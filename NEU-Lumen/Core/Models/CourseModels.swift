@@ -68,8 +68,8 @@ extension Array where Element == CourseOccurrence {
                     room: prev.slot.room,
                     teacher: prev.slot.teacher.isEmpty ? curr.slot.teacher : prev.slot.teacher,
                     kind: prev.slot.kind,
-                    weekStart: min(prev.slot.weekStart, curr.slot.weekStart),
-                    weekEnd: max(prev.slot.weekEnd, curr.slot.weekEnd),
+                    weekStart: Swift.min(prev.slot.weekStart, curr.slot.weekStart),
+                    weekEnd: Swift.max(prev.slot.weekEnd, curr.slot.weekEnd),
                     eventID: prev.slot.eventID ?? curr.slot.eventID
                 )
                 merged[merged.count - 1] = CourseOccurrence(date: prev.date, slot: combined)
