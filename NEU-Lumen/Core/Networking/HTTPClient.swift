@@ -50,8 +50,9 @@ final class HTTPClient {
             guard let http = response as? HTTPURLResponse else {
                 throw NetworkError(message: "网络响应异常")
             }
-            if let sc = http.allHeaderFields["Set-Cookie"] as? String {
-                cookies.absorbRaw(http.url ?? current.url, sc)
+            if let sc = http.allHeaderFields["Set-Cookie"] as? String,
+               let origin = http.url ?? current.url {
+                cookies.absorbRaw(origin, sc)
             }
 
             let status = http.statusCode

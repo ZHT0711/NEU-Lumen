@@ -2,7 +2,7 @@ import Foundation
 
 /// RFC 风格 Cookie 罐：domain -> (name -> entry)。
 /// 从 NEUPortal 的 Dart 实现移植，保证 CASTGC / SESS_ID 全程正确跨域传递。
-struct CookieJar {
+final class CookieJar {
     private struct Entry {
         let value: String
         let path: String
@@ -38,7 +38,7 @@ struct CookieJar {
         return result
     }
 
-    mutating func absorbRaw(_ uri: URL, _ setCookie: String?) {
+    func absorbRaw(_ uri: URL, _ setCookie: String?) {
         guard let sc = setCookie, !sc.isEmpty else { return }
         for rawCookie in Self.splitSetCookie(sc) {
             let parts = rawCookie.split(separator: ";", omittingEmptySubsequences: false)
@@ -93,7 +93,7 @@ struct CookieJar {
         return h == d || h.hasSuffix("." + d)
     }
 
-    mutating func clear() { store.removeAll() }
+    func clear() { store.removeAll() }
 
     func headerFor(_ uri: URL) -> String? {
         guard let host = uri.host?.lowercased() else { return nil }

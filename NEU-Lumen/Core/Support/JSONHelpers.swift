@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - 容错 JSON 取值（对齐 Dart 动态解析习惯）
 
-extension [String: Any] {
+extension Dictionary where Key == String, Value == Any {
     /// 取字符串：nil/NSNull → ""，数字/布尔 → 文本。
     func str(_ key: String) -> String {
         guard let v = self[key], !(v is NSNull) else { return "" }

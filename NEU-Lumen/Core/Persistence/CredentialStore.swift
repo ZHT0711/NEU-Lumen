@@ -13,7 +13,7 @@ enum CredentialStore {
         ]
     }
 
-    private static func set(_ account: String, _ value: String?) {
+    private static func write(_ account: String, _ value: String?) {
         SecItemDelete(baseQuery(account) as CFDictionary)
         guard let value, !value.isEmpty else { return }
         var attrs = baseQuery(account)
@@ -22,7 +22,7 @@ enum CredentialStore {
         SecItemAdd(attrs as CFDictionary, nil)
     }
 
-    private static func get(_ account: String) -> String? {
+    private static func read(_ account: String) -> String? {
         var query = baseQuery(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -33,20 +33,20 @@ enum CredentialStore {
     }
 
     static func save(username: String, password: String) {
-        set("username", username)
-        set("password", password)
+        write("username", username)
+        write("password", password)
     }
 
     static func load() -> (username: String, password: String)? {
-        guard let username = get("username"), let password = get("password"),
+        guard let username = read("username"), let password = read("password"),
               !username.isEmpty, !password.isEmpty else { return nil }
         return (username, password)
     }
 
     static func clear() {
-        set("username", nil)
-        set("password", nil)
+        write("username", nil)
+        write("password", nil)
     }
 
-    static var hasPassword: Bool { get("password") != nil }
+    static var hasPassword: Bool { read("password") != nil }
 }
