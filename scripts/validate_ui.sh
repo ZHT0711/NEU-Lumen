@@ -40,3 +40,15 @@ xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/browser-dark.png"
 cp "$CONTAINER/Documents/browser-checks.txt" "$OUTPUT/browser-checks.txt"
 cat "$OUTPUT/browser-checks.txt"
 grep -q "^PASS:" "$OUTPUT/browser-checks.txt"
+
+# 真正终止并重新启动 App，验证 iOS Keychain 跨进程保存与清除会话。
+for STAGE in save restore; do
+  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--session-${STAGE}-check"
+  for _ in $(seq 1 30); do
+    if [[ -f "$CONTAINER/Documents/session-${STAGE}.txt" ]]; then break; fi
+    sleep 1
+  done
+  cp "$CONTAINER/Documents/session-${STAGE}.txt" "$OUTPUT/session-${STAGE}.txt"
+  cat "$OUTPUT/session-${STAGE}.txt"
+  grep -q "^PASS:" "$OUTPUT/session-${STAGE}.txt"
+done

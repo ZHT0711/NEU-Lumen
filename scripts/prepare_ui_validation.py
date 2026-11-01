@@ -82,12 +82,46 @@ struct UIValidationRoot: View {
             }
         }
         .task {
+            if ProcessInfo.processInfo.arguments.contains("--session-save-check") {
+                runSessionPersistenceCheck(save: true)
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--session-restore-check") {
+                runSessionPersistenceCheck(save: false)
+                return
+            }
             environment.repository.seedUIValidation()
             ready = true
             if ProcessInfo.processInfo.arguments.contains("--browser-checks") {
                 await runBrowserChecks(testBrowser, client: environment.session.client)
             }
         }
+    }
+}
+
+@MainActor
+func runSessionPersistenceCheck(save: Bool) {
+    let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent(save ? "session-save.txt" : "session-restore.txt")
+    let vault = KeychainWebSessionStore()
+    do {
+        if save {
+            let cookie = HTTPCookie(properties: [.name:"wengine_vpn_ticket", .value:"restart-fixture",
+                .domain:"webvpn.neu.edu.cn", .path:"/https/fixture/portal", .secure:"TRUE",
+                HTTPCookiePropertyKey(rawValue:"HttpOnly"):"TRUE"])!
+            try vault.save(SavedWebSession(user: DemoData.user, userAgent: "Fixture WebKit", cookies: [cookie]))
+        } else {
+            guard let saved = vault.load(), saved.user == DemoData.user, saved.userAgent == "Fixture WebKit",
+                  let cookie = saved.restoredCookies().first, cookie.value == "restart-fixture",
+                  cookie.path == "/https/fixture/portal", cookie.isSecure, cookie.isHTTPOnly else {
+                throw NetworkError(message: "Saved browser session did not survive process restart")
+            }
+            vault.clear()
+            guard vault.load() == nil else { throw NetworkError(message: "Session logout cleanup failed") }
+        }
+        try "PASS: Keychain session \(save ? "save" : "restore after process restart and clear")".write(to: output, atomically: true, encoding: .utf8)
+    } catch {
+        try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }
 }
 
