@@ -307,26 +307,29 @@ final class PortalClient {
         guard let url = URL(string: target) else {
             throw NetworkError(message: "门户地址无效")
         }
-        var resp = try await http.get(url)
-        var failed = Self.isPortalSessionFailure(resp)
-        if failed && !target.contains("webvpn.neu.edu.cn") {
-            adoptGatewayTicket()
-            if !webvpnOn && !(await ensureWebVPN()) {
+        // 三级自愈：直连 → 网关（现有票据）→ 丢弃票据强制重换（UA 绑定兜底）
+        for attempt in 0..<3 {
+            if attempt == 2 {
+                webvpnOn = false
+                http.cookies.removeWebVPNTickets()
+            } else {
+                adoptGatewayTicket()
+            }
+            if attempt >= 1 && !(await ensureWebVPN()) {
                 throw NetworkError.sessionExpired()
             }
-            guard let retryURL = URL(string: maybeWrap(Self.portalBase)) else {
+            guard let requestURL = URL(string: maybeWrap(Self.portalBase)) else {
                 throw NetworkError(message: "门户地址无效")
             }
-            resp = try await http.get(retryURL)
-            failed = Self.isPortalSessionFailure(resp)
+            let resp = try await http.get(requestURL)
+            if !Self.isPortalSessionFailure(resp) {
+                guard let user = Self.extractUser(fromHTML: resp.text) else {
+                    throw NetworkError(message: "会话未能正常建立，请重新登录")
+                }
+                return user
+            }
         }
-        if failed {
-            throw NetworkError.sessionExpired()
-        }
-        guard let user = Self.extractUser(fromHTML: resp.text) else {
-            throw NetworkError(message: "会话未能正常建立，请重新登录")
-        }
-        return user
+        throw NetworkError.sessionExpired()
     }
 
     /// 直连门户是否失败：落在 CAS 登录页 / 网关拦截页 / 网关域。

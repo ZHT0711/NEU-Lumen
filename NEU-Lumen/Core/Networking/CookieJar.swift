@@ -111,6 +111,19 @@ final class CookieJar {
         }
     }
 
+    /// 丢弃现有 WebVPN 网关票据（票据可能与浏览器 UA 绑定被拒，重换后再试）。
+    func removeWebVPNTickets() {
+        locked {
+            for (id, entry) in store {
+                guard id.contains("webvpn.neu.edu.cn") else { continue }
+                let name = entry.cookie.name.lowercased()
+                if name.contains("wengine") || name.contains("vpn_ticket") || name.contains("webvpn") {
+                    store[id] = nil
+                }
+            }
+        }
+    }
+
     func snapshot() -> [String: [String: String]] {
         var result: [String: [String: String]] = [:]
         for cookie in allCookies() { result[cookie.domain, default: [:]][cookie.name] = cookie.value }
