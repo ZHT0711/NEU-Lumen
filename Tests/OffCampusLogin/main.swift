@@ -47,9 +47,11 @@ print("Service catalog preservation: 5 checks passed")
 
 final class MockPortalProtocol: URLProtocol {
     static var handle: ((URLRequest) -> (Int, [String: String], String))!
+    static var failure: Error?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if let failure = Self.failure { client?.urlProtocol(self, didFailWithError: failure); return }
         let (status, headers, text) = Self.handle(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -173,3 +175,88 @@ do {
 let missingSubsidy = try PortalClient.parseCardBalance(fromHTML: #"<input id="ContentPlaceHolder1_txtOddFare" value="0.00">"#)
 precondition(missingSubsidy.balance == 0 && missingSubsidy.subsidy == nil)
 print("Campus grades/card: 302 probes, explicit CAS ST, session cookies, Referer, real balances and masked-data errors passed")
+
+
+final class MemoryWebSessionStore: WebSessionPersisting {
+    var data: Data?
+    func load() -> SavedWebSession? { data.flatMap { try? JSONDecoder().decode(SavedWebSession.self, from: $0) } }
+    func save(_ session: SavedWebSession) throws { data = try JSONEncoder().encode(session) }
+    func clear() { data = nil }
+}
+
+@MainActor
+func verifySessionRestart() async throws {
+    let vault = MemoryWebSessionStore()
+    func makeSession() -> SessionStore {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockPortalProtocol.self]
+        return SessionStore(client: PortalClient(http: HTTPClient(configuration: config)), webSessions: vault)
+    }
+    let cas = HTTPCookie(properties: [.name:"CASTGC", .value:"fixture-cas", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
+    let scoped = HTTPCookie(properties: [.name:"SESS_ID", .value:"scoped-session", .domain:"webvpn.neu.edu.cn", .path:wrapped.path,
+        .secure:"TRUE", HTTPCookiePropertyKey(rawValue:"HttpOnly"):"TRUE"])!
+    let root = HTTPCookie(properties: [.name:"SESS_ID", .value:"root-session", .domain:"webvpn.neu.edu.cn", .path:"/"])!
+    let first = makeSession()
+    let ok = await first.completeWebLogin(WebLoginSession(cookies: [cas, ticket, scoped, root], user: user, userAgent: "Saved WebKit UA"))
+    precondition(ok && vault.data != nil && first.usesWebSession)
+    let saved = vault.load()!
+    let decoded = saved.restoredCookies()
+    precondition(decoded.count == 4, "没有 Expires 的会话 Cookie 也必须跨进程保存")
+    let preserved = decoded.first { $0.value == "scoped-session" }!
+    precondition(preserved.path == wrapped.path && preserved.isSecure && preserved.isHTTPOnly)
+    precondition(saved.user == user && saved.userAgent == "Saved WebKit UA")
+
+    MockPortalProtocol.handle = { request in
+        precondition(request.url == wrapped)
+        precondition(request.value(forHTTPHeaderField: "User-Agent") == "Saved WebKit UA")
+        let cookies = request.value(forHTTPHeaderField: "Cookie") ?? ""
+        precondition(cookies.contains("SESS_ID=scoped-session") && cookies.contains("SESS_ID=root-session"))
+        return (200, [:], "<script>const userInfoDSL = \(raw);</script>")
+    }
+    let restarted = makeSession()
+    await restarted.restoreSession()
+    precondition(restarted.phase == .loggedIn && restarted.user == user && restarted.client.webvpnOn)
+    precondition(restarted.client.browserUserAgent == "Saved WebKit UA")
+
+    MockPortalProtocol.failure = URLError(.notConnectedToInternet)
+    let offline = makeSession()
+    await offline.restoreSession()
+    precondition(offline.phase == .loggedIn && offline.user == user && vault.data != nil)
+    MockPortalProtocol.failure = nil
+    MockPortalProtocol.handle = { _ in (403, [:], "gateway temporarily unavailable") }
+    let blocked = makeSession()
+    await blocked.restoreSession()
+    precondition(blocked.phase == .loggedIn && blocked.client.hasWebVPNTicket && vault.data != nil)
+
+    restarted.logout()
+    precondition(vault.data == nil && !restarted.client.hasLoginSession)
+    let loggedOut = makeSession()
+    await loggedOut.restoreSession()
+    precondition(loggedOut.phase == .loggedOut)
+
+    // 学校已给出的到期时间不能因保存而延长。
+    let expired = HTTPCookie(properties: [.name:"CASTGC", .value:"old", .domain:"pass.neu.edu.cn", .path:"/tpass", .expires:Date(timeIntervalSinceNow: -60)])!
+    try vault.save(SavedWebSession(user: user, userAgent: "Saved WebKit UA", cookies: [expired]))
+    let timedOut = makeSession()
+    await timedOut.restoreSession()
+    precondition(timedOut.phase == .loggedOut && vault.data == nil)
+
+    // 只有真正返回认证页，才废弃保存的会话。
+    try vault.save(saved)
+    MockPortalProtocol.handle = { request in
+        if request.url?.host == "pass.neu.edu.cn" { return (200, [:], "<html>login</html>") }
+        return (302, ["Location":CasCrypto.casLoginURL.absoluteString], "")
+    }
+    let expiredAtServer = makeSession()
+    await expiredAtServer.restoreSession()
+    precondition(expiredAtServer.phase == .loggedOut && vault.data == nil)
+    print("Web session restart: serialization, session-only/HttpOnly/path cookies, UA, offline/403 recovery, expiry and logout passed")
+}
+try await verifySessionRestart()
+
+let codeApp = PortalApp(name: "e码通", appId: "ecode", url: "https://ecard.neu.edu.cn/desktop", mobileUrl: "https://ecard.neu.edu.cn/code",
+                         iconUrl: "", desc: "", category: "校园生活", visits: 0)
+precondition(ServiceCatalog(apps: DemoData.apps + [codeApp]).ecodeURL.absoluteString == codeApp.mobileUrl)
+precondition(ServiceCatalog(apps: DemoData.apps).ecodeURL.absoluteString == PortalClient.serviceCard)
+precondition(ServiceCatalog(apps: []).ecodeURL.absoluteString == PortalClient.serviceCard)
+print("Home e-code shortcut: official mobile entry and Flutter-compatible SSO fallback passed")

@@ -108,6 +108,21 @@ final class PortalClient {
         if !agent.isEmpty { http.userAgentOverride = agent }
     }
 
+    var browserUserAgent: String? { http.userAgentOverride }
+
+    /// 重启验证只读取门户，不为了补资料销毁旧票据；拦截/断网不等同于退出。
+    func validateSavedSession() async throws -> PortalUser? {
+        let response = try await http.get(URL(string: maybeWrap(Self.portalBase))!)
+        if response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login")
+            || Self.isSessionLostHTML(response.text) {
+            throw NetworkError.sessionExpired()
+        }
+        guard (200..<300).contains(response.status) else {
+            throw NetworkError(message: "门户暂时不可用，保留已保存的登录会话")
+        }
+        return Self.extractUser(fromHTML: response.text)
+    }
+
     /// WebView 会话回收后：若已持有网关票据则直接进入网关模式
     /// （校外门户直连必被网关劫持，门户读取必须经网关）。
     func adoptGatewayTicket() {

@@ -110,6 +110,9 @@ jobs:
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/*.swift \
             NEU-Lumen/Core/Networking/*.swift \
+            NEU-Lumen/Core/Persistence/CredentialStore.swift \
+            NEU-Lumen/Core/Persistence/WebSessionStore.swift \
+            NEU-Lumen/Core/Services/SessionStore.swift \
             NEU-Lumen/Core/Services/DemoData.swift \
             NEU-Lumen/Core/Services/Semester.swift \
             Tests/OffCampusLogin/main.swift \

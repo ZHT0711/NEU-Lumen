@@ -73,6 +73,8 @@ final class PortalRepository {
         self.session = session
     }
 
+    var ecodeEntryURL: URL { ServiceCatalog(apps: apps).ecodeURL }
+
     // MARK: - 会话恢复
 
     /// 登录用户变化时清空缓存，避免串号。

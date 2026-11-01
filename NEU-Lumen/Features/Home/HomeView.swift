@@ -97,67 +97,77 @@ struct HomeView: View {
     // MARK: - 区块
 
     private var campusHeader: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(spacing: 10) {
-                    Image("NEUEmblem")
-                        .renderingMode(.template)
-                        .resizable().scaledToFit()
-                        .frame(width: 42, height: 42)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("东北大学")
-                            .font(.system(.headline, design: .serif)).tracking(4)
-                        Text("NORTHEASTERN UNIVERSITY")
-                            .font(.system(size: 8, weight: .semibold)).tracking(1)
+        Button {
+            path.append(.web(repo.ecodeEntryURL))
+        } label: {
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(spacing: 10) {
+                        Image("NEUEmblem")
+                            .renderingMode(.template)
+                            .resizable().scaledToFit()
+                            .frame(width: 42, height: 42)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("东北大学")
+                                .font(.system(.headline, design: .serif)).tracking(4)
+                            Text("NORTHEASTERN UNIVERSITY")
+                                .font(.system(size: 8, weight: .semibold)).tracking(1)
+                        }
+                        Spacer(minLength: 0)
+                        Text("1923")
+                            .font(.system(.title3, design: .serif).weight(.light))
+                            .opacity(0.5)
                     }
-                    Spacer(minLength: 0)
-                    Text("1923")
-                        .font(.system(.title3, design: .serif).weight(.light))
-                        .opacity(0.5)
-                }
-                .foregroundStyle(campusInk)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(greeting(at: context.date))
-                        .font(.title2.bold())
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("在东大，让每一天都有所收获。")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .bottom) {
-                        campusDate(context.date)
-                        Spacer(minLength: 12)
-                        motto
+                    .foregroundStyle(campusInk)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(greeting(at: context.date))
+                            .font(.title2.bold())
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("在东大，让每一天都有所收获。")
+                            .font(.subheadline).foregroundStyle(.secondary)
                     }
-                    VStack(alignment: .leading, spacing: 14) {
-                        campusDate(context.date)
-                        motto
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .bottom) {
+                            campusDate(context.date)
+                            Spacer(minLength: 12)
+                            motto
+                        }
+                        VStack(alignment: .leading, spacing: 14) {
+                            campusDate(context.date)
+                            motto
+                        }
                     }
                 }
-            }
-            .padding(22)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                ZStack {
-                Color(.secondarySystemGroupedBackground)
-                LinearGradient(colors: [AppTheme.accent.opacity(0.035), AppTheme.accent.opacity(0.08)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                GeometryReader { geometry in
-                    CampusLineArt()
-                        .stroke(campusInk.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
-                        .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
-                        .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
+                .padding(22)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    ZStack {
+                    Color(.secondarySystemGroupedBackground)
+                    LinearGradient(colors: [AppTheme.accent.opacity(0.035), AppTheme.accent.opacity(0.08)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                    GeometryReader { geometry in
+                        CampusLineArt()
+                            .stroke(campusInk.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                            .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
+                            .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
+                    }
+                    .accessibilityHidden(true)
+                    }
                 }
-                .accessibilityHidden(true)
+                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .strokeBorder(AppTheme.accent.opacity(0.1), lineWidth: 1)
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(AppTheme.accent.opacity(0.1), lineWidth: 1)
             }
         }
+        .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("东北大学建筑，e码通快捷入口")
+        .accessibilityHint("打开校园码")
+        .accessibilityIdentifier("home.ecode")
     }
 
     private var campusExploreSection: some View {

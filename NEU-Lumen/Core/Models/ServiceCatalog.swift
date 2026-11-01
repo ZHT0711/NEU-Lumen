@@ -11,6 +11,22 @@ struct ServiceCategory: Identifiable, Equatable {
 struct ServiceCatalog {
     let apps: [PortalApp]
 
+    /// 沿用 Flutter 的入口选择：门户 e码通/校园码 → 一卡通 SSO。
+    var ecodeURL: URL {
+        let preferred = apps.filter {
+            $0.name.localizedCaseInsensitiveContains("e码通") || $0.name.contains("校园码")
+        }
+        let card = apps.filter {
+            URL(string: $0.entryUrl())?.host == "ecard.neu.edu.cn"
+        }
+        for app in preferred + card {
+            if let url = URL(string: app.entryUrl()), ["http", "https"].contains(url.scheme ?? "") {
+                return url
+            }
+        }
+        return URL(string: "http://ecard.neu.edu.cn/selflogin/login.aspx")!
+    }
+
     /// 短的公开目录不删除已有入口；新响应优先更新同一应用的非空字段。
     static func merging(_ catalogs: [[PortalApp]]) -> [PortalApp] {
         var order: [String] = []

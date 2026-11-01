@@ -280,6 +280,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         guard !started else { return }
         started = true
         self.client = client
+        webView.customUserAgent = client.browserUserAgent
         isLoading = true
         let destination = await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore

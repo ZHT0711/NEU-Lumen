@@ -1,7 +1,7 @@
 import Foundation
 
 /// 统一身份认证解析出的用户信息（来自门户首页 window.userInfoDSL）。
-struct PortalUser: Equatable {
+struct PortalUser: Equatable, Codable {
     let uid: String
     let name: String
     let sid: String

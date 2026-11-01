@@ -51,7 +51,11 @@ struct ProfileView: View {
 
                 Section("会话") {
                     LabeledContent("记住的账号", value: environment.session.rememberedUsername.isEmpty ? "未保存" : environment.session.rememberedUsername)
-                    LabeledContent("保持登录", value: environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭")
+                    LabeledContent("保持登录", value: environment.session.usesWebSession ? "已开启（网页登录会话）" :
+                        (environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭"))
+                    if let error = environment.session.sessionSaveError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
                     LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
                     Button(role: .destructive) {
                         confirmLogout = true

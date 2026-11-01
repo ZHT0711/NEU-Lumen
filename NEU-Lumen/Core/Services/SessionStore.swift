@@ -18,13 +18,21 @@ final class SessionStore {
     private(set) var lastError: String?
     private(set) var refreshingProfile = false
     private(set) var profileSyncError: String?
+    private(set) var usesWebSession = false
+    private(set) var sessionSaveError: String?
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
     private var pendingUsername: String?
     private var pendingPassword: String?
 
-    let client = PortalClient()
+    let client: PortalClient
+    private let webSessions: any WebSessionPersisting
+
+    init(client: PortalClient = PortalClient(), webSessions: any WebSessionPersisting = KeychainWebSessionStore()) {
+        self.client = client
+        self.webSessions = webSessions
+    }
 
     private static let rememberedKey = "lumen.remembered.username"
 
@@ -39,6 +47,7 @@ final class SessionStore {
     /// 启动恢复：有保存凭据则静默续登，否则进登录页。
     func restoreSession() async {
         guard phase == .booting else { return }
+        if await restoreWebSession() { return }
         if let cred = CredentialStore.load() {
             let ok = await performLogin(username: cred.username, password: cred.password, keep: true)
             if !ok {
@@ -65,6 +74,8 @@ final class SessionStore {
             }
             UserDefaults.standard.set(username, forKey: Self.rememberedKey)
             user = info
+            usesWebSession = false
+            webSessions.clear()
             phase = .loggedIn
             return true
         } catch let e as NetworkError where e.needsSecondAuth {
@@ -101,6 +112,8 @@ final class SessionStore {
         pendingUsername = nil
         pendingPassword = nil
         self.user = user
+        usesWebSession = false
+        webSessions.clear()
         needsSecondAuth = false
         lastError = nil
         phase = .loggedIn
@@ -145,8 +158,49 @@ final class SessionStore {
             if let saved = CredentialStore.load(), saved.username != sid { CredentialStore.clear() }
             UserDefaults.standard.set(sid, forKey: Self.rememberedKey)
         }
+        usesWebSession = true
         phase = .loggedIn
+        persistWebSession()
         return true
+    }
+
+    /// 优先恢复网页登录；网络/风控暂时失败时仍保留会话，只有明确过期才清除。
+    private func restoreWebSession() async -> Bool {
+        guard let saved = webSessions.load() else { return false }
+        client.clearSession()
+        client.setUserAgent(saved.userAgent)
+        client.absorbCookies(saved.restoredCookies())
+        client.adoptGatewayTicket()
+        guard client.hasLoginSession else {
+            webSessions.clear()
+            return false
+        }
+        var restoredUser = saved.user
+        do {
+            if let fresh = try await client.validateSavedSession() { restoredUser = restoredUser.merging(fresh) }
+        } catch let error as NetworkError where error.isSessionExpired {
+            webSessions.clear()
+            client.clearSession()
+            lastError = "保存的登录会话已过期，请重新登录"
+            return false
+        } catch {
+            profileSyncError = "暂时无法同步个人资料，已恢复上次登录"
+        }
+        user = restoredUser
+        usesWebSession = true
+        phase = .loggedIn
+        persistWebSession()
+        return true
+    }
+
+    /// 登录成功立即保存，切到后台时再保存一次续期后的 Cookie。
+    func persistWebSession() {
+        guard usesWebSession, phase == .loggedIn, let user else { return }
+        do {
+            try webSessions.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? "",
+                                                 cookies: client.browserCookies()))
+            sessionSaveError = nil
+        } catch { sessionSaveError = NetworkError.from(error).message }
     }
 
     /// 手动刷新可补齐网页登录时尚未提供的学院、身份和邮箱。
@@ -158,6 +212,7 @@ final class SessionStore {
             let fetched = try await client.fetchUserInfo()
             user = user?.merging(fetched) ?? fetched
             profileSyncError = user?.hasCoreProfile == true ? nil : "门户尚未提供完整个人资料"
+            persistWebSession()
         } catch {
             profileSyncError = "个人资料同步失败，请稍后重试"
         }
@@ -177,6 +232,9 @@ final class SessionStore {
     }
 
     func logout() {
+        webSessions.clear()
+        usesWebSession = false
+        sessionSaveError = nil
         CredentialStore.clear()
         client.clearSession()
         user = nil

@@ -3,6 +3,7 @@ import SwiftUI
 /// 根路由：启动恢复会话；未认证时无法进入主界面。
 struct AppRootView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -28,6 +29,9 @@ struct AppRootView: View {
         .background(Color(.systemGroupedBackground))
         .task {
             await environment.session.restoreSession()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .inactive || phase == .background { environment.session.persistWebSession() }
         }
         .animation(.easeInOut(duration: 0.25), value: environment.session.phase)
     }
