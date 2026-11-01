@@ -5,8 +5,8 @@ import Foundation
 final class HTTPClient {
     static let timeout: TimeInterval = 15
     static let userAgent =
-        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) "
-            + "Chrome/126.0 Mobile Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            + "Chrome/122.0.0.0 Safari/537.36"
 
     struct RawResponse {
         let status: Int
@@ -38,7 +38,7 @@ final class HTTPClient {
 
     /// 手动跟随重定向（最多 10 跳），每跳吸收 Set-Cookie。
     @discardableResult
-    func send(_ request: URLRequest, maxHops: Int = 10) async throws -> RawResponse {
+    func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true) async throws -> RawResponse {
         var current = request
         for _ in 0..<maxHops {
             if current.value(forHTTPHeaderField: "User-Agent") == nil {
@@ -46,6 +46,9 @@ final class HTTPClient {
             }
             if current.value(forHTTPHeaderField: "Accept") == nil {
                 current.setValue("application/json, text/html, */*", forHTTPHeaderField: "Accept")
+            }
+            if current.value(forHTTPHeaderField: "Accept-Language") == nil {
+                current.setValue("zh-CN,zh;q=0.9,en;q=0.8", forHTTPHeaderField: "Accept-Language")
             }
             if let url = current.url, let cookie = cookies.headerFor(url) {
                 current.setValue(cookie, forHTTPHeaderField: "Cookie")
@@ -61,7 +64,7 @@ final class HTTPClient {
             }
 
             let status = http.statusCode
-            if (300..<400).contains(status),
+            if followRedirects, (300..<400).contains(status),
                let loc = http.allHeaderFields["Location"] as? String,
                let base = http.url ?? current.url,
                let resolved = URL(string: loc, relativeTo: base)?.absoluteURL {
@@ -112,6 +115,7 @@ final class HTTPClient {
         var req = URLRequest(url: url, timeoutInterval: Self.timeout)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        req.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
         let body = fields
             .map { "\($0.key.urlFormEncoded)=\($0.value.urlFormEncoded)" }
             .joined(separator: "&")

@@ -83,6 +83,11 @@ bash build_ios_unsigned.sh
 
 ## 性能设计
 
+教务与一卡通请求流程参考 [泥洞的实现（607c8fd）](https://github.com/sapphire-xu/nidong/blob/607c8fd2f53df0e373136786a44c2f7cc407fab3/src-tauri/src/client.rs)：
+显式 CAS 换票、串行完成认证事务、保留目标服务 Cookie，并使用学生首页 Referer 与 `Fetch-Api`。
+校园网探测接受正常的 302 响应；一卡通先提交 SSO 表单，再读取余额页面。首页不再用演示金额替代
+取数失败，余额掩码与解析失败也不会显示为零；已取得的真实余额有同步时间，失败时明确提示保留旧结果。
+
 - 单个 `URLSession` 复用连接，重定向手动逐跳跟随、吸收每一跳 Set-Cookie（对齐 CAS 跨域流程）
 - 首页五个业务接口 `async let` 并行拉取，单接口失败不阻塞其它区块，失败自动回退离线演示数据并明确标注
 - 周课表按教学周缓存，同一周切换不重复请求教务；成绩整表缓存，仅手动/下拉刷新

@@ -78,7 +78,9 @@ struct HomeView: View {
                 if repo.homeState == .idle {
                     await repo.refreshHome()
                 }
-                await repo.loadWeek(containing: Date())
+                async let card: Void = repo.loadCardOverview()
+                async let week: Void = repo.loadWeek(containing: Date())
+                _ = await (card, week)
             }
             .navigationDestination(for: AppDestination.self) { dest in
                 switch dest {

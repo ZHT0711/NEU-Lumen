@@ -8,6 +8,7 @@ final class PortalClient {
     static let jwxtBase = "https://jwxt.neu.edu.cn"
 
     private let http: HTTPClient
+    private let casGate = CASRequestGate()
 
     // MARK: - 校园网 / WebVPN
 
@@ -45,9 +46,9 @@ final class PortalClient {
 
     private func quickReachable(_ url: String) async -> Bool {
         guard let requestURL = URL(string: url) else { return false }
-        var request = URLRequest(url: requestURL, timeoutInterval: 2.5)
+        let request = URLRequest(url: requestURL, timeoutInterval: 2.5)
         do {
-            _ = try await http.send(request, maxHops: 1)
+            _ = try await http.send(request, followRedirects: false)
             return true
         } catch {
             return false
@@ -117,6 +118,18 @@ final class PortalClient {
 
     /// 用 CASTGC 给指定 service 换 ST 并跟随到业务系统（停留在 CAS 登录页视为会话失效）。
     private func casLand(_ service: String) async throws -> HTTPClient.RawResponse {
+        await casGate.acquire()
+        do {
+            let response = try await performCASLanding(service)
+            await casGate.release()
+            return response
+        } catch {
+            await casGate.release()
+            throw error
+        }
+    }
+
+    private func performCASLanding(_ service: String) async throws -> HTTPClient.RawResponse {
         let login = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
         guard let url = URL(string: login) else {
             throw NetworkError(message: "认证地址无效")
@@ -595,7 +608,7 @@ final class PortalClient {
     /// 从真实的学生首页建立会话，并沿用落地后的协议/网关前缀。
     private func jwxtSSO() async throws {
         await prepareAccess()
-        let response = try await http.get(URL(string: maybeWrap(Self.jwxtBase + "/jwapp/sys/homeapp/index.do"))!)
+        let response = try await casLand(Self.jwxtBase + "/jwapp/sys/homeapp/index.do")
         if response.finalURL.host == "pass.neu.edu.cn" { throw NetworkError.sessionExpired() }
         let landed = response.finalURL.absoluteString
         if let range = landed.range(of: "/jwapp/") {
@@ -603,12 +616,19 @@ final class PortalClient {
         } else {
             throw NetworkError(message: "教务首页未能建立会话，请打开教务网页完成认证后同步")
         }
+        guard (200..<400).contains(response.status) else {
+            throw NetworkError(message: "教务认证 HTTP \(response.status)，未能建立教务会话")
+        }
+        // 与泥洞保持一致：API Referer 是实际学生首页，而非认证入口 index.do。
+        _ = try await http.get(URL(string: jwxtReferer)!)
     }
+
+    private var jwxtReferer: String { jwxtAppBase + "/home/index.html?av=&contextPath=/jwapp" }
 
     private func jwxtGet(_ path: String) async throws -> Any {
         let url = URL(string: maybeWrap(jwxtAppBase + "/" + path))!
         let response = try await http.get(url, xhr: true, extraHeaders: [
-            "Fetch-Api": "true", "Accept": "application/json", "Referer": jwxtAppBase + "/index.do"
+            "Fetch-Api": "true", "Accept": "application/json", "Referer": jwxtReferer
         ])
         if response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
@@ -679,11 +699,21 @@ final class PortalClient {
         let ssoHTML = resp.text
         if ssoHTML.contains("username") && ssoHTML.contains("auid") {
             let form = Self.inputValuesByName(ssoHTML, names: ["username", "timestamp", "auid"])
+            guard ["username", "timestamp", "auid"].allSatisfy({ form[$0]?.isEmpty == false }) else {
+                throw NetworkError(message: "一卡通单点登录表单不完整")
+            }
             if let url = URL(string: maybeWrap(Self.ecardBase + "/selfsearch/SSOLogin.aspx")) {
-                _ = try? await http.postForm(url, fields: form)
+                let response = try await http.postForm(url, fields: form)
+                guard (200..<400).contains(response.status) else {
+                    throw NetworkError(message: "一卡通单点登录 HTTP \(response.status)")
+                }
             }
         }
         let page = try await ecardGet("/selfsearch/User/baseinfo.aspx")
+        return try Self.parseCardBalance(fromHTML: page)
+    }
+
+    static func parseCardBalance(fromHTML page: String) throws -> CardBalance {
         guard let odd = Self.inputValue(page, id: "ContentPlaceHolder1_txtOddFare")
             ?? Self.inputValue(page, name: "ctl00$ContentPlaceHolder1$txtOddFare") else {
             throw NetworkError(message: "一卡通页面上没有主钱包余额")
@@ -691,10 +721,13 @@ final class PortalClient {
         let subsidyValue = Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddFare")
             ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddfare")
             ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSubsidy")
-        let status = Self.inputValue(page, id: "ContentPlaceHolder1_txtStatus") ?? "正常"
+        guard let amount = Self.parseMoneyLoose(odd) else {
+            throw NetworkError(message: "一卡通未返回可读取的真实余额")
+        }
+        let status = Self.inputValue(page, id: "ContentPlaceHolder1_txtStatus") ?? ""
         return CardBalance(
-            balance: Self.parseMoney(odd),
-            subsidy: subsidyValue.map(Self.parseMoney) ?? 0,
+            balance: amount,
+            subsidy: subsidyValue.flatMap(Self.parseMoneyLoose),
             status: status
         )
     }
@@ -845,6 +878,9 @@ final class PortalClient {
             throw NetworkError(message: "一卡通地址无效")
         }
         let resp = try await http.get(url)
+        guard (200..<300).contains(resp.status) else {
+            throw NetworkError(message: "一卡通接口 HTTP \(resp.status)")
+        }
         if Self.isSessionLostHTML(resp.text) {
             throw NetworkError(message: "一卡通会话未建立，请重试（校外需走 WebVPN）")
         }

@@ -110,6 +110,11 @@ final class SessionStore {
     /// 校外门户被学校重定向进 WebVPN 网关时，WebView 会落在网关域上：
     /// 此时 CASTGC 已到手，先换网关票据再经网关读取门户。
     func completeWebLogin(_ browser: WebLoginSession) async -> Bool {
+        guard PortalLoginDocument.canComplete(user: browser.user, cookies: browser.cookies,
+                                              hasLoginForm: browser.hasLoginForm) else {
+            lastError = "请先在网页中完成认证，登录页会保持打开"
+            return false
+        }
         phase = .loggingIn
         lastError = nil
         needsSecondAuth = false

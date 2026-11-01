@@ -78,43 +78,49 @@ struct WebLoginWebView: UIViewRepresentable {
         private var capturing = false
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard !completed, !capturing, onPortalLanding != nil, let url = webView.url else { return }
-            switch flow.action(for: url) {
-            case .wait:
-                return
-            case .navigate(let destination):
-                webView.load(URLRequest(url: destination))
-            case .capture:
-                capture(webView)
-            }
-        }
-
-        private func capture(_ webView: WKWebView) {
+            guard !completed, !capturing, onPortalLanding != nil else { return }
             capturing = true
             captureTask = Task { @MainActor [weak self, weak webView] in
                 guard let self, let webView else { return }
                 defer { self.capturing = false }
-                var user: PortalUser?
-                // SPA 会先提供不完整 DSL；必须 await，并继续合并后续非空字段。
-                for _ in 0..<6 {
-                    guard !Task.isCancelled else { return }
-                    guard let url = webView.url, PortalLoginFlow.isPersonalPortal(url) else { break }
-                    if let raw = try? await webView.evaluateJavaScript("JSON.stringify(window.userInfoDSL || {})") as? String,
-                       let next = PortalUser.fromBrowserJSON(raw) {
-                        user = user?.merging(next) ?? next
-                        if user?.hasCoreProfile == true { break }
-                    }
-                    try? await Task.sleep(nanoseconds: 700_000_000)
+                let initial = await self.readDocument(webView)
+                guard !Task.isCancelled, let url = webView.url else { return }
+                switch self.flow.action(for: url, hasLoginForm: initial.hasLoginForm) {
+                case .wait: return
+                case .navigate(let destination):
+                    webView.load(URLRequest(url: destination))
+                case .capture:
+                    await self.capture(webView, initial: initial)
                 }
-                guard !Task.isCancelled, let url = webView.url,
-                      ["personal.neu.edu.cn", "webvpn.neu.edu.cn", "portal.neu.edu.cn"].contains(url.host ?? "") else { return }
-                // 在门户加载完成后再收 Cookie，保留代理路径上的 SESS_ID。
-                let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
-                let agent = (try? await webView.evaluateJavaScript("navigator.userAgent")) as? String ?? ""
-                guard !Task.isCancelled, let handler = self.onPortalLanding else { return }
-                self.completed = await handler(WebLoginSession(cookies: cookies, user: user, userAgent: agent))
-                if !self.completed { self.flow = PortalLoginFlow() }
             }
         }
+
+        private func readDocument(_ webView: WKWebView) async -> PortalLoginDocument {
+            PortalLoginDocument.decode(try? await webView.evaluateJavaScript(PortalLoginDocument.script))
+        }
+
+        private func capture(_ webView: WKWebView, initial: PortalLoginDocument) async {
+            var user = initial.user
+            for _ in 0..<6 {
+                guard !Task.isCancelled else { return }
+                guard let url = webView.url, PortalLoginFlow.isPersonalPortal(url) else { break }
+                let document = await readDocument(webView)
+                guard !document.hasLoginForm else { return }
+                if let next = document.user { user = user?.merging(next) ?? next }
+                if user?.hasCoreProfile == true { break }
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+            guard !Task.isCancelled, let url = webView.url,
+                  ["personal.neu.edu.cn", "webvpn.neu.edu.cn", "portal.neu.edu.cn"].contains(url.host ?? "") else { return }
+            let current = await readDocument(webView)
+            let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+            guard PortalLoginDocument.canComplete(user: user, cookies: cookies, hasLoginForm: current.hasLoginForm) else { return }
+            let agent = (try? await webView.evaluateJavaScript("navigator.userAgent")) as? String ?? ""
+            guard !Task.isCancelled, let handler = onPortalLanding else { return }
+            completed = await handler(WebLoginSession(cookies: cookies, user: user, userAgent: agent,
+                                                      hasLoginForm: current.hasLoginForm))
+            if !completed { flow = PortalLoginFlow() }
+        }
+
     }
 }

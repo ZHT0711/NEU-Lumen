@@ -3,7 +3,7 @@ import Foundation
 /// 一卡通余额（主钱包 / 补助 / 卡状态）。
 struct CardBalance: Hashable {
     let balance: Double
-    let subsidy: Double
+    let subsidy: Double?
     let status: String
 }
 

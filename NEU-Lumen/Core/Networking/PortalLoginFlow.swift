@@ -5,6 +5,7 @@ struct WebLoginSession {
     let cookies: [HTTPCookie]
     let user: PortalUser?
     let userAgent: String
+    var hasLoginForm = false
 }
 
 /// 网关首页不是一号通首页；先在浏览器中换票，再进入代理后的门户。
@@ -28,8 +29,9 @@ struct PortalLoginFlow {
         return url.path == prefix || url.path.hasPrefix(prefix + "/")
     }
 
-    mutating func action(for url: URL) -> Action {
+    mutating func action(for url: URL, hasLoginForm: Bool = false) -> Action {
         guard url.scheme == "https", let host = url.host?.lowercased() else { return .wait }
+        guard !hasLoginForm, !url.path.contains("/tpass/login") else { return .wait }
         if Self.isPersonalPortal(url) { return .capture }
         guard host == "webvpn.neu.edu.cn" || host == "portal.neu.edu.cn" else { return .wait }
         if host == "webvpn.neu.edu.cn", !gatewayAuthTried {

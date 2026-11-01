@@ -36,6 +36,8 @@ final class PortalRepository {
 
     private(set) var cardBalance: CardBalance?
     private(set) var cardState: LoadState = .idle
+    private(set) var cardWarning: String?
+    private(set) var cardUpdatedAt: Date?
     private(set) var billsYear: Int = Calendar.current.component(.year, from: Date())
     private(set) var billsMonth: Int = Calendar.current.component(.month, from: Date())
     private(set) var cardBills: [CardBill] = []
@@ -89,6 +91,8 @@ final class PortalRepository {
         gradeRequestID += 1
         gradesWarning = nil
         cardBalance = nil
+        cardWarning = nil
+        cardUpdatedAt = nil
         cardBills = []
         billsCache.removeAll()
         truncatedCache.removeAll()
@@ -148,7 +152,7 @@ final class PortalRepository {
             dataCards = v
             anySuccess = true
         } else if dataCards.isEmpty {
-            dataCards = DemoData.dataCards
+            dataCards = []
         }
         if let v = appsValue, !v.isEmpty {
             apps = ServiceCatalog.merging([DemoData.apps, cachedApps(), apps, v])
@@ -323,34 +327,42 @@ final class PortalRepository {
     // MARK: - 一卡通 / 网费 / 电费
 
     /// 一卡通总览：余额、网费、电费并行拉取（校内直连，校外自动走 WebVPN）。
+    private func cardResult<T>(_ operation: () async throws -> T) async -> Result<T, NetworkError> {
+        do { return .success(try await withRecovery(operation)) }
+        catch { return .failure(NetworkError.from(error)) }
+    }
+
     func loadCardOverview() async {
         if cardState == .loading { return }
         cardState = .loading
-        netState = netInfo == nil ? .loading : netState
-        electricState = electricInfo == nil ? .loading : electricState
+        cardWarning = nil
+        netState = .loading
+        electricState = .loading
         let client = session.client
-        async let cardResult = run { try await client.fetchCardBalance() }
-        async let netResult = run { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
-        async let elecResult = run { try await client.fetchElectric(room: electricRoomCode) }
-        let (card, net, elec) = await (cardResult, netResult, elecResult)
-
-        if let card {
-            cardBalance = card
+        // 与泥洞一致，先固定这一轮的校内/校外路由，再并发取业务数据。
+        await client.prepareAccess()
+        async let fetchedCard = cardResult { try await client.fetchCardBalance() }
+        async let fetchedNet = cardResult { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
+        async let fetchedElectric = cardResult { try await client.fetchElectric(room: electricRoomCode) }
+        let (card, net, elec) = await (fetchedCard, fetchedNet, fetchedElectric)
+        switch card {
+        case .success(let value):
+            cardBalance = value
+            cardUpdatedAt = Date()
             cardState = .loaded
-        } else if cardBalance == nil {
-            cardState = .failed("一卡通余额获取失败，请重试")
+        case .failure(let error):
+            if cardBalance != nil {
+                cardWarning = "本次同步失败，显示上次真实结果：" + error.message
+                cardState = .loaded
+            } else { cardState = .failed(error.message) }
         }
-        if let net {
-            netInfo = net
-            netState = .loaded
-        } else if netInfo == nil {
-            netState = .failed("网费获取失败，请重试")
+        switch net {
+        case .success(let value): netInfo = value; netState = .loaded
+        case .failure(let error): netState = netInfo == nil ? .failed(error.message) : .loaded
         }
-        if let elec {
-            electricInfo = elec
-            electricState = .loaded
-        } else if electricInfo == nil {
-            electricState = .failed("电费获取失败，请重试")
+        switch elec {
+        case .success(let value): electricInfo = value; electricState = .loaded
+        case .failure(let error): electricState = electricInfo == nil ? .failed(error.message) : .loaded
         }
     }
 

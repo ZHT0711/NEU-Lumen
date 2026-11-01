@@ -94,3 +94,82 @@ catch { precondition(client.hasWebVPNTicket && client.hasLoginSession) }
 client.clearSession()
 precondition(!client.hasLoginSession && !client.webvpnOn)
 print("HTTP session handoff, gateway APIs, UA and ticket preservation: passed")
+
+
+let anonymous = HTTPCookie(properties: [.name:"SESS_ID", .value:"anonymous", .domain:"personal.neu.edu.cn", .path:"/"])!
+precondition(!PortalLoginDocument.canComplete(user: nil, cookies: [anonymous], hasLoginForm: false))
+precondition(!PortalLoginDocument.canComplete(user: user, cookies: [ticket], hasLoginForm: true))
+precondition(PortalLoginDocument.canComplete(user: user, cookies: [ticket], hasLoginForm: false))
+var typing = PortalLoginFlow()
+precondition(typing.action(for: portal, hasLoginForm: true) == .wait)
+precondition(typing.action(for: URL(string: WebVPN.wrap(CasCrypto.casLoginURL.absoluteString))!) == .wait)
+precondition(PortalLoginDocument.decode(nil).hasLoginForm)
+print("Login typing: anonymous cookies, visible forms and failed document reads cannot dismiss the sheet")
+
+let schoolConfig = URLSessionConfiguration.ephemeral
+schoolConfig.protocolClasses = [MockPortalProtocol.self]
+let schoolHTTP = HTTPClient(configuration: schoolConfig)
+let schoolClient = PortalClient(http: schoolHTTP)
+schoolHTTP.cookies.absorbRaw(CasCrypto.casLoginURL, "CASTGC=fixture-cas; Path=/tpass")
+var exchangedJWXT = false
+var exchangedCard = false
+MockPortalProtocol.handle = { request in
+    let url = request.url!
+    if url.host == "ecard.neu.edu.cn" && url.path == "/" {
+        // 正常的校园网 302 必须算可达，不能强制转向 WebVPN。
+        return (302, ["Location":"/selflogin/login.aspx"], "")
+    }
+    if url.host == "pass.neu.edu.cn" {
+        let service = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "service" }!.value!
+        precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("fixture-cas") == true)
+        if service.contains("jwxt.neu.edu.cn") {
+            exchangedJWXT = true
+            return (302, ["Location":service + "?ticket=ST-jwxt"], "")
+        }
+        precondition(service == PortalClient.serviceCard)
+        exchangedCard = true
+        return (302, ["Location":service + "?ticket=ST-card"], "")
+    }
+    if url.host == "jwxt.neu.edu.cn" {
+        if url.path.hasSuffix("/index.do") {
+            precondition(exchangedJWXT)
+            return (200, ["Set-Cookie":"JSESSIONID=jwxt; Path=/jwapp"], "<html>student</html>")
+        }
+        precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("JSESSIONID=jwxt") == true)
+        if url.path.hasSuffix("/home/index.html") { return (200, [:], "<html>student home</html>") }
+        let referer = "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp"
+        // 模拟学校 Referer 检查，错误的认证入口 Referer 会得到 403。
+        guard request.value(forHTTPHeaderField: "Referer") == referer else { return (403, [:], "Forbidden") }
+        precondition(request.value(forHTTPHeaderField: "Fetch-Api") == "true")
+        if url.path.hasSuffix("schoolCalendars.do") {
+            return (200, [:], #"{"code":0,"datas":[{"itemCode":"2026-1","itemName":"秋季","selected":true}]}"#)
+        }
+        precondition(url.path.hasSuffix("scores.do"))
+        return (200, [:], #"{"code":0,"datas":[{"courseName":"数学","credit":3,"score":"92"}]}"#)
+    }
+    precondition(url.host == "ecard.neu.edu.cn" && exchangedCard)
+    if url.path == "/selflogin/login.aspx" {
+        return (200, [:], #"<form><input name="username" value="20260042"><input name="timestamp" value="fixture-time"><input name="auid" value="fixture-auid"></form>"#)
+    }
+    if url.path == "/selfsearch/SSOLogin.aspx" {
+        precondition(request.httpMethod == "POST")
+        precondition(request.value(forHTTPHeaderField: "Referer") == url.absoluteString)
+        return (200, ["Set-Cookie":"ASP.NET_SessionId=card; Path=/selfsearch"], "<html>ok</html>")
+    }
+    precondition(url.path == "/selfsearch/User/baseinfo.aspx")
+    precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("ASP.NET_SessionId=card") == true)
+    return (200, [:], #"<input id="ContentPlaceHolder1_txtOddFare" value="52.30"><input id="ContentPlaceHolder1_txtSpecialOddFare" value="7.50">"#)
+}
+let onCampus = await schoolClient.isCampusNet()
+precondition(onCampus && !schoolClient.webvpnOn)
+let grades = try await schoolClient.fetchJwxtGrades()
+precondition(grades.semesters.count == 1 && grades.semesters[0].courses.first?.score == 92)
+let card = try await schoolClient.fetchCardBalance()
+precondition(card.balance == 52.30 && card.subsidy == 7.50 && !schoolClient.webvpnOn)
+do {
+    _ = try PortalClient.parseCardBalance(fromHTML: #"<input id="ContentPlaceHolder1_txtOddFare" value="***">"#)
+    preconditionFailure("掩码余额不能变成假零元")
+} catch {}
+let missingSubsidy = try PortalClient.parseCardBalance(fromHTML: #"<input id="ContentPlaceHolder1_txtOddFare" value="0.00">"#)
+precondition(missingSubsidy.balance == 0 && missingSubsidy.subsidy == nil)
+print("Campus grades/card: 302 probes, explicit CAS ST, session cookies, Referer, real balances and masked-data errors passed")

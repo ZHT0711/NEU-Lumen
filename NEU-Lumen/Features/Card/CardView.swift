@@ -15,6 +15,13 @@ struct CardView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 balanceCard
+                if let warning = repo.cardWarning {
+                    Text(warning).font(.caption).foregroundStyle(.orange)
+                }
+                if let updated = repo.cardUpdatedAt {
+                    Text("来源：一卡通自助平台 · \(updated.formatted(date: .omitted, time: .shortened)) 同步")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 billsSection
                 netSection
                 electricSection
@@ -81,9 +88,9 @@ struct CardView: View {
                         .foregroundStyle(.white)
                         .monospacedDigit()
                     HStack(spacing: 8) {
-                        Text("补助 \(String(format: "%.2f", balance?.subsidy ?? 0))")
+                        Text(balance?.subsidy.map { "补助 \(String(format: "%.2f", $0))" } ?? "补助未提供")
                         Text("·")
-                        Text(balance?.status.isEmpty == false ? balance!.status : "正常")
+                        Text(balance?.status.isEmpty == false ? balance!.status : "状态未提供")
                     }
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.85))
