@@ -19,6 +19,9 @@ struct LoginView: View {
     @State private var secondAuthBusy = false
     @State private var secondAuthError: String?
 
+    // 网页方式登录
+    @State private var showWebLogin = false
+
     private var isLoading: Bool {
         environment.session.phase == .loggingIn
     }
@@ -36,6 +39,7 @@ struct LoginView: View {
                         errorBanner(error)
                     }
                     loginButton
+                    webLoginButton
                 }
 
                 VStack(spacing: 6) {
@@ -54,6 +58,13 @@ struct LoginView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemGroupedBackground))
+        .sheet(isPresented: $showWebLogin) {
+            WebLoginSheet { cookies in
+                Task {
+                    await environment.session.completeWebLogin(cookies: cookies)
+                }
+            }
+        }
         .task {
             if username.isEmpty {
                 username = environment.session.rememberedUsername
@@ -138,6 +149,23 @@ struct LoginView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(isLoading || username.isEmpty || password.isEmpty)
+    }
+
+    /// 网页方式登录：真实浏览器页完成认证（学校风控/设备信任/短信都在页面内完成），
+    /// 校外被拦截或二次认证异常时的保底方式。
+    private var webLoginButton: some View {
+        Button {
+            showWebLogin = true
+        } label: {
+            HStack {
+                Image(systemName: "safari")
+                Text("浏览器方式登录（校外推荐）")
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.bordered)
+        .disabled(isLoading)
     }
 
     private func errorBanner(_ error: String) -> some View {

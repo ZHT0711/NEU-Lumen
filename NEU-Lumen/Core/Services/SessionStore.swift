@@ -18,6 +18,9 @@ final class SessionStore {
     private(set) var lastError: String?
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
+    /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
+    private var pendingUsername: String?
+    private var pendingPassword: String?
 
     let client = PortalClient()
 
@@ -49,6 +52,8 @@ final class SessionStore {
         phase = .loggingIn
         lastError = nil
         needsSecondAuth = false
+        pendingUsername = username
+        pendingPassword = password
         do {
             let info = try await client.login(username: username, password: password)
             if keep {
@@ -83,16 +88,43 @@ final class SessionStore {
 
     /// 二次认证（图形码 + 短信）完成后的收尾：保存凭据并进入主界面。
     func completeSecondAuth(username: String, password: String, keep: Bool, user: PortalUser) {
-        if keep {
-            CredentialStore.save(username: username, password: password)
-        } else {
+        let finalUsername = username.isEmpty ? (pendingUsername ?? "") : username
+        let finalPassword = password.isEmpty ? (pendingPassword ?? "") : password
+        if keep, !finalUsername.isEmpty, !finalPassword.isEmpty {
+            CredentialStore.save(username: finalUsername, password: finalPassword)
+            UserDefaults.standard.set(finalUsername, forKey: Self.rememberedKey)
+        } else if !keep {
             CredentialStore.clear()
         }
-        UserDefaults.standard.set(username, forKey: Self.rememberedKey)
+        pendingUsername = nil
+        pendingPassword = nil
         self.user = user
         needsSecondAuth = false
         lastError = nil
         phase = .loggedIn
+    }
+
+    /// 网页方式登录完成：吸收 WKWebView 里的会话 Cookie 并拉取用户信息。
+    /// 说明：网页登录不经过 App 的密码表单，不写钥匙串；下次启动需重新网页登录。
+    func completeWebLogin(cookies: [HTTPCookie]) async -> Bool {
+        phase = .loggingIn
+        lastError = nil
+        needsSecondAuth = false
+        client.absorbCookies(cookies)
+        do {
+            let info = try await client.fetchUserInfo()
+            user = info
+            phase = .loggedIn
+            return true
+        } catch let e as NetworkError {
+            lastError = e.message
+            phase = .loggedOut
+            return false
+        } catch {
+            lastError = error.localizedDescription
+            phase = .loggedOut
+            return false
+        }
     }
 
     /// 用户放弃二次认证，回到账号密码登录。

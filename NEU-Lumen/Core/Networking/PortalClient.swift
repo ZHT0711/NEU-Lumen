@@ -114,6 +114,11 @@ final class PortalClient {
         secondAuthExecution = nil
     }
 
+    /// 吸收网页方式登录（WKWebView）里完成的会话 Cookie（含 CASTGC / SESS_ID）。
+    func absorbCookies(_ cookies: [HTTPCookie]) {
+        http.cookies.absorb(cookies)
+    }
+
     /// 供 WebView 注入的会话快照：domain -> {name: value}。
     func cookieSnapshot() -> [String: [String: String]] {
         http.cookies.snapshot()
@@ -135,7 +140,7 @@ final class PortalClient {
         let page = try await http.get(CasCrypto.casLoginURL).text
         guard let lt = Self.firstMatch(Self.ltRegex, page),
               let execution = Self.firstMatch(Self.executionRegex, page) else {
-            throw NetworkError(message: "统一身份认证页加载失败，请检查网络或校园 VPN 后重试")
+            throw NetworkError(message: "【认证页】统一身份认证页加载失败：请检查网络后重试；多次失败可改用「浏览器方式登录」")
         }
 
         // 2. RSA 加密并提交（学号+密码拼接后整体加密）
@@ -166,19 +171,23 @@ final class PortalClient {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !msg.isEmpty && !msg.contains("null") {
                     if msg.contains("账号不存在") {
-                        throw NetworkError(message: "账号不存在：若当前使用移动网络或在校外，学校统一认证会拦截公网直连鉴权（返回账号不存在）。请切换至校园网 WiFi 后重试。")
+                        throw NetworkError(message: "【密码校验】账号不存在：若当前使用移动网络（4G/5G），学校统一认证会拦截公网直连鉴权。请切换至校园网 WiFi，或改用下方「浏览器方式登录」。")
                     }
-                    throw NetworkError(message: msg)
+                    throw NetworkError(message: "【密码校验】" + msg)
                 }
             }
-            throw NetworkError(message: "账号或密码错误")
+            throw NetworkError(message: "【密码校验】账号或密码错误")
         }
 
         if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
            let user = Self.extractUser(fromHTML: post.text) {
             return user
         }
-        return try await fetchUserInfo()
+        do {
+            return try await fetchUserInfo()
+        } catch let e as NetworkError {
+            throw NetworkError(message: "【门户会话】" + e.message)
+        }
     }
 
     // MARK: - 新设备二次认证（图形码 + 短信）
