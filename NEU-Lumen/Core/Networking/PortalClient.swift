@@ -90,6 +90,19 @@ final class PortalClient {
         return url
     }
 
+    /// 是否已持有 WebVPN 网关票据。
+    var hasWebVPNTicket: Bool {
+        http.cookies.hasWebVPNTicket()
+    }
+
+    /// WebView 会话回收后：若已持有网关票据则直接进入网关模式
+    /// （校外门户直连必被网关劫持，门户读取必须经网关）。
+    func adoptGatewayTicket() {
+        if http.cookies.hasWebVPNTicket() {
+            webvpnOn = true
+        }
+    }
+
     /// 用 CASTGC 给指定 service 换 ST 并跟随到业务系统（停留在 CAS 登录页视为会话失效）。
     private func casLand(_ service: String) async throws -> HTTPClient.RawResponse {
         let login = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
@@ -287,23 +300,27 @@ final class PortalClient {
     }
 
     /// 请求门户首页并解析 window.userInfoDSL。
-    /// 校外门户 HTML 会被学校重定向进 WebVPN 网关，webvpnOn 时直接经网关读取；
-    /// 网关票据缺失时其 403 拦截页含「仅用于我校师生在校外登录」，据此自动重换票据。
+    /// 校外门户 HTML 会被学校重定向进 WebVPN 网关：直连失败（落到 CAS/网关拦截页）
+    /// 时自动切换到网关模式重试一次。
     func fetchUserInfo() async throws -> PortalUser {
         var target = maybeWrap(Self.portalBase)
         guard let url = URL(string: target) else {
             throw NetworkError(message: "门户地址无效")
         }
         var resp = try await http.get(url)
-        if Self.isWebVPNBlockedPage(resp) {
-            webvpnOn = false
-            guard await ensureWebVPN(), let retryURL = URL(string: maybeWrap(Self.portalBase)) else {
-                throw NetworkError(message: "WebVPN 网关登录失败：请稍后重试，或连接校园网后直接登录")
+        var failed = Self.isPortalSessionFailure(resp)
+        if failed && !target.contains("webvpn.neu.edu.cn") {
+            adoptGatewayTicket()
+            if !webvpnOn && !(await ensureWebVPN()) {
+                throw NetworkError.sessionExpired()
+            }
+            guard let retryURL = URL(string: maybeWrap(Self.portalBase)) else {
+                throw NetworkError(message: "门户地址无效")
             }
             resp = try await http.get(retryURL)
+            failed = Self.isPortalSessionFailure(resp)
         }
-        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
-            || resp.finalURL.path.contains("/tpass/login") {
+        if failed {
             throw NetworkError.sessionExpired()
         }
         guard let user = Self.extractUser(fromHTML: resp.text) else {
@@ -312,10 +329,14 @@ final class PortalClient {
         return user
     }
 
-    /// WebVPN 网关的拦截页（未携带网关会话时的 403 提示页）。
-    private static func isWebVPNBlockedPage(_ resp: HTTPClient.RawResponse) -> Bool {
-        guard resp.finalURL.host?.contains("webvpn.neu.edu.cn") == true else { return false }
-        return resp.status == 403 || resp.text.contains("仅用于我校师生在校外登录")
+    /// 直连门户是否失败：落在 CAS 登录页 / 网关拦截页 / 网关域。
+    private static func isPortalSessionFailure(_ resp: HTTPClient.RawResponse) -> Bool {
+        let onPass = resp.finalURL.host?.contains("pass.neu.edu.cn") == true
+            || resp.finalURL.path.contains("/tpass/login")
+        let onWebVPN = resp.finalURL.host?.contains("webvpn.neu.edu.cn") == true
+        let gate = onWebVPN
+            && (resp.status == 403 || resp.text.contains("仅用于我校师生在校外登录"))
+        return onPass || gate || resp.text.contains("当前设备需进行身份验证")
     }
 
     // MARK: - 门户业务接口

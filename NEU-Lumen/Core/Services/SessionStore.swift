@@ -112,8 +112,10 @@ final class SessionStore {
         lastError = nil
         needsSecondAuth = false
         client.absorbCookies(cookies)
+        // WebView 里已拿到网关票据 → 直接进入网关模式（校外门户必须经网关读取）
+        client.adoptGatewayTicket()
         do {
-            if !client.isLoggedIn {
+            if !client.isLoggedIn && !client.webvpnOn {
                 guard await client.ensureWebVPN() else {
                     throw NetworkError(message: "WebVPN 网关登录失败：请稍后重试，或连接校园网后直接登录")
                 }
