@@ -9,7 +9,6 @@ struct PortalWebViewScreen: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
     @State private var browser = PortalBrowser()
     @State private var syncError: String?
 
@@ -43,10 +42,13 @@ struct PortalWebViewScreen: View {
         .background(Color(.systemBackground))
         .navigationTitle(browser.title.isEmpty ? "校园网页" : browser.title)
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button("前进", systemImage: "chevron.right") { browser.webView.goForward() }
+                        .disabled(!browser.canGoForward)
                     Button("在页面中查找", systemImage: "doc.text.magnifyingglass") {
                         browser.webView.findInteraction?.presentFindNavigator(showingReplace: false)
                     }
@@ -69,11 +71,12 @@ struct PortalWebViewScreen: View {
                         Task { await browser.exportPDF() }
                     }
                     Button("回到应用入口", systemImage: "house") { browser.goToEntry() }
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.primary) }
                 .accessibilityLabel("网页工具")
             }
-            if academicMode {
-                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
+            ToolbarItem(placement: .topBarLeading) {
+                Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(.primary) }
+                    .accessibilityLabel("关闭网页")
             }
         }
         .overlay(alignment: .bottom) { floatingControls }
@@ -121,27 +124,10 @@ struct PortalWebViewScreen: View {
                     .padding(12)
                 }
             }
-            HStack {
-                toolButton("后退", icon: "chevron.left", disabled: !browser.canGoBack) { browser.webView.goBack() }
-                Spacer(minLength: 0)
-                toolButton("前进", icon: "chevron.right", disabled: !browser.canGoForward) { browser.webView.goForward() }
-                Spacer(minLength: 0)
-                toolButton(browser.isLoading ? "停止" : "刷新", icon: browser.isLoading ? "xmark" : "arrow.clockwise") {
-                    if browser.isLoading { browser.webView.stopLoading() } else { browser.reload() }
-                }
-                Spacer(minLength: 0)
-                ShareLink(item: browser.currentURL ?? url) {
-                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("分享当前网页")
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 56)
-            .modifier(BrowserCapsuleStyle())
+            browserDock
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 12)
-        .tint(colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent)
         .background {
             GeometryReader { geometry in
                 Color.clear.preference(key: BrowserControlsHeightKey.self, value: geometry.size.height)
@@ -149,10 +135,50 @@ struct PortalWebViewScreen: View {
         }
     }
 
+    @ViewBuilder
+    private var browserDock: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 12) { dockButtons }
+        } else {
+            dockButtons
+        }
+    }
+
+    /// 与参考图一致：独立返回圆钮 + 分享/停止或刷新/Safari 的短胶囊。
+    private var dockButtons: some View {
+        HStack(spacing: 16) {
+            toolButton("后退", icon: "chevron.left", disabled: !browser.canGoBack) { browser.webView.goBack() }
+                .padding(4)
+                .modifier(BrowserCapsuleStyle())
+            Spacer(minLength: 12)
+            HStack(spacing: 6) {
+                ShareLink(item: browser.currentURL ?? url) {
+                    Image(systemName: "square.and.arrow.up")
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("分享当前网页")
+                toolButton(browser.isLoading ? "停止" : "刷新", icon: browser.isLoading ? "xmark" : "arrow.clockwise") {
+                    if browser.isLoading { browser.webView.stopLoading() } else { browser.reload() }
+                }
+                toolButton("在 Safari 中打开", icon: "safari") { openURL(browser.currentURL ?? url) }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 52)
+            .modifier(BrowserCapsuleStyle())
+        }
+        .font(.system(size: 22, weight: .regular))
+        .foregroundStyle(.primary)
+    }
+
     private func toolButton(_ title: String, icon: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44) }
-            .disabled(disabled).accessibilityLabel(title)
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .opacity(disabled ? 0.3 : 1)
+            .accessibilityLabel(title)
     }
+
 }
 
 private struct BrowserControlsHeightKey: PreferenceKey {
@@ -166,12 +192,11 @@ private struct BrowserCapsuleStyle: ViewModifier {
         if #available(iOS 26.0, *) {
             content
                 .glassEffect(.regular.interactive(), in: Capsule())
-                .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
         } else {
             content
                 .background(.regularMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
-                .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
+                .shadow(color: .black.opacity(0.05), radius: 8, y: 3)
         }
     }
 }
