@@ -148,17 +148,12 @@ final class PortalClient {
         out.reserveCapacity(32)
         for (dateStr, slotValue) in dayMap {
             guard let date = PortalDate.day(dateStr) else { continue }
-            let events: [[String: Any]]
-            if let list = slotValue as? [Any] {
-                events = list.compactMap { $0 as? [String: Any] }
-            } else if let map = slotValue as? [String: Any],
-                      map.values.contains(where: { $0 is [String: Any] }) {
-                events = map.values.compactMap { $0 as? [String: Any] }
-            } else {
-                continue
-            }
+            // day 的值可能是：事件 / {节次: 事件} / [事件] / {节次: [事件]} 任意嵌套，统一展平
+            var events: [[String: Any]] = []
+            events.reserveCapacity(12)
+            Self.flattenSlots(slotValue, into: &events)
             for e in events {
-                let con = e.str("con")
+                let con = e.str("con").trimmingCharacters(in: .whitespaces)
                 if con.isEmpty { continue }
                 guard let s = PortalDate.dateTime(e.str("start_time")),
                       let endTime = PortalDate.dateTime(e.str("end")) else { continue }
@@ -178,6 +173,26 @@ final class PortalClient {
             }
         }
         return out
+    }
+
+    /// 把 week-list 事件槽位的任意嵌套结构（Map/List 混合）展平成事件数组。
+    /// 事件以包含非空 con 字段为标志（与门户前端判断一致）。
+    private static func flattenSlots(_ value: Any, into acc: inout [[String: Any]]) {
+        if let map = value as? [String: Any] {
+            if map["con"] != nil {
+                if !map.str("con").isEmpty {
+                    acc.append(map)
+                }
+            } else if map.values.contains(where: { $0 is [String: Any] || $0 is [Any] }) {
+                for v in map.values {
+                    flattenSlots(v, into: &acc)
+                }
+            }
+        } else if let list = value as? [Any] {
+            for v in list {
+                flattenSlots(v, into: &acc)
+            }
+        }
     }
 
     /// 服务大厅全部应用（含图标/分类/访问量）。
@@ -320,18 +335,31 @@ final class PortalClient {
     // MARK: - 教务系统（金智 jwapp）真实成绩
 
     /// 跟随重定向 SSO 进入教务系统（CASTGC 被 CAS 识别，建立 jwapp 会话）。
+    /// 注意：教务的 302 会跳 http:// 明文地址（ATS 例外已在 Info.plist 放开），与 Flutter 版行为一致。
     private func jwxtSSO() async throws {
         _ = try await http.get(URL(string: Self.jwxtBase + "/")!)
     }
 
     private static let jwxtHeaders = ["Fetch-Api": "true"]
 
+    /// jwapp JSON 接口：若被重定向回 CAS 登录页说明会话未建立，抛会话失效以触发静默重登。
+    private func jwxtGet(_ urlString: String) async throws -> Any {
+        let resp = try await http.get(URL(string: urlString)!, extraHeaders: Self.jwxtHeaders)
+        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
+            || resp.finalURL.path.contains("/tpass/login") {
+            throw NetworkError.sessionExpired()
+        }
+        do {
+            return try http.json(resp)
+        } catch {
+            throw NetworkError(message: "教务系统返回异常，请稍后重试")
+        }
+    }
+
     /// 全部学期的真实成绩（成绩可能为数字或五级制文本，如「良」）。
     func fetchJwxtGrades() async throws -> [GradeSemester] {
         try await jwxtSSO()
-        let calURL = URL(string: "\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/schoolCalendars.do")!
-        let calRaw = try await http.get(calURL, extraHeaders: Self.jwxtHeaders)
-        let cal = try http.json(calRaw)
+        let cal = try await jwxtGet("\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/schoolCalendars.do")
         guard let calJ = cal as? [String: Any], calJ.str("code") == "0" else {
             throw NetworkError(message: "学期列表获取失败")
         }
@@ -343,11 +371,8 @@ final class PortalClient {
             let name0 = t.str("itemName").trimmingCharacters(in: .whitespaces)
             let name = name0.isEmpty ? code : name0
             if code.isEmpty { continue }
-            var comps = URLComponents(string: "\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/scores.do")!
-            comps.queryItems = [URLQueryItem(name: "termCode", value: code)]
-            let raw = try await http.get(comps.url!, extraHeaders: Self.jwxtHeaders)
-            let j = try http.json(raw)
-            guard let jJ = j as? [String: Any], jJ.str("code") == "0" else { continue }
+            let raw = try await jwxtGet("\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/scores.do?termCode=\(code.urlFormEncoded)")
+            guard let jJ = raw as? [String: Any], jJ.str("code") == "0" else { continue }
             let list = (jJ["datas"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
             let courses = list.compactMap { c -> GradeCourse? in
                 let courseName = c.str("courseName")

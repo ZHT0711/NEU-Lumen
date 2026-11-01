@@ -24,6 +24,7 @@ final class PortalRepository {
     private(set) var usedOfflineFallback = false
 
     private var weekCache: [Date: [CourseOccurrence]] = [:]
+    private var loadingWeeks: Set<Date> = []
     private(set) var weekState: LoadState = .idle
 
     private var gradesCache: [GradeSemester]?
@@ -47,6 +48,7 @@ final class PortalRepository {
         todos = []
         hotSearch = []
         weekCache.removeAll()
+        loadingWeeks.removeAll()
         gradesCache = nil
         homeState = .idle
         weekState = .idle
@@ -148,14 +150,30 @@ final class PortalRepository {
     // MARK: - 课表
 
     /// 拉取某天所在教学周；命中缓存直接返回，不重复请求教务。
+    /// 同一周已有在途加载时等待其完成，避免快速翻周时请求被吞掉。
     func loadWeek(containing date: Date, force: Bool = false) async {
         let weekStart = Semester.weekStart(forDay: date)
         if !force, weekCache[weekStart] != nil {
             weekState = .loaded
             return
         }
-        if weekState == .loading { return }
+        if !force, loadingWeeks.contains(weekStart) {
+            while loadingWeeks.contains(weekStart) {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                if weekCache[weekStart] != nil { break }
+            }
+            if weekCache[weekStart] != nil {
+                weekState = .loaded
+                return
+            }
+        }
+        if !force, weekCache[weekStart] != nil {
+            weekState = .loaded
+            return
+        }
+        loadingWeeks.insert(weekStart)
         weekState = .loading
+        defer { loadingWeeks.remove(weekStart) }
         do {
             let list = try await withRecovery {
                 try await self.session.client.fetchWeek(anyDayInWeek: date)
@@ -165,7 +183,7 @@ final class PortalRepository {
         } catch {
             // 有缓存就继续用缓存，无缓存才报错
             if weekCache[weekStart] == nil {
-                weekState = .failed((error as? NetworkError)?.message ?? error.localizedDescription)
+                weekState = .failed(NetworkError.from(error).message)
             } else {
                 weekState = .loaded
             }
@@ -213,7 +231,7 @@ final class PortalRepository {
             gradesCache = list
             gradesState = .loaded
         } catch {
-            gradesState = .failed((error as? NetworkError)?.message ?? error.localizedDescription)
+            gradesState = .failed(NetworkError.from(error).message)
         }
     }
 }
