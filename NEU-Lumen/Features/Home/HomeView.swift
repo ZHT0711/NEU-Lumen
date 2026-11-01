@@ -42,6 +42,13 @@ struct HomeView: View {
                             startPoint: .top, endPoint: .bottom
                         )
                         .frame(height: 340)
+                        .overlay(alignment: .topTrailing) {
+                            CampusLineArt()
+                                .stroke(AppTheme.accent.opacity(0.045), lineWidth: 1)
+                                .frame(width: 360, height: 240)
+                                .offset(x: 70, y: 120)
+                                .accessibilityHidden(true)
+                        }
                     }
                     .ignoresSafeArea()
             }
@@ -83,34 +90,32 @@ struct HomeView: View {
 
     private var campusHeader: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 24) {
                 HStack(spacing: 10) {
                     Image("NEUEmblem")
-                        .resizable()
-                        .scaledToFit()
+                        .renderingMode(.template)
+                        .resizable().scaledToFit()
                         .frame(width: 42, height: 42)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("东北大学")
-                            .font(.system(.headline, design: .serif))
-                            .tracking(4)
+                            .font(.system(.headline, design: .serif)).tracking(4)
                         Text("NORTHEASTERN UNIVERSITY")
-                            .font(.system(size: 8, weight: .semibold))
-                            .tracking(1)
+                            .font(.system(size: 8, weight: .semibold)).tracking(1)
                     }
                     Spacer(minLength: 0)
+                    Text("1923")
+                        .font(.system(.title3, design: .serif).weight(.light))
+                        .opacity(0.5)
                 }
-
-                Spacer(minLength: 44)
+                .foregroundStyle(AppTheme.accent)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(greeting(at: context.date))
                         .font(.title2.bold())
                         .fixedSize(horizontal: false, vertical: true)
                     Text("在东大，让每一天都有所收获。")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .bottom) {
                         campusDate(context.date)
@@ -123,29 +128,24 @@ struct HomeView: View {
                     }
                 }
             }
-            .foregroundStyle(.white)
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
+                Color(.secondarySystemGroupedBackground)
+                LinearGradient(colors: [AppTheme.accent.opacity(0.035), AppTheme.accent.opacity(0.08)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
                 GeometryReader { geometry in
-                    Image("NEUCampusArchitecture")
-                        .resizable().scaledToFill()
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                        .overlay {
-                            LinearGradient(stops: [
-                                .init(color: AppTheme.accentDeep.opacity(0.65), location: 0),
-                                .init(color: .black.opacity(0.08), location: 0.38),
-                                .init(color: AppTheme.accentDeep.opacity(0.92), location: 1)
-                            ], startPoint: .top, endPoint: .bottom)
-                        }
+                    CampusLineArt()
+                        .stroke(AppTheme.accent.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                        .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
+                        .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
                 }
                 .accessibilityHidden(true)
             }
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(AppTheme.accent.opacity(0.1), lineWidth: 1)
             }
         }
     }
@@ -154,45 +154,37 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("走进东大", icon: "building.columns")
             Button {
-                path.append(.web(URL(string: "https://www.neu.edu.cn/zjdd/xyfj.htm")!))
+                path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
             } label: {
-                ZStack(alignment: .bottomLeading) {
-                    GeometryReader { geometry in
-                        Image("NEUCampusAutumn")
-                            .resizable().scaledToFill()
-                            .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                HStack {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("自强不息\n知行合一")
+                            .font(.system(.title3, design: .serif).weight(.semibold))
+                            .tracking(4)
+                        Label("东大精神，日常相伴", systemImage: "arrow.up.right")
+                            .font(.caption)
                     }
-                    LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .center, endPoint: .bottom)
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("东大 · 秋").font(.title3.bold())
-                            Text("把熟悉的校园，装进口袋。") .font(.caption)
-                        }
-                        Spacer()
-                        Image(systemName: "arrow.up.right.circle.fill").font(.title2)
-                    }
-                    .foregroundStyle(.white).padding(16)
+                    Spacer()
                 }
-                .frame(height: 156)
+                .foregroundStyle(AppTheme.accent)
+                .padding(20)
+                .frame(minHeight: 136)
+                .background {
+                    AppTheme.accent.opacity(0.045)
+                    GeometryReader { geometry in
+                        CampusLineArt()
+                            .stroke(AppTheme.accent.opacity(0.12), lineWidth: 1)
+                            .frame(width: geometry.size.width * 0.62, height: 145)
+                            .offset(x: geometry.size.width * 0.44, y: 10)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 20))
             }
             .buttonStyle(.plain)
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
-                    campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
-                }
-                VStack {
-                    campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
-                    campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
-                }
+            HStack {
+                campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
+                campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
             }
-            Text("自强不息 · 知行合一")
-                .font(.system(.caption, design: .serif).weight(.semibold))
-                .tracking(3)
-                .foregroundStyle(AppTheme.accent)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 4)
         }
     }
 
@@ -201,7 +193,7 @@ struct HomeView: View {
             Label(title, systemImage: icon)
                 .font(.subheadline.weight(.medium))
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(AppTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                .background(AppTheme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
     }
@@ -217,7 +209,7 @@ struct HomeView: View {
                 .font(.caption.weight(.medium))
             Text(semesterLabel(at: date))
                 .font(.caption2)
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(.secondary)
         }
         .fixedSize(horizontal: true, vertical: false)
     }
@@ -227,7 +219,7 @@ struct HomeView: View {
             .renderingMode(.template)
             .resizable()
             .scaledToFit()
-            .foregroundStyle(.white.opacity(0.9))
+            .foregroundStyle(AppTheme.accent.opacity(0.75))
             .frame(width: 112, height: 27)
             .accessibilityLabel("知行合一")
     }

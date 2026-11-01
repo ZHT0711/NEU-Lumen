@@ -70,16 +70,21 @@ final class CookieJar {
     func headerFor(_ uri: URL) -> String? {
         guard let host = uri.host?.lowercased() else { return nil }
         let path = uri.path.isEmpty ? "/" : uri.path
-        let cookies = locked {
-            store.values.filter { entry in
+        let cookies: [HTTPCookie] = locked {
+            var matching: [HTTPCookie] = []
+            for entry in store.values {
                 let cookie = entry.cookie
                 let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
-                let matchesDomain = host == domain || (!entry.hostOnly && host.hasSuffix("." + domain))
-                let matchesPath = path == cookie.path || (path.hasPrefix(cookie.path)
-                    && (cookie.path.hasSuffix("/") || path.dropFirst(cookie.path.count).hasPrefix("/")))
-                return matchesDomain && matchesPath && (!cookie.isSecure || uri.scheme == "https")
-                    && !(cookie.expiresDate.map { $0 <= Date() } ?? false)
-            }.map(\.cookie).sorted {
+                guard host == domain || (!entry.hostOnly && host.hasSuffix("." + domain)) else { continue }
+                let exactPath = path == cookie.path
+                let descendantPath = path.hasPrefix(cookie.path)
+                    && (cookie.path.hasSuffix("/") || path.dropFirst(cookie.path.count).hasPrefix("/"))
+                guard exactPath || descendantPath else { continue }
+                if cookie.isSecure && uri.scheme != "https" { continue }
+                if let expires = cookie.expiresDate, expires <= Date() { continue }
+                matching.append(cookie)
+            }
+            return matching.sorted {
                 $0.path.count == $1.path.count ? $0.name < $1.name : $0.path.count > $1.path.count
             }
         }
