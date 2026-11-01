@@ -68,8 +68,11 @@ struct UIValidationRoot: View {
                 case "services": ServicesView()
                 case "grades": GradesView()
                 case "browser":
-                    NavigationStack { PortalWebViewScreen(url: URL(string: "http://127.0.0.1:8787/index.html")!) }
-                default: HomeView(selection: .constant(.home))
+                    TabView {
+                        NavigationStack { PortalWebViewScreen(url: URL(string: "http://127.0.0.1:8787/index.html")!) }
+                            .tabItem { Label("浏览器", systemImage: "globe") }
+                    }
+                default: MainTabView()
                 }
             } else { ProgressView() }
         }

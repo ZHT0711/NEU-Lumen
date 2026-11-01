@@ -43,6 +43,7 @@ struct PortalWebViewScreen: View {
         .background(Color(.systemBackground))
         .navigationTitle(browser.title.isEmpty ? "校园网页" : browser.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
