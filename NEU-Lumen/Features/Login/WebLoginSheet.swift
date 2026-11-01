@@ -18,6 +18,7 @@ struct WebLoginSheet: View {
                 let ok = await onCookies(cookies)
                 if ok { dismiss() }
                 // 失败时保持面板打开：页面内可重试，或左上角取消
+                return ok
             }
             .ignoresSafeArea(edges: .bottom)
             .navigationTitle("统一身份认证")
