@@ -8,11 +8,8 @@ python3 "$ROOT/scripts/prepare_ui_validation.py" "$PREVIEW"
 SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")))')"
 xcrun simctl boot "$SIM_ID" || true
 xcrun simctl bootstatus "$SIM_ID" -b
-xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
-  -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID" \
-  -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO > "$OUTPUT/simulator-build.log" 2>&1
-# Keychain requires an application identity even in the simulator. The release
-# IPA is signed by the installer; give this disposable simulator build its own.
+# Simulator securityd reads the Mach-O simulated-entitlements section. Keep
+# the app unsigned and embed that identity at link time, as simulator builds do.
 cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -21,8 +18,11 @@ cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
 <key>keychain-access-groups</key><array><string>edu.neu.lumen</string></array>
 </dict></plist>
 PLIST
-codesign --force --sign - --entitlements "$PREVIEW/simulator.entitlements" \
-  "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
+xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
+  -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID" \
+  -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO \
+  "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
+  > "$OUTPUT/simulator-build.log" 2>&1
 xcrun simctl install "$SIM_ID" "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
 python3 -m http.server 8787 --bind 127.0.0.1 --directory "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
