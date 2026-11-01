@@ -4,7 +4,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
     @Binding var selection: AppTab
-    @ScaledMetric(relativeTo: .caption) private var appColumnWidth = 72
+    @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 72
     @State private var path: [AppDestination] = []
 
     private var repo: PortalRepository {

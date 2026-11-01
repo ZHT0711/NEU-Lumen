@@ -6,7 +6,7 @@ struct ServicesView: View {
     @State private var path: [AppDestination] = []
     @State private var query = ""
     @State private var selectedCategory: String?
-    @ScaledMetric(relativeTo: .caption) private var appColumnWidth = 76
+    @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 76
 
     private var repo: PortalRepository {
         environment.repository
