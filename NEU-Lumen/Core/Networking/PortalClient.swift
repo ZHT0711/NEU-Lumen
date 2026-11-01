@@ -80,7 +80,14 @@ final class PortalClient {
     }
 
     private func maybeWrap(_ url: String) -> String {
-        (webvpnOn && WebVPN.isIntranet(url)) ? WebVPN.wrap(url) : url
+        guard webvpnOn else { return url }
+        if WebVPN.isIntranet(url) { return WebVPN.wrap(url) }
+        // 校外门户 HTML 会被学校重定向进网关，门户域的请求统一改走网关
+        let lowered = url.lowercased()
+        if lowered.contains("personal.neu.edu.cn") || lowered.contains("portal.neu.edu.cn") {
+            return WebVPN.wrap(url)
+        }
+        return url
     }
 
     /// 用 CASTGC 给指定 service 换 ST 并跟随到业务系统（停留在 CAS 登录页视为会话失效）。
@@ -179,6 +186,16 @@ final class PortalClient {
             throw NetworkError(message: "【密码校验】账号或密码错误")
         }
 
+        // 校外门户登录成功后会被学校重定向进 WebVPN 网关（网关无票据时显示
+        // 「仅用于我校师生在校外登录」403 页）：此时 CASTGC 已到手，
+        // 换网关票据后改经网关读取门户，不要停在网关拦截页。
+        if post.finalURL.host?.contains("webvpn.neu.edu.cn") == true {
+            guard await ensureWebVPN() else {
+                throw NetworkError(message: "校外需经 WebVPN 访问门户，网关登录失败：请稍后重试，或连接校园网后直接登录")
+            }
+            return try await fetchUserInfo()
+        }
+
         if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
            let user = Self.extractUser(fromHTML: post.text) {
             return user
@@ -255,6 +272,13 @@ final class PortalClient {
             throw NetworkError(message: "二次认证失败，请重新登录")
         }
         secondAuthExecution = nil
+        // 校外完成二次认证后同样可能被门户重定向进 WebVPN 网关
+        if post.finalURL.host?.contains("webvpn.neu.edu.cn") == true {
+            guard await ensureWebVPN() else {
+                throw NetworkError(message: "校外需经 WebVPN 访问门户，网关登录失败：请稍后重试，或连接校园网后直接登录")
+            }
+            return try await fetchUserInfo()
+        }
         if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
            let user = Self.extractUser(fromHTML: post.text) {
             return user
@@ -263,8 +287,21 @@ final class PortalClient {
     }
 
     /// 请求门户首页并解析 window.userInfoDSL。
+    /// 校外门户 HTML 会被学校重定向进 WebVPN 网关，webvpnOn 时直接经网关读取；
+    /// 网关票据缺失时其 403 拦截页含「仅用于我校师生在校外登录」，据此自动重换票据。
     func fetchUserInfo() async throws -> PortalUser {
-        let resp = try await http.get(URL(string: Self.portalBase)!)
+        var target = maybeWrap(Self.portalBase)
+        guard let url = URL(string: target) else {
+            throw NetworkError(message: "门户地址无效")
+        }
+        var resp = try await http.get(url)
+        if Self.isWebVPNBlockedPage(resp) {
+            webvpnOn = false
+            guard await ensureWebVPN(), let retryURL = URL(string: maybeWrap(Self.portalBase)) else {
+                throw NetworkError(message: "WebVPN 网关登录失败：请稍后重试，或连接校园网后直接登录")
+            }
+            resp = try await http.get(retryURL)
+        }
         if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
             || resp.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
@@ -273,6 +310,12 @@ final class PortalClient {
             throw NetworkError(message: "会话未能正常建立，请重新登录")
         }
         return user
+    }
+
+    /// WebVPN 网关的拦截页（未携带网关会话时的 403 提示页）。
+    private static func isWebVPNBlockedPage(_ resp: HTTPClient.RawResponse) -> Bool {
+        guard resp.finalURL.host?.contains("webvpn.neu.edu.cn") == true else { return false }
+        return resp.status == 403 || resp.text.contains("仅用于我校师生在校外登录")
     }
 
     // MARK: - 门户业务接口

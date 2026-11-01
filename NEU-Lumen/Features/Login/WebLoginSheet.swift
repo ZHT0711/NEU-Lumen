@@ -53,8 +53,13 @@ struct WebLoginWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard !completed, onPortalLanding != nil else { return }
             guard let host = webView.url?.host?.lowercased() else { return }
-            // 成功标志：CAS 把会话带到门户域并落地门户页
-            guard host == "personal.neu.edu.cn" else { return }
+            // 两种成功/半成功落地都收会话：
+            // - personal：直连门户成功；
+            // - webvpn：校外门户被学校重定向进网关（CAS 已成功，CASTGC 已到手，
+            //   由 SessionStore 换网关票据后经网关完成登录），不要停在网关拦截页。
+            let landedPortal = host == "personal.neu.edu.cn"
+            let landedWebVPN = host == "webvpn.neu.edu.cn"
+            guard landedPortal || landedWebVPN else { return }
             completed = true
             let store = webView.configuration.websiteDataStore.httpCookieStore
             store.getAllCookies { [weak self] cookies in

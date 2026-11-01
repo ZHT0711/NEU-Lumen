@@ -105,13 +105,19 @@ final class SessionStore {
     }
 
     /// 网页方式登录完成：吸收 WKWebView 里的会话 Cookie 并拉取用户信息。
-    /// 说明：网页登录不经过 App 的密码表单，不写钥匙串；下次启动需重新网页登录。
+    /// 校外门户被学校重定向进 WebVPN 网关时，WebView 会落在网关域上：
+    /// 此时 CASTGC 已到手，先换网关票据再经网关读取门户。
     func completeWebLogin(cookies: [HTTPCookie]) async -> Bool {
         phase = .loggingIn
         lastError = nil
         needsSecondAuth = false
         client.absorbCookies(cookies)
         do {
+            if !client.isLoggedIn {
+                guard await client.ensureWebVPN() else {
+                    throw NetworkError(message: "WebVPN 网关登录失败：请稍后重试，或连接校园网后直接登录")
+                }
+            }
             let info = try await client.fetchUserInfo()
             user = info
             phase = .loggedIn
