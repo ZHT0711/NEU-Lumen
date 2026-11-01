@@ -20,12 +20,12 @@ enum DemoData {
     ]
 
     static let apps: [PortalApp] = [
-        PortalApp(name: "本科教务系统", appId: "demo-1", url: "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do", mobileUrl: "", iconUrl: "", desc: "选课、成绩、课表", category: "教务", visits: 0),
-        PortalApp(name: "校园卡自助", appId: "demo-2", url: "http://ecard.neu.edu.cn/selflogin/login.aspx", mobileUrl: "", iconUrl: "", desc: "余额与流水", category: "生活", visits: 0),
-        PortalApp(name: "缴费大厅", appId: "demo-3", url: "https://pay.neu.edu.cn/drCasLogin", mobileUrl: "", iconUrl: "", desc: "网费电费缴纳", category: "财务", visits: 0),
-        PortalApp(name: "图书馆", appId: "demo-4", url: "https://lib.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "馆藏与借阅", category: "学习", visits: 0),
-        PortalApp(name: "学生邮箱", appId: "demo-5", url: "https://mail.stumail.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "学校邮箱", category: "办公", visits: 0),
-        PortalApp(name: "校园网关", appId: "demo-6", url: "https://ipgw.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "网络自助服务", category: "网络", visits: 0),
+        PortalApp(name: "本科教务系统", appId: "demo-1", url: "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do", mobileUrl: "", iconUrl: "", desc: "选课、成绩、课表", category: "教学学习", visits: 0),
+        PortalApp(name: "校园卡自助", appId: "demo-2", url: "http://ecard.neu.edu.cn/selflogin/login.aspx", mobileUrl: "", iconUrl: "", desc: "余额与流水", category: "校园生活", visits: 0),
+        PortalApp(name: "缴费大厅", appId: "demo-3", url: "https://pay.neu.edu.cn/drCasLogin", mobileUrl: "", iconUrl: "", desc: "网费电费缴纳", category: "财务资产", visits: 0),
+        PortalApp(name: "图书馆", appId: "demo-4", url: "https://lib.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "馆藏与借阅", category: "校园生活", visits: 0),
+        PortalApp(name: "学生邮箱", appId: "demo-5", url: "https://mail.stumail.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "学校邮箱", category: "公共服务", visits: 0),
+        PortalApp(name: "校园网关", appId: "demo-6", url: "https://ipgw.neu.edu.cn", mobileUrl: "", iconUrl: "", desc: "网络自助服务", category: "公共服务", visits: 0),
     ]
 
     static let news: [NewsItem] = [

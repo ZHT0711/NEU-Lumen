@@ -3,6 +3,8 @@ import SwiftUI
 /// 首页仪表盘：问候、数据条、下一节课、今日时间轴、常用应用、办事动态、校园资讯。
 struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Binding var selection: AppTab
+    @ScaledMetric(relativeTo: .caption) private var appColumnWidth = 72
     @State private var path: [AppDestination] = []
 
     private var repo: PortalRepository {
@@ -12,15 +14,16 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: 22) {
+                    campusHeader
                     if repo.usedOfflineFallback {
                         offlineBanner
                     }
                     nextClassBanner
                     cardEntrySection
-                    dataCardsSection
-                    todaySection
                     quickAppsSection
+                    todaySection
+                    dataCardsSection
                     if !repo.todos.isEmpty {
                         todosSection
                     }
@@ -30,8 +33,18 @@ struct HomeView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("首页")
+            .background {
+                Color(.systemGroupedBackground)
+                    .overlay(alignment: .top) {
+                        LinearGradient(
+                            colors: [AppTheme.accent.opacity(0.09), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .frame(height: 340)
+                    }
+                    .ignoresSafeArea()
+            }
+            .navigationTitle("东大 · Lumen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -40,6 +53,8 @@ struct HomeView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
+                    .accessibilityLabel("刷新首页")
+                    .disabled(repo.homeState == .loading)
                 }
             }
             .refreshable {
@@ -65,6 +80,110 @@ struct HomeView: View {
 
     // MARK: - 区块
 
+    private var campusHeader: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 10) {
+                    Image("NEUEmblem")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 42, height: 42)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("东北大学")
+                            .font(.system(.headline, design: .serif))
+                            .tracking(4)
+                        Text("NORTHEASTERN UNIVERSITY")
+                            .font(.system(size: 8, weight: .semibold))
+                            .tracking(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(greeting(at: context.date))
+                        .font(.title2.bold())
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("在东大，让每一天都有所收获。")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom) {
+                        campusDate(context.date)
+                        Spacer(minLength: 12)
+                        motto
+                    }
+                    VStack(alignment: .leading, spacing: 14) {
+                        campusDate(context.date)
+                        motto
+                    }
+                }
+            }
+            .foregroundStyle(.white)
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                ZStack(alignment: .trailing) {
+                    LinearGradient(
+                        colors: [AppTheme.accent, AppTheme.accentDeep],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                    Circle()
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                        .frame(width: 280, height: 280)
+                        .offset(x: 90, y: -60)
+                    Image("NEUEmblem")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 190, height: 190)
+                        .opacity(0.07)
+                        .rotationEffect(.degrees(-14))
+                        .offset(x: 42, y: 15)
+                }
+                .accessibilityHidden(true)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            }
+        }
+    }
+
+    private func greeting(at date: Date) -> String {
+        let name = environment.session.user?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "\(AppTheme.greeting(date))，东大人" : "\(AppTheme.greeting(date))，\(name)"
+    }
+
+    private func campusDate(_ date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(date, format: .dateTime.locale(Locale(identifier: "zh_CN")).month().day().weekday(.wide))
+                .font(.caption.weight(.medium))
+            Text(semesterLabel(at: date))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.75))
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var motto: some View {
+        Image("NEUMotto")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(width: 112, height: 27)
+            .accessibilityLabel("知行合一")
+    }
+
+    private func semesterLabel(at date: Date) -> String {
+        let week = Semester.weekNumberOf(date)
+        if week < 1 || week > Semester.totalWeeks { return "校园时光 · 假期中" }
+        return Semester.isExamWeek(week) ? "第 \(week) 周 · 考试周" : "第 \(week) 教学周"
+    }
+
     private var offlineBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.slash")
@@ -81,30 +200,39 @@ struct HomeView: View {
     private var nextClassBanner: some View {
         if let next = repo.nextCourse() {
             let ongoing = next.isOngoing
-            HStack(spacing: 12) {
-                Image(systemName: ongoing ? "figure.run" : "book.fill")
-                    .font(.title3)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(ongoing ? "正在上课" : "下一节课")
-                        .font(.caption)
-                        .opacity(0.85)
-                    Text("\(next.slot.name) · \(Semester.hm(next.slot.startMinutes))")
-                        .font(.headline)
-                        .lineLimit(1)
-                    if !next.slot.room.isEmpty {
-                        Text(next.slot.room)
+            Button {
+                selection = .schedule
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: ongoing ? "figure.run" : "book.fill")
+                        .font(.title3)
+                        .foregroundStyle(AppTheme.accent)
+                        .frame(width: 44, height: 44)
+                        .background(AppTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(ongoing ? "正在上课" : "下一节课")
                             .font(.caption)
-                            .opacity(0.85)
+                            .foregroundStyle(AppTheme.accent)
+                        Text("\(next.slot.name) · \(Semester.hm(next.slot.startMinutes))")
+                            .font(.headline)
+                            .lineLimit(2)
+                        if !next.slot.room.isEmpty {
+                            Text(next.slot.room)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
+                .foregroundStyle(.primary)
+                .padding(16)
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
             }
-            .foregroundStyle(.white)
-            .padding(16)
-            .background(
-                LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-            )
+            .buttonStyle(.plain)
+            .accessibilityHint("打开课表")
         }
     }
 
@@ -112,14 +240,14 @@ struct HomeView: View {
         Group {
             if !repo.dataCards.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader("数据条", icon: "chart.bar.doc.horizontal")
+                    sectionHeader("我的校园数据", icon: "chart.bar.doc.horizontal")
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 10) {
                             ForEach(repo.dataCards) { card in
                                 GlassCard(cornerRadius: 16) {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(card.name)
-                                            .font(.caption2)
+                                            .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .lineLimit(1)
                                         Text(card.value)
@@ -128,7 +256,7 @@ struct HomeView: View {
                                             .minimumScaleFactor(0.6)
                                     }
                                     .padding(12)
-                                    .frame(width: 116, height: 76, alignment: .topLeading)
+                                    .frame(width: 128, alignment: .topLeading)
                                 }
                             }
                         }
@@ -141,7 +269,12 @@ struct HomeView: View {
     private var todaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             let timeline = repo.todayTimeline()
-            sectionHeader("今日课程", icon: "clock")
+            HStack {
+                sectionHeader("今日课程", icon: "clock")
+                Spacer()
+                Button("查看课表") { selection = .schedule }
+                    .font(.caption.weight(.medium))
+            }
             GlassCard {
                 VStack(spacing: 0) {
                     if timeline.isEmpty {
@@ -170,26 +303,41 @@ struct HomeView: View {
 
     private var quickAppsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("常用应用", icon: "square.grid.2x2")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
-                ForEach(Array(repo.apps.prefix(8))) { app in
-                    Button {
-                        open(app)
-                    } label: {
-                        VStack(spacing: 6) {
-                            RemoteImageView(path: app.iconUrl)
-                                .frame(width: 40, height: 40)
-                            Text(app.name)
-                                .font(.caption2)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 4)
+            HStack {
+                sectionHeader("常用应用", icon: "square.grid.2x2")
+                Spacer()
+                Button { selection = .services } label: {
+                    HStack(spacing: 4) {
+                        Text("全部服务")
+                        Image(systemName: "arrow.up.right")
                     }
-                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
                 }
+            }
+            GlassCard {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
+                    ForEach(Array(repo.apps.prefix(8))) { app in
+                        Button {
+                            open(app)
+                        } label: {
+                            VStack(spacing: 6) {
+                                RemoteImageView(path: app.iconUrl)
+                                    .frame(width: 40, height: 40)
+                                Text(app.name)
+                                    .font(.caption2)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.center)
+                                    .frame(minHeight: 28, alignment: .top)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(12)
             }
         }
     }
@@ -267,35 +415,37 @@ struct HomeView: View {
     }
 
     private var cardEntrySection: some View {
-        Button {
-            path.append(.card)
-        } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Image(systemName: "creditcard.fill")
-                        .font(.title3)
-                        .foregroundStyle(.white)
-                }
-                .frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("校园卡")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(.primary)
-                    Text(cardEntrySubtitle)
+        GlassCard {
+            Button {
+                path.append(.card)
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        Image(systemName: "creditcard.fill")
+                            .font(.title3)
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 44, height: 44)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("校园卡")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.primary)
+                        Text(cardEntrySubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(.tertiary)
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                .padding(14)
             }
-            .padding(14)
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     private var cardEntrySubtitle: String {
@@ -322,7 +472,7 @@ struct HomeView: View {
                 .font(.footnote)
                 .foregroundStyle(AppTheme.accent)
             Text(title)
-                .font(.subheadline.bold())
+                .font(.headline)
         }
     }
 

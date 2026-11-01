@@ -1,34 +1,38 @@
 import SwiftUI
 
-/// 服务大厅：全部校内应用 + 热搜词 + 本地即时过滤。
+/// 服务大厅：门户分类、热搜词、本地联合筛选与智慧搜索。
 struct ServicesView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var path: [AppDestination] = []
     @State private var query = ""
+    @State private var selectedCategory: String?
+    @ScaledMetric(relativeTo: .caption) private var appColumnWidth = 76
 
     private var repo: PortalRepository {
         environment.repository
     }
 
+    private var catalog: ServiceCatalog { ServiceCatalog(apps: repo.apps) }
+
+    private var keyword: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var filtered: [PortalApp] {
-        let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return repo.apps }
-        return repo.apps.filter {
-            $0.name.localizedCaseInsensitiveContains(q)
-                || $0.desc.localizedCaseInsensitiveContains(q)
-                || $0.category.localizedCaseInsensitiveContains(q)
-        }
+        catalog.filtered(query: query, category: selectedCategory)
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    serviceHeader
                     searchField
-                    smartSearchCard
-                    if query.isEmpty {
+                    if keyword.isEmpty && !repo.hotSearch.isEmpty {
                         hotChips
                     }
+                    categoryChips
+                    smartSearchCard
                     appsSection
                 }
                 .padding(.horizontal, 16)
@@ -37,6 +41,13 @@ struct ServicesView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("服务大厅")
+            .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: catalog.categories) { _, categories in
+                if let selectedCategory, !categories.contains(where: { $0.name == selectedCategory }) {
+                    self.selectedCategory = nil
+                }
+            }
             .task {
                 await repo.ensureLoadedForCurrentUser()
                 await repo.loadAppsIfNeeded()
@@ -53,6 +64,66 @@ struct ServicesView: View {
         }
     }
 
+    private var serviceHeader: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.title2)
+                .foregroundStyle(AppTheme.accent)
+                .frame(width: 52, height: 52)
+                .background(AppTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("东大服务，一站直达")
+                    .font(.title3.bold())
+                Text("\(repo.apps.count) 个应用 · \(catalog.categories.count) 类校园服务")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+    }
+
+    private var categoryChips: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("服务分类")
+                .font(.subheadline.bold())
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    categoryChip(name: "全部", count: repo.apps.count, category: nil)
+                    ForEach(catalog.categories) { category in
+                        categoryChip(name: category.name, count: category.count, category: category.name)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private func categoryChip(name: String, count: Int, category: String?) -> some View {
+        let active = selectedCategory == category
+        return Button {
+            selectedCategory = category
+        } label: {
+            HStack(spacing: 6) {
+                Text(name)
+                    .font(.subheadline.weight(active ? .semibold : .medium))
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .opacity(0.8)
+            }
+            .foregroundStyle(active ? Color.white : Color.primary)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(
+                active ? AppTheme.accent : Color(.secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name)，\(count) 个应用")
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -67,6 +138,7 @@ struct ServicesView: View {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
                 }
+                .accessibilityLabel("清除搜索")
             }
         }
         .padding(12)
@@ -76,9 +148,8 @@ struct ServicesView: View {
     /// 智慧搜索入口：一键跳转智搜平台全校搜索（SSO 免登录）。
     private var smartSearchCard: some View {
         Group {
-            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            if !keyword.isEmpty {
                 Button {
-                    let keyword = query.trimmingCharacters(in: .whitespaces)
                     if let url = URL(string: "https://so.neu.edu.cn/#/accessLogin?searchWord=\(keyword.urlFormEncoded)") {
                         path.append(.web(url))
                     }
@@ -91,7 +162,7 @@ struct ServicesView: View {
                             Text("在智搜平台全校搜索")
                                 .font(.subheadline.bold())
                                 .foregroundStyle(.primary)
-                            Text("「\(query.trimmingCharacters(in: .whitespaces))」")
+                            Text("「\(keyword)」")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -117,6 +188,7 @@ struct ServicesView: View {
                     ForEach(repo.hotSearch, id: \.self) { word in
                         Button {
                             query = word
+                            selectedCategory = nil
                         } label: {
                             Text(word)
                                 .font(.caption)
@@ -133,39 +205,59 @@ struct ServicesView: View {
 
     private var appsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("全部应用（\(filtered.count)）")
-                .font(.subheadline.bold())
+            HStack {
+                Text("\(selectedCategory ?? "全部应用")（\(filtered.count)）")
+                    .font(.subheadline.bold())
+                Spacer()
+                if selectedCategory != nil || !keyword.isEmpty {
+                    Button("重置") {
+                        query = ""
+                        selectedCategory = nil
+                    }
+                    .font(.caption.weight(.medium))
+                }
+            }
             if filtered.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                    Text("没有匹配「\(query)」的应用")
+                    Text(keyword.isEmpty ? "暂无可用应用" : "没有匹配「\(keyword)」的应用")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if selectedCategory != nil {
+                        Button("在全部分类中查找") { selectedCategory = nil }
+                            .font(.footnote)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 32)
             } else {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 14) {
-                    ForEach(filtered) { app in
-                        Button {
-                            open(app)
-                        } label: {
-                            VStack(spacing: 6) {
-                                RemoteImageView(path: app.iconUrl)
-                                    .frame(width: 40, height: 40)
-                                Text(app.name)
-                                    .font(.caption2)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
+                GlassCard {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 10)], spacing: 14) {
+                        ForEach(filtered) { app in
+                            Button {
+                                open(app)
+                            } label: {
+                                VStack(spacing: 6) {
+                                    RemoteImageView(path: app.iconUrl)
+                                        .frame(width: 40, height: 40)
+                                    Text(app.name)
+                                        .font(.caption2)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                        .frame(minHeight: 28, alignment: .top)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 4)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 4)
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(12)
                 }
             }
         }

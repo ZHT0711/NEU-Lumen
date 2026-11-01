@@ -81,6 +81,18 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
+      - name: Test service categories and search
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc \
+            NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Models/PortalModels.swift \
+            NEU-Lumen/Core/Models/ServiceCatalog.swift \
+            Tests/ServiceCatalog/main.swift \
+            -o "${RUNNER_TEMP}/service-catalog-tests"
+          "${RUNNER_TEMP}/service-catalog-tests"
+
       - name: Build unsigned IPA
         run: bash build_ios_unsigned.sh
 
