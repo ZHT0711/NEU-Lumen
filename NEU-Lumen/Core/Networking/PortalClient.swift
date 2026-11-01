@@ -328,8 +328,9 @@ final class PortalClient {
             } else {
                 adoptGatewayTicket()
             }
-            if attempt >= 1 && !(await ensureWebVPN()) {
-                throw NetworkError.sessionExpired()
+            if attempt >= 1 {
+                let gatewayReady = await ensureWebVPN()
+                if !gatewayReady { throw NetworkError.sessionExpired() }
             }
             guard let requestURL = URL(string: maybeWrap(Self.portalBase)) else {
                 throw NetworkError(message: "门户地址无效")
