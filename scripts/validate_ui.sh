@@ -20,7 +20,7 @@ cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
 PLIST
 xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
   -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID" \
-  -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO \
+  -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
   > "$OUTPUT/simulator-build.log" 2>&1
 xcrun simctl install "$SIM_ID" "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
