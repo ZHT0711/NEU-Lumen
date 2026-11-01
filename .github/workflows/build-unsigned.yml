@@ -100,6 +100,7 @@ jobs:
           "${RUNNER_TEMP}/service-catalog-tests"
           node Tests/AcademicBridge/check.mjs
           node Tests/OffCampusLogin/document.mjs
+          python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Test off-campus login and service preservation
         shell: bash
