@@ -219,7 +219,9 @@ struct LoginView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Button(action: sendSMS) {
+                    Button {
+                        Task { await sendSMS() }
+                    } label: {
                         Text("发送短信验证码")
                             .bold()
                             .frame(maxWidth: .infinity)
