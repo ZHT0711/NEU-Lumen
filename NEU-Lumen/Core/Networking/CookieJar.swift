@@ -76,9 +76,17 @@ final class CookieJar {
                 let cookie = entry.cookie
                 let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
                 guard host == domain || (!entry.hostOnly && host.hasSuffix("." + domain)) else { continue }
-                let exactPath = path == cookie.path
-                let descendantPath = path.hasPrefix(cookie.path)
-                    && (cookie.path.hasSuffix("/") || path.dropFirst(cookie.path.count).hasPrefix("/"))
+                let cookiePath = cookie.path
+                let exactPath = path == cookiePath
+                var descendantPath = false
+                if path.hasPrefix(cookiePath) {
+                    if cookiePath.hasSuffix("/") {
+                        descendantPath = true
+                    } else {
+                        let remainder = path.dropFirst(cookiePath.count)
+                        descendantPath = remainder.hasPrefix("/")
+                    }
+                }
                 guard exactPath || descendantPath else { continue }
                 if cookie.isSecure && uri.scheme != "https" { continue }
                 if let expires = cookie.expiresDate, expires <= Date() { continue }
