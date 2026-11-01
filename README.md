@@ -16,8 +16,10 @@ NEU-Lumen 是东北大学「一号通门户」（https://personal.neu.edu.cn/por
 - 课表：教学周网格（第1-2节…第9-10节真实作息）、周次切换、假期/考试周提示、本机自定义日程上格
 - 服务大厅：全部校内应用（图标/分类/访问量）+ 门户热搜词 + 本地即时过滤
 - 成绩：教务系统真实数据（CASTGC → jwapp 会话），全部学期、GPA / 加权平均分 / 学分统计、五级制换算
+- 校园卡：一卡通余额 / 按自然月流水（图表 + 明细，单月最多 10 页）/ 网费（余额 + 流量）/ 电费（房间码本机保存），校外自动经 WebVPN
 - 打开网页：WKWebView 注入会话 Cookie，各业务系统 SSO 免登录直达，Safari 兜底
-- 液态玻璃：iOS 26+ 使用系统 `glassEffect`，低版本回退系统材质；东大蓝主题
+- 服务大厅智慧搜索：门户热搜词 + 本地即时过滤 + 一键跳转智搜平台全校搜索（SSO 免登录）
+- 液态玻璃：iOS 26+ 使用系统 `glassEffect`，低版本回退系统材质；东大蓝主题与校徽 / 「知行合一」题字标识
 
 ## 目录结构
 
@@ -27,7 +29,7 @@ NEU-Lumen/
 ├── Components/   可复用的纯 SwiftUI 组件（玻璃卡片、远程图片、状态视图）
 ├── Core/
 │   ├── Models/       门户 / 课表 / 成绩数据模型
-│   ├── Networking/   HTTP、Cookie 罐、CAS RSA 加密与门户 API
+│   ├── Networking/   HTTP、Cookie 罐、CAS RSA 加密、WebVPN 网关编码与门户 API
 │   ├── Persistence/  钥匙串凭据与本机日程持久化
 │   ├── Services/     会话状态机、业务仓储与学期模型
 │   └── Support/      容错 JSON 取值与日期解析工具
@@ -61,6 +63,16 @@ bash build_ios_unsigned.sh
 | 苹果开发者账号（$99/年）+ 证书 | 付费 | 1 年 |
 | TrollStore（特定 iOS 版本） | 永久 | 永久 |
 
+## 校外访问（WebVPN）
+
+启动请求前探测校园网（ecard:80 / jwxt:443 任一可达，结果缓存 10 分钟）：
+
+- 校园网内直连全部系统；
+- 校外对 `ecard` / `jwxt` 等校园网专属主机自动改写为 Wengine 网关地址
+  （AES-128-CFB128、IV=密钥，密钥来自学校 WebVPN 前端，写在 `Core/Networking/WebVPN.swift`），
+  票据用公网一号通的 CASTGC 经 `webvpn.neu.edu.cn/login?cas_login=true` 换取；
+- `portal` / `pass` / `pay` / `personal` 属公网可达主机，校外仍直连。
+
 ## 性能设计
 
 - 单个 `URLSession` 复用连接，重定向手动逐跳跟随、吸收每一跳 Set-Cookie（对齐 CAS 跨域流程）
@@ -73,8 +85,10 @@ bash build_ios_unsigned.sh
 
 - 统一认证的二次短信验证未实现：如触发设备二次认证，请先在网页端完成设备信任绑定再登录
   （与 NEUPortal 行为一致）
-- 校外网络下门户与教务依赖学校 WebVPN，未内置 WebVPN 换票逻辑；校园网内全功能可用
-- 校园卡余额门户端返回 `***`，卡余额/流水/电费等一卡通直连接口属于后续计划
+- 统一认证的二次短信验证未实现：如触发设备二次认证，请先在网页端完成设备信任绑定再登录
+  （与 NEUPortal 行为一致）
+- WebVPN 网关密钥来自学校前端，学校更换后需同步更新 `WebVPN.key`
+- 电费接口 23:00–6:00 常不可达，失败时请白天再试
 
 ## 隐私与安全
 

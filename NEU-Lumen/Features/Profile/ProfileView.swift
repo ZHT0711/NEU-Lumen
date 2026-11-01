@@ -14,14 +14,10 @@ struct ProfileView: View {
             List {
                 Section {
                     HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
-                            Text(String((environment.session.user?.name.first ?? "东").description))
-                                .font(.title2.bold())
-                                .foregroundStyle(.white)
-                        }
-                        .frame(width: 56, height: 56)
+                        Image("NEUEmblemDark")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 52, height: 52)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(environment.session.user?.name ?? "未登录")
                                 .font(.headline)
@@ -51,6 +47,19 @@ struct ProfileView: View {
                 }
 
                 Section("关于") {
+                    VStack(spacing: 10) {
+                        Image("NEULogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 30)
+                        Image("NEUMotto")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 26)
+                            .accessibilityLabel("校训：知行合一")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
                     LabeledContent("版本", value: version)
                     LabeledContent("数据来源", value: "东北大学一号通门户")
                     Link(destination: URL(string: "https://github.com/ZHT0711/NEU-Lumen")!) {

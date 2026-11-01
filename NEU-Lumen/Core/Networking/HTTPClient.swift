@@ -22,6 +22,10 @@ final class HTTPClient {
     private let session: URLSession
     let cookies = CookieJar()
 
+    /// 重定向目标改写钩子：WebVPN 模式下把校内主机 Location 改写为网关地址。
+    /// 返回 nil 表示不改写。
+    var redirectRewriter: ((URL) -> URL?)?
+
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false
@@ -59,7 +63,8 @@ final class HTTPClient {
             if (300..<400).contains(status),
                let loc = http.allHeaderFields["Location"] as? String,
                let base = http.url ?? current.url,
-               let next = URL(string: loc, relativeTo: base)?.absoluteURL {
+               let resolved = URL(string: loc, relativeTo: base)?.absoluteURL {
+                let next = redirectRewriter?(resolved) ?? resolved
                 var nextReq = URLRequest(url: next, timeoutInterval: Self.timeout)
                 let keepMethod = (status == 307 || status == 308) && current.httpMethod == "POST"
                 if keepMethod {

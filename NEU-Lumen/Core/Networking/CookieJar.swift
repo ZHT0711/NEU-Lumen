@@ -121,6 +121,20 @@ final class CookieJar {
         return false
     }
 
+    /// 是否已持有 WebVPN 网关票据（wengine / vpn_ticket / webvpn 任一未过期 Cookie）。
+    func hasWebVPNTicket() -> Bool {
+        let now = Date()
+        for (_, cookies) in store {
+            for (name, entry) in cookies {
+                let lower = name.lowercased()
+                if lower.contains("wengine") || lower.contains("vpn_ticket") || lower.contains("webvpn") {
+                    if entry.expires == nil || entry.expires! > now { return true }
+                }
+            }
+        }
+        return false
+    }
+
     /// 供 WebView 注入的会话快照：domain -> {name: value}。
     func snapshot() -> [String: [String: String]] {
         var out: [String: [String: String]] = [:]

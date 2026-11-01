@@ -30,6 +30,37 @@ final class PortalRepository {
     private var gradesCache: [GradeSemester]?
     private(set) var gradesState: LoadState = .idle
 
+    // MARK: 一卡通 / 网费 / 电费
+
+    private(set) var cardBalance: CardBalance?
+    private(set) var cardState: LoadState = .idle
+    private(set) var billsYear: Int = Calendar.current.component(.year, from: Date())
+    private(set) var billsMonth: Int = Calendar.current.component(.month, from: Date())
+    private(set) var cardBills: [CardBill] = []
+    private(set) var billTruncated = false
+    private(set) var billsState: LoadState = .idle
+    private var billsCache: [String: [CardBill]] = [:]
+    private var truncatedCache: [String: Bool] = [:]
+    private(set) var netInfo: NetUsageInfo?
+    private(set) var netState: LoadState = .idle
+    private(set) var electricInfo: ElectricInfo?
+    private(set) var electricState: LoadState = .idle
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM"
+        return f
+    }()
+
+    /// 电费房间码（宿舍 3 位 + 寝室 4 位，本机保存）。
+    var electricRoomCode: String {
+        get { UserDefaults.standard.string(forKey: "lumen.electric.room") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "lumen.electric.room") }
+    }
+
+    private var monthKey: String { Self.monthFormatter.string(from: Calendar.current.date(from: DateComponents(year: billsYear, month: billsMonth))!) }
+
     private var loadedForSID: String?
 
     init(session: SessionStore) {
@@ -50,6 +81,16 @@ final class PortalRepository {
         weekCache.removeAll()
         loadingWeeks.removeAll()
         gradesCache = nil
+        cardBalance = nil
+        cardBills = []
+        billsCache.removeAll()
+        truncatedCache.removeAll()
+        netInfo = nil
+        electricInfo = nil
+        cardState = .idle
+        billsState = .idle
+        netState = .idle
+        electricState = .idle
         homeState = .idle
         weekState = .idle
         gradesState = .idle
@@ -233,6 +274,119 @@ final class PortalRepository {
         } catch {
             gradesState = .failed(NetworkError.from(error).message)
         }
+    }
+
+    // MARK: - 一卡通 / 网费 / 电费
+
+    /// 一卡通总览：余额、网费、电费并行拉取（校内直连，校外自动走 WebVPN）。
+    func loadCardOverview() async {
+        if cardState == .loading { return }
+        cardState = .loading
+        netState = netInfo == nil ? .loading : netState
+        electricState = electricInfo == nil ? .loading : electricState
+        let client = session.client
+        async let cardResult = run { try await client.fetchCardBalance() }
+        async let netResult = run { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
+        async let elecResult = run { try await client.fetchElectric(room: electricRoomCode) }
+        let (card, net, elec) = await (cardResult, netResult, elecResult)
+
+        if let card {
+            cardBalance = card
+            cardState = .loaded
+        } else if cardBalance == nil {
+            cardState = .failed("一卡通余额获取失败，请重试")
+        }
+        if let net {
+            netInfo = net
+            netState = .loaded
+        } else if netInfo == nil {
+            netState = .failed("网费获取失败，请重试")
+        }
+        if let elec {
+            electricInfo = elec
+            electricState = .loaded
+        } else if electricInfo == nil {
+            electricState = .failed("电费获取失败，请重试")
+        }
+    }
+
+    /// 拉取某自然月流水（历史月落缓存，不再自动刷新）。
+    func loadBills(year: Int, month: Int, force: Bool = false) async {
+        billsYear = year
+        billsMonth = month
+        let key = "\(year)-\(month)"
+        if !force, let cached = billsCache[key] {
+            cardBills = cached
+            billTruncated = truncatedCache[key] ?? false
+            billsState = .loaded
+            return
+        }
+        if billsState == .loading { return }
+        billsState = .loading
+        do {
+            let result = try await withRecovery {
+                try await self.session.client.fetchCardBills(year: year, month: month)
+            }
+            billsCache[key] = result.bills
+            truncatedCache[key] = result.truncated
+            cardBills = result.bills
+            billTruncated = result.truncated
+            billsState = .loaded
+        } catch {
+            if billsCache[key] == nil {
+                billsState = .failed(NetworkError.from(error).message)
+            } else {
+                billsState = .loaded
+            }
+        }
+    }
+
+    /// 前后翻月（跨年自动进位）。
+    func shiftBillsMonth(_ delta: Int) async {
+        var month = billsMonth + delta
+        var year = billsYear
+        if month < 1 { month = 12; year -= 1 }
+        if month > 12 { month = 1; year += 1 }
+        await loadBills(year: year, month: month)
+    }
+
+    /// 按自然日聚合当前月流水（无流水日补 0，柱数 = 当月天数）。
+    func daySpends() -> [CardDaySpend] {
+        let cal = Calendar.current
+        var buckets: [Date: (spend: Double, recharge: Double, count: Int)] = [:]
+        for bill in cardBills {
+            guard let time = bill.time else { continue }
+            let day = cal.startOfDay(for: time)
+            var bucket = buckets[day] ?? (0, 0, 0)
+            if bill.amount < 0 {
+                bucket.spend += -bill.amount
+                bucket.count += 1
+            } else if bill.amount > 0 {
+                bucket.recharge += bill.amount
+            }
+            buckets[day] = bucket
+        }
+        guard let monthDate = cal.date(from: DateComponents(year: billsYear, month: billsMonth)),
+              let dayCount = cal.range(of: .day, in: .month, for: monthDate)?.count else { return [] }
+        var out: [CardDaySpend] = []
+        out.reserveCapacity(dayCount)
+        for day in 1...dayCount {
+            guard let date = cal.date(from: DateComponents(year: billsYear, month: billsMonth, day: day)) else { continue }
+            let bucket = buckets[cal.startOfDay(for: date)] ?? (0, 0, 0)
+            out.append(CardDaySpend(date: date, spend: bucket.spend, recharge: bucket.recharge, count: bucket.count))
+        }
+        return out
+    }
+
+    /// 当月消费合计。
+    var monthSpendTotal: Double {
+        daySpends().reduce(0) { $0 + $1.spend }
+    }
+
+    /// 首页一卡通入口卡片的摘要。
+    var cardSummaryText: String? {
+        guard let balance = cardBalance else { return nil }
+        return String(format: "%.2f", balance.balance)
     }
 }
 

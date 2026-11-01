@@ -3,7 +3,7 @@ import SwiftUI
 /// 服务大厅：全部校内应用 + 热搜词 + 本地即时过滤。
 struct ServicesView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var path: [URL] = []
+    @State private var path: [AppDestination] = []
     @State private var query = ""
 
     private var repo: PortalRepository {
@@ -25,6 +25,7 @@ struct ServicesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     searchField
+                    smartSearchCard
                     if query.isEmpty {
                         hotChips
                     }
@@ -41,8 +42,13 @@ struct ServicesView: View {
                 await repo.loadAppsIfNeeded()
                 await repo.loadHotSearchIfNeeded()
             }
-            .navigationDestination(for: URL.self) { url in
-                PortalWebViewScreen(url: url)
+            .navigationDestination(for: AppDestination.self) { dest in
+                switch dest {
+                case .web(let url):
+                    PortalWebViewScreen(url: url)
+                case .card:
+                    CardView()
+                }
             }
         }
     }
@@ -65,6 +71,41 @@ struct ServicesView: View {
         }
         .padding(12)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// 智慧搜索入口：一键跳转智搜平台全校搜索（SSO 免登录）。
+    private var smartSearchCard: some View {
+        Group {
+            if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button {
+                    let keyword = query.trimmingCharacters(in: .whitespaces)
+                    if let url = URL(string: "https://so.neu.edu.cn/#/accessLogin?searchWord=\(keyword.urlFormEncoded)") {
+                        path.append(.web(url))
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkle.magnifyingglass")
+                            .font(.title3)
+                            .foregroundStyle(AppTheme.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("在智搜平台全校搜索")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.primary)
+                            Text("「\(query.trimmingCharacters(in: .whitespaces))」")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var hotChips: some View {
@@ -133,6 +174,6 @@ struct ServicesView: View {
     private func open(_ app: PortalApp) {
         let entry = app.entryUrl()
         guard !entry.isEmpty, let url = URL(string: entry) else { return }
-        path.append(url)
+        path.append(.web(url))
     }
 }

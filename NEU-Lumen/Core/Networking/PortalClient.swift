@@ -9,6 +9,89 @@ final class PortalClient {
 
     private let http = HTTPClient()
 
+    // MARK: - 校园网 / WebVPN
+
+    /// WebVPN 模式开启后，校内主机的重定向与请求都会改写为网关地址。
+    private(set) var webvpnOn = false
+    private var campusProbe: (date: Date, isCampus: Bool)?
+
+    init() {
+        http.redirectRewriter = { [weak self] url in
+            guard let self,
+                  self.webvpnOn,
+                  WebVPN.isIntranet(url.absoluteString),
+                  !WebVPN.isWrapped(url.absoluteString) else { return nil }
+            return URL(string: WebVPN.wrap(url.absoluteString))
+        }
+    }
+
+    /// 是否校园网：ecard:80 或 jwxt:443 任一可达（结果缓存 10 分钟）。
+    func isCampusNet() async -> Bool {
+        if let probe = campusProbe, Date().timeIntervalSince(probe.date) < 600 {
+            return probe.isCampus
+        }
+        let ok = await quickReachable("http://ecard.neu.edu.cn/")
+            || await quickReachable("https://jwxt.neu.edu.cn/")
+        campusProbe = (Date(), ok)
+        if ok { webvpnOn = false }
+        return ok
+    }
+
+    private func quickReachable(_ url: String) async -> Bool {
+        guard let requestURL = URL(string: url) else { return false }
+        var request = URLRequest(url: requestURL, timeoutInterval: 2.5)
+        do {
+            _ = try await http.send(request, maxHops: 1)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// 用一号通 CASTGC 给 WebVPN 网关换票（必须走公网 pass，不能先开 webvpn 首页）。
+    @discardableResult
+    func ensureWebVPN() async -> Bool {
+        if webvpnOn && http.cookies.hasWebVPNTicket() { return true }
+        for _ in 0..<2 {
+            let login = "https://pass.neu.edu.cn/tpass/login?service=\(WebVPN.casService.urlFormEncoded)"
+            if let url = URL(string: login),
+               let resp = try? await http.get(url) {
+                let landed = resp.finalURL.absoluteString
+                if http.cookies.hasWebVPNTicket()
+                    || (landed.contains("webvpn.neu.edu.cn") && !landed.contains("tpass/login")) {
+                    webvpnOn = true
+                    return true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        return false
+    }
+
+    /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
+    func prepareAccess() async {
+        if await isCampusNet() { return }
+        _ = await ensureWebVPN()
+    }
+
+    private func maybeWrap(_ url: String) -> String {
+        (webvpnOn && WebVPN.isIntranet(url)) ? WebVPN.wrap(url) : url
+    }
+
+    /// 用 CASTGC 给指定 service 换 ST 并跟随到业务系统（停留在 CAS 登录页视为会话失效）。
+    private func casLand(_ service: String) async throws -> HTTPClient.RawResponse {
+        let login = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
+        guard let url = URL(string: login) else {
+            throw NetworkError(message: "认证地址无效")
+        }
+        let resp = try await http.get(url)
+        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
+            || resp.finalURL.path.contains("/tpass/login") {
+            throw NetworkError.sessionExpired()
+        }
+        return resp
+    }
+
     // 正则只编译一次。
     private static let ltRegex = try! NSRegularExpression(pattern: #"name="lt"\s+value="([^"]+)""#)
     private static let executionRegex = try! NSRegularExpression(pattern: #"name="execution"\s+value="([^"]+)""#)
@@ -335,16 +418,18 @@ final class PortalClient {
     // MARK: - 教务系统（金智 jwapp）真实成绩
 
     /// 跟随重定向 SSO 进入教务系统（CASTGC 被 CAS 识别，建立 jwapp 会话）。
-    /// 注意：教务的 302 会跳 http:// 明文地址（ATS 例外已在 Info.plist 放开），与 Flutter 版行为一致。
+    /// 注意：教务的 302 会跳 http:// 明文地址（ATS 例外已在 Info.plist 放开）；
+    /// 校外直连不通时自动经 WebVPN 网关改写。
     private func jwxtSSO() async throws {
-        _ = try await http.get(URL(string: Self.jwxtBase + "/")!)
+        await prepareAccess()
+        _ = try await http.get(URL(string: maybeWrap(Self.jwxtBase + "/"))!)
     }
 
     private static let jwxtHeaders = ["Fetch-Api": "true"]
 
     /// jwapp JSON 接口：若被重定向回 CAS 登录页说明会话未建立，抛会话失效以触发静默重登。
     private func jwxtGet(_ urlString: String) async throws -> Any {
-        let resp = try await http.get(URL(string: urlString)!, extraHeaders: Self.jwxtHeaders)
+        let resp = try await http.get(URL(string: maybeWrap(urlString))!, extraHeaders: Self.jwxtHeaders)
         if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
             || resp.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
@@ -393,6 +478,455 @@ final class PortalClient {
             throw NetworkError(message: "未获取到成绩数据")
         }
         return out
+    }
+
+    // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
+
+    static let serviceCard = "http://ecard.neu.edu.cn/selflogin/login.aspx"
+    static let servicePay = "https://pay.neu.edu.cn/drCasLogin"
+    static let servicePortalTP = "https://portal.neu.edu.cn/tp_up/"
+
+    private static let ecardBase = "http://ecard.neu.edu.cn"
+
+    /// 一卡通余额：CAS 换票 → ecard 自动提交表单 → baseinfo 页解析输入框。
+    func fetchCardBalance() async throws -> CardBalance {
+        await prepareAccess()
+        let resp = try await casLand(Self.serviceCard)
+        let ssoHTML = resp.text
+        if ssoHTML.contains("username") && ssoHTML.contains("auid") {
+            let form = Self.inputValuesByName(ssoHTML, names: ["username", "timestamp", "auid"])
+            if let url = URL(string: maybeWrap(Self.ecardBase + "/selfsearch/SSOLogin.aspx")) {
+                _ = try? await http.postForm(url, fields: form)
+            }
+        }
+        let page = try await ecardGet("/selfsearch/User/baseinfo.aspx")
+        guard let odd = Self.inputValue(page, id: "ContentPlaceHolder1_txtOddFare")
+            ?? Self.inputValue(page, name: "ctl00$ContentPlaceHolder1$txtOddFare") else {
+            throw NetworkError(message: "一卡通页面上没有主钱包余额")
+        }
+        let subsidyValue = Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddFare")
+            ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddfare")
+            ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSubsidy")
+        let status = Self.inputValue(page, id: "ContentPlaceHolder1_txtStatus") ?? "正常"
+        return CardBalance(
+            balance: Self.parseMoney(odd),
+            subsidy: subsidyValue.map(Self.parseMoney) ?? 0,
+            status: status
+        )
+    }
+
+    /// 某自然月的一卡通流水（单月最多 10 页，超出返回 truncated）。
+    func fetchCardBills(year: Int, month: Int) async throws -> (bills: [CardBill], truncated: Bool) {
+        _ = try? await fetchCardBalance() // 建立 ecard 会话（失败则复用现有会话）
+        var html = try await ecardGet("/selfsearch/User/ConsumeInfo.aspx")
+
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: Date())
+        let lastDay = Self.daysInMonth(year: year, month: month)
+        let start = String(format: "%04d-%02d-01", year, month)
+        let end: String
+        if comps.year == year && comps.month == month {
+            end = String(format: "%04d-%02d-%02d", year, month, comps.day ?? lastDay)
+        } else {
+            end = String(format: "%04d-%02d-%02d", year, month, lastDay)
+        }
+
+        var fields = Self.hiddenFields(html)
+        fields["ctl00$ContentPlaceHolder1$rbtnType"] = "0"
+        fields["ctl00$ContentPlaceHolder1$txtStartDate"] = start
+        fields["ctl00$ContentPlaceHolder1$txtEndDate"] = end
+        fields["ctl00$ContentPlaceHolder1$btnSearch"] = "查  询"
+
+        var response = try await postToEcard("/selfsearch/User/ConsumeInfo.aspx", fields)
+        html = response.text
+        var bills = Self.parseBillTable(html)
+        var truncated = false
+
+        for page in 2...10 {
+            guard html.contains("AspNetPager"), Self.hasNextPage(html, page) else { break }
+            var pageFields = Self.hiddenFields(html)
+            pageFields["__EVENTTARGET"] = "ctl00$ContentPlaceHolder1$AspNetPager1"
+            pageFields["__EVENTARGUMENT"] = "\(page)"
+            response = try await postToEcard("/selfsearch/User/ConsumeInfo.aspx", pageFields)
+            html = response.text
+            let more = Self.parseBillTable(html)
+            if more.isEmpty { break }
+            bills.append(contentsOf: more)
+            if page == 10 && Self.hasNextPage(html, 11) { truncated = true }
+        }
+        return (bills, truncated)
+    }
+
+    /// 网费：门户用量 JSON + 缴费大厅余额（两路对拍，余额优先取缴费大厅）。
+    func fetchNetInfo(sid: String) async throws -> NetUsageInfo {
+        var balance: Double?
+        var bytes: Int64?
+        var seconds: Int64?
+        var times: Int64?
+        var lastError = "网费查询失败"
+        for attempt in 0..<2 {
+            do {
+                if let value = try await portalWlzz() {
+                    balance = Self.findDouble(value, keys: ["user_balance", "userBalance", "balance"])
+                    bytes = Self.findInt(value, keys: ["sum_bytes", "sumBytes", "SUM_BYTES", "used_bytes", "usedBytes", "usedFlow", "used_flow"])
+                    seconds = Self.findInt(value, keys: ["sum_seconds", "sumSeconds", "SUM_SECONDS"])
+                    times = Self.findInt(value, keys: ["sum_times", "sumTimes", "SUM_TIMES"])
+                    if bytes != nil { break }
+                    lastError = "门户网费没有流量字段"
+                } else {
+                    lastError = "门户网费还停在登录页"
+                }
+            } catch let e as NetworkError {
+                lastError = e.message
+                if e.message.contains("访问被拒绝") { break }
+            } catch {
+                lastError = error.localizedDescription
+            }
+            if attempt == 0 { try? await Task.sleep(nanoseconds: 500_000_000) }
+        }
+        do {
+            _ = try await casLand(Self.servicePay)
+        } catch let e as NetworkError where e.isSessionExpired {
+            throw e
+        } catch {}
+        if let url = URL(string: "https://pay.neu.edu.cn/queryNetAccBalance") {
+            let resp = try? await http.postForm(url, fields: [
+                "netNo": sid,
+                "netType": "1",
+                "factorycode": "N005",
+            ])
+            if let resp, let json = try? http.json(resp) as? [String: Any] {
+                balance = json.dbl("netaccbal") ?? balance
+            }
+        }
+        guard let finalBalance = balance else { throw NetworkError(message: lastError) }
+        return NetUsageInfo(
+            balance: finalBalance,
+            monthBytes: bytes ?? 0,
+            monthSeconds: seconds ?? 0,
+            monthTimes: times ?? 0,
+            flowFromPortal: bytes != nil
+        )
+    }
+
+    /// 电费：缴费大厅 queryRommInfo，房间码为宿舍 3 位 + 寝室 4 位。
+    func fetchElectric(room rawRoom: String) async throws -> ElectricInfo {
+        let room = rawRoom.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        if room.isEmpty {
+            return ElectricInfo(unbound: true, remainKwh: nil, roomNo: nil, roomLabel: nil, lastReadAt: nil)
+        }
+        do {
+            _ = try await casLand(Self.servicePay)
+        } catch let e as NetworkError where e.isSessionExpired {
+            throw e
+        } catch {}
+        if let url = URL(string: "https://pay.neu.edu.cn/checkProCouldPay") {
+            _ = try? await http.postForm(url, fields: ["id": "414"])
+        }
+        guard let queryURL = URL(string: "https://pay.neu.edu.cn/queryRommInfo") else {
+            throw NetworkError(message: "查电费失败")
+        }
+        let resp = try await http.postForm(queryURL, fields: [
+            "elecroomno": room,
+            "factorycode": "E039",
+        ])
+        let text = resp.text
+        guard let json = try? http.json(resp) as? [String: Any] else {
+            if text.contains("维护") { throw NetworkError(message: "电费系统维护中，请稍后再试") }
+            throw NetworkError(message: "查电费失败")
+        }
+        guard json.str("returncode") == "SUCCESS" else {
+            let msg = json.str("returnmsg")
+            throw NetworkError(message: msg.isEmpty ? "查电费失败" : msg)
+        }
+        let remainText = json.str("elecRemain")
+        guard remainText.contains(where: { $0.isNumber }), let remain = Self.parseMoneyLoose(remainText) else {
+            throw NetworkError(message: "电费余量暂时读不到")
+        }
+        return ElectricInfo(
+            unbound: false,
+            remainKwh: remain,
+            roomNo: room,
+            roomLabel: json.str("elecroominfo"),
+            lastReadAt: json.str("lastReadTime")
+        )
+    }
+
+    // MARK: - 一卡通 / 缴费大厅辅助
+
+    private func ecardGet(_ path: String) async throws -> String {
+        guard let url = URL(string: maybeWrap(Self.ecardBase + path)) else {
+            throw NetworkError(message: "一卡通地址无效")
+        }
+        let resp = try await http.get(url)
+        if Self.isSessionLostHTML(resp.text) {
+            throw NetworkError(message: "一卡通会话未建立，请重试（校外需走 WebVPN）")
+        }
+        return resp.text
+    }
+
+    private func postToEcard(_ path: String, _ fields: [String: String]) async throws -> HTTPClient.RawResponse {
+        guard let url = URL(string: maybeWrap(Self.ecardBase + path)) else {
+            throw NetworkError(message: "一卡通地址无效")
+        }
+        return try await http.postForm(url, fields: fields)
+    }
+
+    /// 门户 tp_up 网费用量：先种会话再 POST。返回 nil 表示还停在登录页。
+    private func portalWlzz() async throws -> Any? {
+        do {
+            _ = try await casLand(Self.servicePortalTP)
+        } catch let e as NetworkError where e.message.contains("访问被拒绝") {
+            throw e
+        } catch {}
+        _ = try? await http.get(URL(string: "https://portal.neu.edu.cn/tp_up/view?m=up")!)
+        guard let url = URL(string: "https://portal.neu.edu.cn/tp_up/up/subgroup/getWlzzList") else { return nil }
+        var request = URLRequest(url: url, timeoutInterval: HTTPClient.timeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://portal.neu.edu.cn/tp_up/view?m=up", forHTTPHeaderField: "Referer")
+        request.setValue("https://portal.neu.edu.cn", forHTTPHeaderField: "Origin")
+        request.httpBody = Data("{}".utf8)
+        let resp = try await http.send(request)
+        let text = resp.text
+        if Self.isAccessDeniedHTML(text) {
+            throw NetworkError(message: "一号通访问被拒绝：当前网络被拦截，请换校园网或关闭代理后重试")
+        }
+        if Self.isSessionLostHTML(text) || text.contains("tpass/login") { return nil }
+        return try? http.json(resp)
+    }
+
+    private static func isSessionLostHTML(_ html: String) -> Bool {
+        html.contains("当前设备需进行身份验证")
+            || html.contains("second_auth_form")
+            || (html.contains("id=\"un\"") && html.contains("id=\"pd\"") && html.contains("index_login_btn"))
+    }
+
+    private static func isAccessDeniedHTML(_ html: String) -> Bool {
+        html.contains("访问被拒绝") || html.contains("Access Denied") || html.contains("403 Forbidden")
+            || html.contains("请求被拒绝") || html.contains("您的访问被拦截") || html.contains("非法访问")
+    }
+
+    static func daysInMonth(year: Int, month: Int) -> Int {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = 1
+        guard let first = Calendar.current.date(from: comps),
+              let range = Calendar.current.range(of: .day, in: .month, for: first) else { return 30 }
+        return range.count
+    }
+
+    // MARK: - 一卡通 HTML 解析（ASP.NET 页面，容错优先）
+
+    private static let inputTagRegex = try! NSRegularExpression(pattern: #"<input\b[^>]*>"#, options: [.caseInsensitive])
+    private static let attrNameRegex = try! NSRegularExpression(pattern: #"\bname\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
+    private static let attrValueRegex = try! NSRegularExpression(pattern: #"\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
+    private static let attrIDRegex = try! NSRegularExpression(pattern: #"\bid\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
+    private static let attrHiddenRegex = try! NSRegularExpression(pattern: #"\btype\s*=\s*(?:"hidden"|'hidden'|hidden\b)"#, options: [.caseInsensitive])
+    private static let trRegex = try! NSRegularExpression(pattern: #"<tr\b[^>]*>[\s\S]*?</tr>"#, options: [.caseInsensitive])
+    private static let tdRegex = try! NSRegularExpression(pattern: #"<td\b[^>]*>[\s\S]*?</td>"#, options: [.caseInsensitive])
+    private static let tagStripRegex = try! NSRegularExpression(pattern: #"<[^>]*>"#)
+    private static let billDateRegex = try! NSRegularExpression(pattern: #"\d{4}[-/]\d{1,2}[-/]\d{1,2}"#)
+    private static let junkDateSubjectRegex = try! NSRegularExpression(pattern: #"^\d{4}\s*[-/年.]\s*\d{1,2}\s*[-/月.]\s*\d{1,2}"#)
+    private static let numberRegex = try! NSRegularExpression(pattern: #"[0-9]+(?:\.[0-9]+)?"#)
+
+    private static func attr(_ tag: String, _ regex: NSRegularExpression) -> String? {
+        guard let m = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
+              m.numberOfRanges > 1,
+              let r = Range(m.range(at: 1), in: tag) else { return nil }
+        return String(tag[r])
+    }
+
+    private static func inputTags(_ html: String) -> [[String: String]] {
+        let range = NSRange(html.startIndex..., in: html)
+        let matches = inputTagRegex.matches(in: html, range: range)
+        var out: [[String: String]] = []
+        out.reserveCapacity(matches.count)
+        for m in matches {
+            guard let tagRange = Range(m.range, in: html) else { continue }
+            let tag = String(html[tagRange])
+            var attrs: [String: String] = [:]
+            attrs["name"] = attr(tag, attrNameRegex)
+            attrs["value"] = attr(tag, attrValueRegex)
+            attrs["id"] = attr(tag, attrIDRegex)
+            attrs["hidden"] = attr(tag, attrHiddenRegex) != nil ? "1" : "0"
+            out.append(attrs)
+        }
+        return out
+    }
+
+    /// type=hidden 输入框：name -> value（ASP.NET 回发必需）。
+    private static func hiddenFields(_ html: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for attrs in inputTags(html) where attrs["hidden"] == "1" {
+            if let name = attrs["name"], !name.isEmpty {
+                out[name] = attrs["value"] ?? ""
+            }
+        }
+        return out
+    }
+
+    private static func inputValue(_ html: String, id: String) -> String? {
+        let value = inputTags(html).first { $0["id"] == id }?["value"]
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    private static func inputValue(_ html: String, name: String) -> String? {
+        let value = inputTags(html).first { $0["name"] == name }?["value"]
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    private static func inputValuesByName(_ html: String, names: [String]) -> [String: String] {
+        var out: [String: String] = [:]
+        for attrs in inputTags(html) {
+            if let name = attrs["name"], names.contains(name) {
+                out[name] = attrs["value"] ?? ""
+            }
+        }
+        return out
+    }
+
+    private static func parseMoney(_ raw: String) -> Double {
+        let cleaned = raw
+            .replacingOccurrences(of: "元", with: "")
+            .replacingOccurrences(of: "￥", with: "")
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(cleaned) ?? 0
+    }
+
+    private static func parseMoneyLoose(_ raw: String) -> Double? {
+        guard let m = numberRegex.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)),
+              let r = Range(m.range, in: raw) else { return nil }
+        return Double(String(raw[r]))
+    }
+
+    private static func hasNextPage(_ html: String, _ page: Int) -> Bool {
+        html.contains("'\(page)'") || html.contains(">\(page)<")
+    }
+
+    private static func decodeEntities(_ text: String) -> String {
+        var s = text
+        s = s.replacingOccurrences(of: "&nbsp;", with: " ")
+        s = s.replacingOccurrences(of: "&amp;", with: "&")
+        s = s.replacingOccurrences(of: "&lt;", with: "<")
+        s = s.replacingOccurrences(of: "&gt;", with: ">")
+        s = s.replacingOccurrences(of: "&quot;", with: "\"")
+        s = s.replacingOccurrences(of: "&#39;", with: "'")
+        return s
+    }
+
+    private static func cellText(_ html: String, _ range: Range<String.Index>) -> String {
+        let stripped = tagStripRegex.stringByReplacingMatches(
+            in: html,
+            range: NSRange(range, in: html),
+            withTemplate: ""
+        )
+        return decodeEntities(stripped).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isJunkSubject(_ subject: String) -> Bool {
+        let s = subject.trimmingCharacters(in: .whitespaces)
+        if s.isEmpty { return false }
+        if s.contains("物联网采集") { return true }
+        return junkDateSubjectRegex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+
+    private static func parseBillTable(_ html: String) -> [CardBill] {
+        var out: [CardBill] = []
+        for m in trRegex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            guard let rowRange = Range(m.range, in: html) else { continue }
+            let cells = tdRegex
+                .matches(in: html, range: NSRange(rowRange, in: html))
+                .compactMap { tm in Range(tm.range, in: html).map { cellText(html, $0) } }
+            guard cells.count >= 5 else { continue }
+            let timeText = cells[0]
+            guard billDateRegex.firstMatch(in: timeText, range: NSRange(timeText.startIndex..., in: timeText)) != nil else {
+                continue
+            }
+            let subject = cells[1]
+            guard !isJunkSubject(subject) else { continue }
+            var amount = parseMoney(cells[2])
+            let station = cells.count > 7 ? cells[7] : (cells.count > 6 ? cells[6] : "")
+            if abs(amount) < 0.005 && station.contains("物联网采集") { continue }
+            let isRecharge = subject.contains("充值") || subject.contains("转账") || subject.contains("补助")
+            if amount > 0 && !isRecharge { amount = -amount }
+            if amount < 0 && isRecharge { amount = abs(amount) }
+            let fee = parseMoney(cells[3])
+            let balanceAfter = parseMoney(cells[4])
+            let time = PortalDate.dateTime(normalizeBillTime(timeText))
+            out.append(CardBill(
+                time: time,
+                timeText: timeText,
+                subject: subject,
+                amount: amount,
+                fee: fee,
+                balanceAfter: balanceAfter,
+                station: station
+            ))
+        }
+        return out
+    }
+
+    /// 「2026/9/8 12:30」「2026年9月8日 12:30」等 → 「2026-09-08 12:30:00」。
+    private static let billTimeRegex = try! NSRegularExpression(pattern: #"(\d{4})-(\d{1,2})-(\d{1,2})(?:[^0-9]{0,4}(\d{1,2}):(\d{2})(?::(\d{2}))?)?"#)
+
+    private static func normalizeBillTime(_ raw: String) -> String {
+        let replaced = raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "年", with: "-")
+            .replacingOccurrences(of: "月", with: "-")
+            .replacingOccurrences(of: "日", with: " ")
+        guard let cm = billTimeRegex.firstMatch(in: replaced, range: NSRange(replaced.startIndex..., in: replaced)),
+              cm.numberOfRanges >= 4,
+              let yr = Range(cm.range(at: 1), in: replaced),
+              let mr = Range(cm.range(at: 2), in: replaced),
+              let dr = Range(cm.range(at: 3), in: replaced) else {
+            return String(replaced.prefix(32))
+        }
+        func pad(_ s: String) -> String { s.count == 1 ? "0" + s : s }
+        let y = String(replaced[yr])
+        let mo = pad(String(replaced[mr]))
+        let d = pad(String(replaced[dr]))
+        let hh = cm.range(at: 4).location != NSNotFound ? pad(String(replaced[Range(cm.range(at: 4), in: replaced)!])) : "00"
+        let mi = cm.range(at: 5).location != NSNotFound ? pad(String(replaced[Range(cm.range(at: 5), in: replaced)!])) : "00"
+        let ss = cm.range(at: 6).location != NSNotFound ? pad(String(replaced[Range(cm.range(at: 6), in: replaced)!])) : "00"
+        return "\(y)-\(mo)-\(d) \(hh):\(mi):\(ss)"
+    }
+
+    private static func numberFrom(_ v: Any) -> Double? {
+        if let n = v as? NSNumber { return n.doubleValue }
+        if let s = v as? String {
+            return Double(s.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ""))
+        }
+        return nil
+    }
+
+    private static func findValue(_ value: Any, keys: [String]) -> Any? {
+        if let map = value as? [String: Any] {
+            for k in keys {
+                if let v = map[k], !(v is NSNull) { return v }
+            }
+            for v in map.values {
+                if let found = findValue(v, keys: keys) { return found }
+            }
+        } else if let arr = value as? [Any] {
+            for v in arr {
+                if let found = findValue(v, keys: keys) { return found }
+            }
+        }
+        return nil
+    }
+
+    private static func findDouble(_ value: Any, keys: [String]) -> Double? {
+        findValue(value, keys: keys).flatMap(numberFrom)
+    }
+
+    private static func findInt(_ value: Any, keys: [String]) -> Int64? {
+        findValue(value, keys: keys).flatMap { numberFrom($0).map { Int64($0) } }
     }
 
     // MARK: - HTML 解析

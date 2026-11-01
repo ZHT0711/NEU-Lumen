@@ -121,21 +121,27 @@ struct LoginView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 84, height: 84)
-                Image(systemName: "sun.max.fill")
-                    .font(.system(size: 38, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .frame(width: 92, height: 92)
+                Image("NEUEmblem")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 58, height: 58)
             }
-            VStack(spacing: 4) {
+            VStack(spacing: 5) {
                 Text("NEU-Lumen")
                     .font(.title.bold())
                 Text("东北大学一号通门户 · 原生 iOS 客户端")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                Image("NEUMotto")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 30)
+                    .accessibilityLabel("校训：知行合一")
             }
         }
         .padding(.bottom, 8)

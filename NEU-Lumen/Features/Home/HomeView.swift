@@ -3,7 +3,7 @@ import SwiftUI
 /// 首页仪表盘：问候、数据条、下一节课、今日时间轴、常用应用、办事动态、校园资讯。
 struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var path: [URL] = []
+    @State private var path: [AppDestination] = []
 
     private var repo: PortalRepository {
         environment.repository
@@ -17,6 +17,7 @@ struct HomeView: View {
                         offlineBanner
                     }
                     nextClassBanner
+                    cardEntrySection
                     dataCardsSection
                     todaySection
                     quickAppsSection
@@ -51,8 +52,13 @@ struct HomeView: View {
                 }
                 await repo.loadWeek(containing: Date())
             }
-            .navigationDestination(for: URL.self) { url in
-                PortalWebViewScreen(url: url)
+            .navigationDestination(for: AppDestination.self) { dest in
+                switch dest {
+                case .web(let url):
+                    PortalWebViewScreen(url: url)
+                case .card:
+                    CardView()
+                }
             }
         }
     }
@@ -196,7 +202,7 @@ struct HomeView: View {
                     ForEach(repo.todos) { todo in
                         Button {
                             if let url = URL(string: withScheme(todo.url)) {
-                                path.append(url)
+                                path.append(.web(url))
                             }
                         } label: {
                             GlassCard(cornerRadius: 16) {
@@ -244,7 +250,7 @@ struct HomeView: View {
                         ForEach(Array(repo.news.enumerated()), id: \.element.id) { index, item in
                             Button {
                                 if let url = URL(string: withScheme(item.url)) {
-                                    path.append(url)
+                                    path.append(.web(url))
                                 }
                             } label: {
                                 NewsRow(item: item)
@@ -257,6 +263,56 @@ struct HomeView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var cardEntrySection: some View {
+        Button {
+            path.append(.card)
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(LinearGradient(colors: [AppTheme.accent, AppTheme.accentDeep], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "creditcard.fill")
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                }
+                .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("校园卡")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.primary)
+                    Text(cardEntrySubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var cardEntrySubtitle: String {
+        switch repo.cardState {
+        case .loaded:
+            var parts: [String] = []
+            if let balance = repo.cardBalance {
+                parts.append("余额 \(String(format: "%.2f", balance.balance)) 元")
+            }
+            if let net = repo.netInfo, net.flowFromPortal {
+                parts.append("网费 \(String(format: "%.2f", net.balance)) 元")
+            }
+            return parts.isEmpty ? "查看余额与流水" : parts.joined(separator: " · ")
+        case .loading:
+            return "正在同步…"
+        default:
+            return "查看余额、流水、网费与电费"
         }
     }
 
@@ -273,7 +329,7 @@ struct HomeView: View {
     private func open(_ app: PortalApp) {
         let entry = app.entryUrl()
         guard !entry.isEmpty, let url = URL(string: entry) else { return }
-        path.append(url)
+        path.append(.web(url))
     }
 }
 
