@@ -9,6 +9,7 @@ struct PortalWebViewScreen: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var browser = PortalBrowser()
     @State private var syncError: String?
 
@@ -30,6 +31,7 @@ struct PortalWebViewScreen: View {
                     .frame(height: 2)
             }
             PortalWebView(browser: browser)
+                .ignoresSafeArea(.container, edges: .bottom)
                 .overlay {
                     if let error = browser.error {
                         ErrorStateView(message: error, retryTitle: "重新加载") { browser.reload() }
@@ -73,9 +75,25 @@ struct PortalWebViewScreen: View {
                 ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                if academicMode {
+        .overlay(alignment: .bottom) { floatingControls }
+        .onPreferenceChange(BrowserControlsHeightKey.self) { height in
+            Task { @MainActor in
+                browser.webView.scrollView.contentInset.bottom = height + 12
+                browser.webView.scrollView.verticalScrollIndicatorInsets.bottom = height + 12
+            }
+        }
+        .sheet(item: $browser.sharedFile) { file in
+            BrowserShareSheet(url: file.url)
+                .presentationDetents([.medium, .large])
+        }
+        .task { await browser.start(url, client: environment.session.client) }
+        .onDisappear { browser.webView.stopLoading() }
+    }
+
+    private var floatingControls: some View {
+        VStack(spacing: 10) {
+            if academicMode {
+                GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(syncError ?? "进入教务学生首页后，将网页中的成绩同步到应用。")
                             .font(.caption).foregroundStyle(syncError == nil ? Color.secondary : Color.orange)
@@ -96,39 +114,64 @@ struct PortalWebViewScreen: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.accent)
                         .disabled(browser.isSyncing || browser.isLoading)
                     }
                     .padding(12)
                 }
-                HStack {
-                    toolButton("后退", icon: "chevron.left", disabled: !browser.canGoBack) { browser.webView.goBack() }
-                    Spacer(minLength: 0)
-                    toolButton("前进", icon: "chevron.right", disabled: !browser.canGoForward) { browser.webView.goForward() }
-                    Spacer(minLength: 0)
-                    toolButton(browser.isLoading ? "停止" : "刷新", icon: browser.isLoading ? "xmark" : "arrow.clockwise") {
-                        if browser.isLoading { browser.webView.stopLoading() } else { browser.reload() }
-                    }
-                    Spacer(minLength: 0)
-                    ShareLink(item: browser.currentURL ?? url) {
-                        Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("分享当前网页")
-                }
-                .padding(.horizontal, 18)
             }
-            .background(.bar)
+            HStack {
+                toolButton("后退", icon: "chevron.left", disabled: !browser.canGoBack) { browser.webView.goBack() }
+                Spacer(minLength: 0)
+                toolButton("前进", icon: "chevron.right", disabled: !browser.canGoForward) { browser.webView.goForward() }
+                Spacer(minLength: 0)
+                toolButton(browser.isLoading ? "停止" : "刷新", icon: browser.isLoading ? "xmark" : "arrow.clockwise") {
+                    if browser.isLoading { browser.webView.stopLoading() } else { browser.reload() }
+                }
+                Spacer(minLength: 0)
+                ShareLink(item: browser.currentURL ?? url) {
+                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("分享当前网页")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 56)
+            .modifier(BrowserCapsuleStyle())
         }
-        .sheet(item: $browser.sharedFile) { file in
-            BrowserShareSheet(url: file.url)
-                .presentationDetents([.medium, .large])
+        .padding(.horizontal, 22)
+        .padding(.bottom, 12)
+        .tint(colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: BrowserControlsHeightKey.self, value: geometry.size.height)
+            }
         }
-        .task { await browser.start(url, client: environment.session.client) }
-        .onDisappear { browser.webView.stopLoading() }
     }
 
     private func toolButton(_ title: String, icon: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44) }
             .disabled(disabled).accessibilityLabel(title)
+    }
+}
+
+private struct BrowserControlsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct BrowserCapsuleStyle: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular.interactive(), in: Capsule())
+                .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
+        } else {
+            content
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                .shadow(color: .black.opacity(0.10), radius: 14, y: 6)
+        }
     }
 }
 

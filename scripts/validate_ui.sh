@@ -34,6 +34,9 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/browser-light.png"
+xcrun simctl ui "$SIM_ID" appearance dark
+sleep 2
+xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/browser-dark.png"
 cp "$CONTAINER/Documents/browser-checks.txt" "$OUTPUT/browser-checks.txt"
 cat "$OUTPUT/browser-checks.txt"
 grep -q "^PASS:" "$OUTPUT/browser-checks.txt"
