@@ -11,6 +11,18 @@ xcrun simctl bootstatus "$SIM_ID" -b
 xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
   -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID" \
   -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO > "$OUTPUT/simulator-build.log" 2>&1
+# Keychain requires an application identity even in the simulator. The release
+# IPA is signed by the installer; give this disposable simulator build its own.
+cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>edu.neu.lumen</string>
+<key>keychain-access-groups</key><array><string>edu.neu.lumen</string></array>
+</dict></plist>
+PLIST
+codesign --force --sign - --entitlements "$PREVIEW/simulator.entitlements" \
+  "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
 xcrun simctl install "$SIM_ID" "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
 python3 -m http.server 8787 --bind 127.0.0.1 --directory "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
