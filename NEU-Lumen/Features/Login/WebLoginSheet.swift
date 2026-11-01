@@ -4,16 +4,21 @@ import WebKit
 /// 网页方式登录：在真实浏览器页面完成统一认证
 /// （学校的 JS 风控、设备信任、短信二次认证全部由学校页面自己处理），
 /// 成功抵达门户后把会话 Cookie 吸收回 App，等效于登录完成。
+///
+/// 使用一次性（nonPersistent）Cookie 存储：每次打开都是干净的认证页，
+/// 不会被残留的旧票据带进自动跳转；登录失败时面板保持打开可重试。
 struct WebLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
-    var onCookies: ([HTTPCookie]) -> Void
+    @Environment(AppEnvironment.self) private var environment
+    var onCookies: ([HTTPCookie]) async -> Bool
 
     var body: some View {
         NavigationStack {
-            WebLoginWebView(onPortalLanding: { cookies in
-                onCookies(cookies)
-                dismiss()
-            })
+            WebLoginWebView { cookies in
+                let ok = await onCookies(cookies)
+                if ok { dismiss() }
+                // 失败时保持面板打开：页面内可重试，或左上角取消
+            }
             .ignoresSafeArea(edges: .bottom)
             .navigationTitle("统一身份认证")
             .navigationBarTitleDisplayMode(.inline)
@@ -22,16 +27,29 @@ struct WebLoginSheet: View {
                     Button("取消") { dismiss() }
                 }
             }
+            .safeAreaInset(edge: .top) {
+                if let error = environment.session.lastError, environment.session.phase == .loggingIn {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.ultraThinMaterial)
+                }
+            }
         }
     }
 }
 
 struct WebLoginWebView: UIViewRepresentable {
-    var onPortalLanding: ([HTTPCookie]) -> Void
+    var onPortalLanding: ([HTTPCookie]) async -> Bool
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = WKWebsiteDataStore.default()
+        // 一次性存储：每次网页登录从干净的认证页开始，避免残留票据引起瞬时跳转
+        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.onPortalLanding = onPortalLanding
@@ -47,7 +65,7 @@ struct WebLoginWebView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var onPortalLanding: (([HTTPCookie]) -> Void)?
+        var onPortalLanding: (([HTTPCookie]) async -> Bool)?
         private var completed = false
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -64,8 +82,8 @@ struct WebLoginWebView: UIViewRepresentable {
             let store = webView.configuration.websiteDataStore.httpCookieStore
             store.getAllCookies { [weak self] cookies in
                 Task { @MainActor in
-                    self?.onPortalLanding?(cookies)
-                    self?.onPortalLanding = nil
+                    guard let self, let handler = self.onPortalLanding else { return }
+                    _ = await handler(cookies)
                 }
             }
         }

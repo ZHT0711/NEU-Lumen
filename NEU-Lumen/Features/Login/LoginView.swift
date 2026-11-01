@@ -60,9 +60,7 @@ struct LoginView: View {
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showWebLogin) {
             WebLoginSheet { cookies in
-                Task {
-                    await environment.session.completeWebLogin(cookies: cookies)
-                }
+                await environment.session.completeWebLogin(cookies: cookies)
             }
         }
         .task {
