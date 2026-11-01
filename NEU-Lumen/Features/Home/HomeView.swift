@@ -3,9 +3,14 @@ import SwiftUI
 /// 首页仪表盘：问候、数据条、下一节课、今日时间轴、常用应用、办事动态、校园资讯。
 struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var selection: AppTab
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 72
     @State private var path: [AppDestination] = []
+
+    private var campusInk: Color {
+        colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
+    }
 
     private var repo: PortalRepository {
         environment.repository
@@ -44,7 +49,7 @@ struct HomeView: View {
                         .frame(height: 340)
                         .overlay(alignment: .topTrailing) {
                             CampusLineArt()
-                                .stroke(AppTheme.accent.opacity(0.045), lineWidth: 1)
+                                .stroke(campusInk.opacity(0.045), lineWidth: 1)
                                 .frame(width: 360, height: 240)
                                 .offset(x: 70, y: 120)
                                 .accessibilityHidden(true)
@@ -84,6 +89,7 @@ struct HomeView: View {
                 }
             }
         }
+        .tint(campusInk)
     }
 
     // MARK: - 区块
@@ -108,7 +114,7 @@ struct HomeView: View {
                         .font(.system(.title3, design: .serif).weight(.light))
                         .opacity(0.5)
                 }
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(campusInk)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(greeting(at: context.date))
                         .font(.title2.bold())
@@ -137,7 +143,7 @@ struct HomeView: View {
                                startPoint: .topLeading, endPoint: .bottomTrailing)
                 GeometryReader { geometry in
                     CampusLineArt()
-                        .stroke(AppTheme.accent.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                        .stroke(campusInk.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
                         .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
                         .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
                 }
@@ -168,7 +174,7 @@ struct HomeView: View {
                     }
                     Spacer()
                 }
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(campusInk)
                 .padding(20)
                 .frame(minHeight: 136)
                 .background {
@@ -176,7 +182,7 @@ struct HomeView: View {
                     AppTheme.accent.opacity(0.045)
                     GeometryReader { geometry in
                         CampusLineArt()
-                            .stroke(AppTheme.accent.opacity(0.12), lineWidth: 1)
+                            .stroke(campusInk.opacity(0.12), lineWidth: 1)
                             .frame(width: geometry.size.width * 0.62, height: 145)
                             .offset(x: geometry.size.width * 0.44, y: 10)
                     }
@@ -223,7 +229,7 @@ struct HomeView: View {
             .renderingMode(.template)
             .resizable()
             .scaledToFit()
-            .foregroundStyle(AppTheme.accent.opacity(0.75))
+            .foregroundStyle(campusInk.opacity(0.75))
             .frame(width: 112, height: 27)
             .accessibilityLabel("知行合一")
     }
@@ -256,13 +262,13 @@ struct HomeView: View {
                 HStack(spacing: 12) {
                     Image(systemName: ongoing ? "figure.run" : "book.fill")
                         .font(.title3)
-                        .foregroundStyle(AppTheme.accent)
+                        .foregroundStyle(campusInk)
                         .frame(width: 44, height: 44)
                         .background(AppTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
                     VStack(alignment: .leading, spacing: 3) {
                         Text(ongoing ? "正在上课" : "下一节课")
                             .font(.caption)
-                            .foregroundStyle(AppTheme.accent)
+                            .foregroundStyle(campusInk)
                         Text("\(next.slot.name) · \(Semester.hm(next.slot.startMinutes))")
                             .font(.headline)
                             .lineLimit(2)
@@ -520,7 +526,7 @@ struct HomeView: View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.footnote)
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(campusInk)
             Text(title)
                 .font(.headline)
         }
