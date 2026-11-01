@@ -186,12 +186,24 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         webView.isFindInteractionEnabled = true
         webView.scrollView.keyboardDismissMode = .interactive
         observations = [
-            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in self?.updateState() },
-            webView.observe(\.isLoading, options: [.new]) { [weak self] _, _ in self?.updateState() },
-            webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in self?.updateState() },
-            webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in self?.updateState() },
-            webView.observe(\.url, options: [.new]) { [weak self] _, _ in self?.updateState() },
-            webView.observe(\.title, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
+            webView.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
+            webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
+            webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
+            webView.observe(\.url, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
+            webView.observe(\.title, options: [.new]) { [weak self] _, _ in
+                Task { @MainActor [weak self] in self?.updateState() }
+            },
         ]
     }
 
@@ -276,8 +288,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func syncGrades() async throws -> GradeReport {
+        let gatewayPrefixes = ["https://jwxt.neu.edu.cn/", "http://jwxt.neu.edu.cn/"].map { WebVPN.wrap($0) }
         guard let url = webView.url,
-              url.host == "jwxt.neu.edu.cn" || (url.host == "webvpn.neu.edu.cn" && url.path.contains("/jwapp/")) else {
+              url.host == "jwxt.neu.edu.cn" || gatewayPrefixes.contains(where: { url.absoluteString.hasPrefix($0) }) else {
             throw NetworkError(message: "请先完成认证，进入教务系统学生首页")
         }
         isSyncing = true

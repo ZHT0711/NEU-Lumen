@@ -200,7 +200,9 @@ struct LoginView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        Button(action: submitSecondAuth) {
+                        Button {
+                            Task { await submitSecondAuth() }
+                        } label: {
                             Text("验证并登录")
                                 .bold()
                                 .frame(maxWidth: .infinity)

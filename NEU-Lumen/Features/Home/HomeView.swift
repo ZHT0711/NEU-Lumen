@@ -131,6 +131,7 @@ struct HomeView: View {
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
+                ZStack {
                 Color(.secondarySystemGroupedBackground)
                 LinearGradient(colors: [AppTheme.accent.opacity(0.035), AppTheme.accent.opacity(0.08)],
                                startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -141,6 +142,7 @@ struct HomeView: View {
                         .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
                 }
                 .accessibilityHidden(true)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
             .overlay {
@@ -170,12 +172,14 @@ struct HomeView: View {
                 .padding(20)
                 .frame(minHeight: 136)
                 .background {
+                    ZStack {
                     AppTheme.accent.opacity(0.045)
                     GeometryReader { geometry in
                         CampusLineArt()
                             .stroke(AppTheme.accent.opacity(0.12), lineWidth: 1)
                             .frame(width: geometry.size.width * 0.62, height: 145)
                             .offset(x: geometry.size.width * 0.44, y: 10)
+                    }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 20))

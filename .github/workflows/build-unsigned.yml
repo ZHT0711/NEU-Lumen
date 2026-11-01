@@ -98,6 +98,7 @@ jobs:
             Tests/ServiceCatalog/main.swift \
             -o "${RUNNER_TEMP}/service-catalog-tests"
           "${RUNNER_TEMP}/service-catalog-tests"
+          node Tests/AcademicBridge/check.mjs
 
       - name: Build unsigned IPA
         run: bash build_ios_unsigned.sh

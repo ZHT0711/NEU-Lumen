@@ -30,10 +30,11 @@ enum AcademicResponse {
         }
         let code = map.str("code")
         let message = [map.str("msg"), map.str("message")].first { !$0.isEmpty } ?? ""
-        if message.contains("登录") || ["401", "403", "-401"].contains(code) {
+        let success = code == "0" || code == "200" || (code.isEmpty && map.bool("success") == true)
+        if !success && (message.contains("登录") || ["401", "403", "-401"].contains(code)) {
             throw NetworkError.sessionExpired()
         }
-        guard code == "0" || code == "200" || (code.isEmpty && map.bool("success") == true) else {
+        guard success else {
             throw NetworkError(message: "\(stage)失败\(code.isEmpty ? "" : "（代码 \(code)）")\(message.isEmpty ? "" : "：\(message)")")
         }
     }
@@ -102,7 +103,7 @@ enum AcademicResponse {
     };
     try {
         const calendar = await get('api/home/student/schoolCalendars.do');
-        if (!['0','200'].includes(String(calendar.code))) return {error: calendar.msg || calendar.message || '学期列表获取失败'};
+        if (!['0','200'].includes(String(calendar.code)) && calendar.success !== true) return {error: calendar.msg || calendar.message || '学期列表获取失败'};
         const semesters = [];
         for (const t of rows(calendar)) {
             if (!t.itemCode) continue;
