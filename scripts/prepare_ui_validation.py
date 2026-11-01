@@ -43,6 +43,7 @@ extension PortalRepository {
 ''')
 (destination / "NEU-Lumen/App/NEULumenApp.swift").write_text(r'''
 import SwiftUI
+import WebKit
 
 @main
 struct UIValidationApp: App {
