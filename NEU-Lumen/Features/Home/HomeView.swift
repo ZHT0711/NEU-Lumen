@@ -24,6 +24,7 @@ struct HomeView: View {
                     quickAppsSection
                     todaySection
                     dataCardsSection
+                    campusExploreSection
                     if !repo.todos.isEmpty {
                         todosSection
                     }
@@ -100,6 +101,7 @@ struct HomeView: View {
                     Spacer(minLength: 0)
                 }
 
+                Spacer(minLength: 44)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(greeting(at: context.date))
                         .font(.title2.bold())
@@ -125,22 +127,18 @@ struct HomeView: View {
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                ZStack(alignment: .trailing) {
-                    LinearGradient(
-                        colors: [AppTheme.accent, AppTheme.accentDeep],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                    Circle()
-                        .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-                        .frame(width: 280, height: 280)
-                        .offset(x: 90, y: -60)
-                    Image("NEUEmblem")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 190, height: 190)
-                        .opacity(0.07)
-                        .rotationEffect(.degrees(-14))
-                        .offset(x: 42, y: 15)
+                GeometryReader { geometry in
+                    Image("NEUCampusArchitecture")
+                        .resizable().scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .overlay {
+                            LinearGradient(stops: [
+                                .init(color: AppTheme.accentDeep.opacity(0.65), location: 0),
+                                .init(color: .black.opacity(0.08), location: 0.38),
+                                .init(color: AppTheme.accentDeep.opacity(0.92), location: 1)
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
                 }
                 .accessibilityHidden(true)
             }
@@ -150,6 +148,62 @@ struct HomeView: View {
                     .strokeBorder(.white.opacity(0.12), lineWidth: 1)
             }
         }
+    }
+
+    private var campusExploreSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("走进东大", icon: "building.columns")
+            Button {
+                path.append(.web(URL(string: "https://www.neu.edu.cn/zjdd/xyfj.htm")!))
+            } label: {
+                ZStack(alignment: .bottomLeading) {
+                    GeometryReader { geometry in
+                        Image("NEUCampusAutumn")
+                            .resizable().scaledToFill()
+                            .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                    }
+                    LinearGradient(colors: [.clear, .black.opacity(0.7)], startPoint: .center, endPoint: .bottom)
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("东大 · 秋").font(.title3.bold())
+                            Text("把熟悉的校园，装进口袋。") .font(.caption)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.up.right.circle.fill").font(.title2)
+                    }
+                    .foregroundStyle(.white).padding(16)
+                }
+                .frame(height: 156)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+            }
+            .buttonStyle(.plain)
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
+                    campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
+                }
+                VStack {
+                    campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
+                    campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
+                }
+            }
+            Text("自强不息 · 知行合一")
+                .font(.system(.caption, design: .serif).weight(.semibold))
+                .tracking(3)
+                .foregroundStyle(AppTheme.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
+        }
+    }
+
+    private func campusLink(_ title: String, icon: String, url: String) -> some View {
+        Button { path.append(.web(URL(string: url)!)) } label: {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(AppTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 
     private func greeting(at date: Date) -> String {

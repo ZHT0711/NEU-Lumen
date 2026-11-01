@@ -139,30 +139,32 @@ struct ScheduleView: View {
 
     // MARK: - 网格
 
+    private let periodHeight: CGFloat = 52
+
     private var grid: some View {
-        let occs = occurrences
         let today = Calendar.current.startOfDay(for: Date())
-        return Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-            GridRow {
-                Color.clear.frame(width: 44, height: 30)
-                ForEach(weekDates.indices, id: \.self) { i in
-                    dayHeader(weekDates[i], isToday: Calendar.current.isDate(weekDates[i], inSameDayAs: today))
+        return HStack(alignment: .top, spacing: 4) {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 42)
+                ForEach(0..<5, id: \.self) { pair in
+                    periodLabel(pair).frame(height: periodHeight * 2)
                 }
             }
-            ForEach(0..<5, id: \.self) { pair in
-                GridRow {
-                    periodLabel(pair)
-                    ForEach(weekDates.indices, id: \.self) { i in
-                        DayCell(
-                            blocks: blocksIn(occs, date: weekDates[i], pair: pair),
-                            isToday: Calendar.current.isDate(weekDates[i], inSameDayAs: today)
-                        ) { selected = $0 }
-                    }
+            ForEach(weekDates, id: \.self) { date in
+                VStack(spacing: 0) {
+                    dayHeader(date, isToday: Calendar.current.isDate(date, inSameDayAs: today))
+                        .frame(height: 42)
+                    TimetableDayColumn(
+                        placements: TimetablePlacement.layout(occurrences, on: date),
+                        isToday: Calendar.current.isDate(date, inSameDayAs: today),
+                        periodHeight: periodHeight
+                    ) { selected = $0 }
                 }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(8)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 
     private static let weekdayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
@@ -196,18 +198,6 @@ struct ScheduleView: View {
         .frame(width: 44)
     }
 
-    private func blocksIn(_ occs: [CourseOccurrence], date: Date, pair: Int) -> [CourseOccurrence] {
-        let startPeriod = pair * 2 + 1
-        let endPeriod = pair * 2 + 2
-        let cal = Calendar.current
-        return occs.filter { occ in
-            guard cal.isDate(occ.date, inSameDayAs: date) else { return false }
-            let sp = Semester.periodOf(startMinutes: occ.slot.startMinutes)
-            let ep = Semester.endPeriod(of: occ.slot.endMinutes)
-            return !(ep < startPeriod || sp > endPeriod)
-        }
-    }
-
     @ViewBuilder
     private var loadStateFooter: some View {
         switch repo.weekState {
@@ -230,46 +220,56 @@ struct ScheduleView: View {
     }
 }
 
-/// 课表格子：一格内可叠多个事件块。
-struct DayCell: View {
-    let blocks: [CourseOccurrence]
+/// 每天的连续时间列：合并后的课程跨行显示，避免在每个双节格子重复绘制。
+struct TimetableDayColumn: View {
+    let placements: [TimetablePlacement]
     let isToday: Bool
+    let periodHeight: CGFloat
     let onTap: (CourseOccurrence) -> Void
 
     var body: some View {
-        VStack(spacing: 3) {
-            ForEach(blocks) { occ in
-                Button {
-                    onTap(occ)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(occ.slot.name)
-                            .font(.system(size: 10, weight: .bold))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                        Text(occ.slot.room)
-                            .font(.system(size: 9))
-                            .lineLimit(1)
-                            .opacity(0.85)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    ForEach(0..<5, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isToday ? AppTheme.accent.opacity(0.07) : Color.primary.opacity(0.025))
+                            .padding(.bottom, 4)
+                            .frame(height: periodHeight * 2)
                     }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(5)
-                    .frame(height: blocks.count > 1 ? 28 : 58, alignment: .top)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(AppTheme.courseColor(for: occ.slot.name))
-                    )
                 }
-                .buttonStyle(.plain)
+                ForEach(placements) { block in
+                    let width = geometry.size.width / CGFloat(block.laneCount)
+                    Button { onTap(block.occurrence) } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(block.occurrence.slot.name)
+                                .font(.system(size: 10, weight: .bold))
+                                .lineLimit(block.periodCount > 2 ? 6 : 3)
+                            Text(block.occurrence.slot.room)
+                                .font(.system(size: 9))
+                                .lineLimit(2)
+                                .opacity(0.85)
+                            if block.periodCount > 2 {
+                                Text("第 \(block.firstPeriod)–\(block.lastPeriod) 节")
+                                    .font(.system(size: 8))
+                                    .opacity(0.8)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .frame(width: Swift.max(1, width - 2),
+                               height: CGFloat(block.periodCount) * periodHeight - 4, alignment: .topLeading)
+                        .background(AppTheme.courseColor(for: block.occurrence.slot.name), in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(block.occurrence.slot.name)，第 \(block.firstPeriod) 至 \(block.lastPeriod) 节，\(block.occurrence.slot.room)")
+                    .offset(x: CGFloat(block.lane) * width, y: CGFloat(block.firstPeriod - 1) * periodHeight)
+                }
             }
         }
-        .frame(minHeight: 62)
-        .frame(maxWidth: .infinity)
-        .background(
-            isToday ? AppTheme.accent.opacity(0.06) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
+        .frame(height: periodHeight * 10)
     }
 }
 

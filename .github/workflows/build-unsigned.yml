@@ -81,7 +81,7 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks
 
-      - name: Test service categories and search
+      - name: Test categories, timetable, grades and cookies
         shell: bash
         run: |
           set -euo pipefail
@@ -89,6 +89,12 @@ jobs:
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/PortalModels.swift \
             NEU-Lumen/Core/Models/ServiceCatalog.swift \
+            NEU-Lumen/Core/Models/CourseModels.swift \
+            NEU-Lumen/Core/Models/GradeModels.swift \
+            NEU-Lumen/Core/Models/AcademicResponse.swift \
+            NEU-Lumen/Core/Services/Semester.swift \
+            NEU-Lumen/Core/Networking/CookieJar.swift \
+            NEU-Lumen/Core/Networking/NetworkError.swift \
             Tests/ServiceCatalog/main.swift \
             -o "${RUNNER_TEMP}/service-catalog-tests"
           "${RUNNER_TEMP}/service-catalog-tests"

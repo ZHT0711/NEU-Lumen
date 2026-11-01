@@ -76,6 +76,12 @@ final class HTTPClient {
                 } else {
                     nextReq.httpMethod = "GET"
                 }
+                // 同主机重定向保留接口语义；Cookie 总是根据目标重新计算。
+                if next.host == current.url?.host {
+                    for name in ["Accept", "X-Requested-With", "Fetch-Api", "Referer", "User-Agent"] {
+                        if let value = current.value(forHTTPHeaderField: name) { nextReq.setValue(value, forHTTPHeaderField: name) }
+                    }
+                }
                 current = nextReq
                 continue
             }

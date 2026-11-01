@@ -4,6 +4,7 @@ import SwiftUI
 struct GradesView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var selectedSemesterID: String?
+    @State private var showAcademicWeb = false
 
     private var repo: PortalRepository {
         environment.repository
@@ -11,6 +12,8 @@ struct GradesView: View {
 
     private var currentSemester: GradeSemester? {
         repo.grades.first { $0.id == selectedSemesterID }
+            ?? repo.grades.first { $0.current && !$0.courses.isEmpty }
+            ?? repo.grades.first { !$0.courses.isEmpty }
             ?? repo.grades.first { $0.current }
             ?? repo.grades.first
     }
@@ -22,9 +25,16 @@ struct GradesView: View {
                 case .idle, .loading:
                     LoadingView(text: "正在从教务系统同步成绩…")
                 case .failed(let message):
-                    ErrorStateView(message: message) {
-                        Task { await repo.loadGrades(force: true) }
+                    VStack(spacing: 8) {
+                        ErrorStateView(message: message) {
+                            Task { await repo.loadGrades(force: true) }
+                        }
+                        Button("打开教务网页并同步成绩", systemImage: "globe") { showAcademicWeb = true }
+                            .buttonStyle(.borderedProminent)
+                        Text("网页内完成认证后，点击“同步成绩到应用”。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                    .padding()
                 case .loaded:
                     if let semester = currentSemester {
                         content(semester)
@@ -39,11 +49,16 @@ struct GradesView: View {
             .navigationTitle("成绩")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button("教务网页", systemImage: "globe") { showAcademicWeb = true }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await repo.loadGrades(force: true) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
+                    .disabled(repo.gradesState == .loading)
+                    .accessibilityLabel("刷新成绩")
                 }
             }
             .task {
@@ -54,13 +69,25 @@ struct GradesView: View {
                 await repo.loadGrades(force: true)
             }
         }
+        .sheet(isPresented: $showAcademicWeb) {
+            NavigationStack {
+                PortalWebViewScreen(url: URL(string: PortalClient.jwxtBase + "/jwapp/sys/homeapp/index.do")!, academicMode: true)
+            }
+        }
     }
 
     private func content(_ semester: GradeSemester) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 semesterPicker
+                if let warning = repo.gradesWarning {
+                    Label(warning, systemImage: "exclamationmark.circle")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
                 statTiles(semester)
+                if semester.courses.isEmpty {
+                    ContentUnavailableView("本学期暂无成绩", systemImage: "doc.text", description: Text("可以切换到其他学期查看已公布的成绩。"))
+                }
                 GlassCard {
                     VStack(spacing: 0) {
                         ForEach(Array(semester.courses.enumerated()), id: \.element.id) { index, course in

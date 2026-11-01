@@ -1,155 +1,106 @@
 import Foundation
 
-/// RFC 风格 Cookie 罐：domain -> (name -> entry)。
-/// 从 NEUPortal 的 Dart 实现移植，保证 CASTGC / SESS_ID 全程正确跨域传递。
+/// 保留 Cookie 的域、路径、Secure 与有效期，HTTP 与 WebKit 共用会话。
 final class CookieJar {
     private struct Entry {
-        let value: String
-        let path: String
-        let expires: Date?
+        let cookie: HTTPCookie
+        let hostOnly: Bool
+    }
+    private var store: [String: Entry] = [:]
+    private let lock = NSLock()
+
+    private func locked<T>(_ work: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return work()
     }
 
-    private var store: [String: [String: Entry]] = [:]
-
-    /// 处理 Set-Cookie 头：同一个头里可能以逗号合并多条 Cookie，
-    /// 需要跳过 expires= 值内部的逗号。
+    /// 只在逗号后确实开始 name=value 时拆分，不截断 Expires 中的日期。
     static func splitSetCookie(_ raw: String) -> [String] {
+        let regex = try! NSRegularExpression(pattern: #",(?=\s*[^\s=;,]+\s*=)"#)
+        let range = NSRange(raw.startIndex..., in: raw)
         var result: [String] = []
         var start = raw.startIndex
-        var inExpires = false
-        var i = raw.startIndex
-        while i < raw.endIndex {
-            if raw.distance(from: raw.startIndex, to: i) >= 8 {
-                let prev = raw.index(i, offsetBy: -8)
-                if raw[prev..<i].lowercased() == "expires=" { inExpires = true }
-            }
-            if raw[i] == ";" { inExpires = false }
-            if raw[i] == "," {
-                if !inExpires {
-                    let part = String(raw[start..<i]).trimmingCharacters(in: .whitespaces)
-                    if !part.isEmpty { result.append(part) }
-                    start = raw.index(after: i)
-                }
-            }
-            i = raw.index(after: i)
+        for match in regex.matches(in: raw, range: range) {
+            guard let comma = Range(match.range, in: raw) else { continue }
+            result.append(String(raw[start..<comma.lowerBound]).trimmingCharacters(in: .whitespaces))
+            start = comma.upperBound
         }
-        let last = String(raw[start...]).trimmingCharacters(in: .whitespaces)
-        if !last.isEmpty { result.append(last) }
-        return result
+        result.append(String(raw[start...]).trimmingCharacters(in: .whitespaces))
+        return result.filter { !$0.isEmpty }
+    }
+
+    private func key(_ cookie: HTTPCookie) -> String {
+        "\(cookie.domain.lowercased())|\(cookie.path)|\(cookie.name)"
     }
 
     func absorbRaw(_ uri: URL, _ setCookie: String?) {
-        guard let sc = setCookie, !sc.isEmpty else { return }
-        for rawCookie in Self.splitSetCookie(sc) {
-            let parts = rawCookie.split(separator: ";", omittingEmptySubsequences: false)
-            guard let first = parts.first else { continue }
-            let pair = first.trimmingCharacters(in: .whitespaces)
-            guard let eq = pair.firstIndex(of: "="), eq != pair.startIndex else { continue }
-            let name = String(pair[pair.startIndex..<eq]).trimmingCharacters(in: .whitespaces)
-            let value = String(pair[pair.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
-            if name.isEmpty { continue }
-
-            var domain = (uri.host ?? "").lowercased()
-            var path = "/"
-            var expires: Date?
-            var expired = value.isEmpty
-
-            for attrPart in parts.dropFirst() {
-                let attr = attrPart.trimmingCharacters(in: .whitespaces)
-                let attrEq = attr.firstIndex(of: "=")
-                let attrName = attrEq.map { String(attr[attr.startIndex..<$0]).trimmingCharacters(in: .whitespaces).lowercased() }
-                    ?? attr.lowercased()
-                let attrVal = attrEq.map { String(attr[attr.index(after: $0)...]).trimmingCharacters(in: .whitespaces) } ?? ""
-                switch attrName {
-                case "domain" where !attrVal.isEmpty:
-                    domain = attrVal.lowercased()
-                    if domain.hasPrefix(".") { domain.removeFirst() }
-                case "path" where !attrVal.isEmpty:
-                    path = attrVal
-                case "max-age":
-                    if let sec = Int(attrVal) {
-                        if sec <= 0 {
-                            expired = true
-                        } else {
-                            expires = Date().addingTimeInterval(TimeInterval(sec))
-                        }
-                    }
-                default:
-                    break
-                }
-            }
-
-            if expired {
-                store[domain]?[name] = nil
-            } else {
-                store[domain, default: [:]][name] = Entry(value: value, path: path, expires: expires)
+        guard let raw = setCookie else { return }
+        for item in Self.splitSetCookie(raw) {
+            let hostOnly = item.range(of: #";\s*domain\s*="#, options: [.regularExpression, .caseInsensitive]) == nil
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": item], for: uri) {
+                let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+                guard let host = uri.host?.lowercased(), host == domain || host.hasSuffix("." + domain) else { continue }
+                save(cookie, hostOnly: hostOnly)
             }
         }
     }
 
-    private func matchesDomain(host: String, domain: String) -> Bool {
-        let h = host.lowercased()
-        let d = domain.lowercased()
-        return h == d || h.hasSuffix("." + d)
+    private func save(_ cookie: HTTPCookie, hostOnly: Bool) {
+        locked {
+            let id = key(cookie)
+            if cookie.value.isEmpty || (cookie.expiresDate.map { $0 <= Date() } ?? false) {
+                store[id] = nil
+            } else {
+                store[id] = Entry(cookie: cookie, hostOnly: hostOnly)
+            }
+        }
     }
 
-    func clear() { store.removeAll() }
+    func absorb(_ cookies: [HTTPCookie]) {
+        for cookie in cookies { save(cookie, hostOnly: !cookie.domain.hasPrefix(".")) }
+    }
+
+    func clear() { locked { store.removeAll() } }
+
+    func allCookies() -> [HTTPCookie] {
+        locked { store.values.map(\.cookie).filter { !($0.expiresDate.map { $0 <= Date() } ?? false) } }
+    }
 
     func headerFor(_ uri: URL) -> String? {
         guard let host = uri.host?.lowercased() else { return nil }
         let path = uri.path.isEmpty ? "/" : uri.path
-        let now = Date()
-        var pairs: [String] = []
-        for (domain, cookies) in store where matchesDomain(host: host, domain: domain) {
-            for (name, entry) in cookies {
-                if let exp = entry.expires, now > exp { continue }
-                if entry.path == "/" || path.hasPrefix(entry.path) {
-                    pairs.append("\(name)=\(entry.value)")
-                }
+        let cookies = locked {
+            store.values.filter { entry in
+                let cookie = entry.cookie
+                let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+                let matchesDomain = host == domain || (!entry.hostOnly && host.hasSuffix("." + domain))
+                let matchesPath = path == cookie.path || (path.hasPrefix(cookie.path)
+                    && (cookie.path.hasSuffix("/") || path.dropFirst(cookie.path.count).hasPrefix("/")))
+                return matchesDomain && matchesPath && (!cookie.isSecure || uri.scheme == "https")
+                    && !(cookie.expiresDate.map { $0 <= Date() } ?? false)
+            }.map(\.cookie).sorted {
+                $0.path.count == $1.path.count ? $0.name < $1.name : $0.path.count > $1.path.count
             }
         }
-        return pairs.isEmpty ? nil : pairs.joined(separator: "; ")
+        return cookies.isEmpty ? nil : cookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
     }
 
     func hasCookie(_ uri: URL, _ name: String) -> Bool {
-        guard let host = uri.host?.lowercased() else { return false }
-        for (domain, cookies) in store where matchesDomain(host: host, domain: domain) {
-            if let entry = cookies[name], !(entry.expires.map { Date() > $0 } ?? false), !entry.value.isEmpty {
-                return true
-            }
-        }
-        return false
+        headerFor(uri)?.components(separatedBy: "; ").contains { $0.hasPrefix(name + "=") } == true
     }
 
-    /// 是否已持有 WebVPN 网关票据（wengine / vpn_ticket / webvpn 任一未过期 Cookie）。
     func hasWebVPNTicket() -> Bool {
-        let now = Date()
-        for (_, cookies) in store {
-            for (name, entry) in cookies {
-                let lower = name.lowercased()
-                if lower.contains("wengine") || lower.contains("vpn_ticket") || lower.contains("webvpn") {
-                    if entry.expires == nil || entry.expires! > now { return true }
-                }
-            }
+        allCookies().contains {
+            let domain = $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let name = $0.name.lowercased()
+            return domain == "webvpn.neu.edu.cn" && (name.contains("wengine") || name.contains("vpn_ticket") || name.contains("webvpn"))
         }
-        return false
     }
 
-    /// 供 WebView 注入的会话快照：domain -> {name: value}。
     func snapshot() -> [String: [String: String]] {
-        var out: [String: [String: String]] = [:]
-        let now = Date()
-        for (domain, cookies) in store {
-            var m: [String: String] = [:]
-            for (name, entry) in cookies {
-                if let exp = entry.expires, now > exp { continue }
-                m[name] = entry.value
-            }
-            if !m.isEmpty {
-                out[domain] = m
-                out["." + domain] = m
-            }
-        }
-        return out
+        var result: [String: [String: String]] = [:]
+        for cookie in allCookies() { result[cookie.domain, default: [:]][cookie.name] = cookie.value }
+        return result
     }
 }

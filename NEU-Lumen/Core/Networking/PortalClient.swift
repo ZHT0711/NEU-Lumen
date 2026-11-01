@@ -111,6 +111,7 @@ final class PortalClient {
 
     func clearSession() {
         http.cookies.clear()
+        secondAuthExecution = nil
     }
 
     /// 供 WebView 注入的会话快照：domain -> {name: value}。
@@ -152,20 +153,99 @@ final class PortalClient {
         if post.finalURL.host?.contains("pass.neu.edu.cn") == true
             || post.finalURL.path.contains("/tpass/login") {
             let html = post.text
+
+            // 新设备二次认证（图形码 + 短信，login_second.js 流程）
+            if html.contains("second_auth_form") || html.contains("当前设备需进行身份验证") {
+                secondAuthExecution = Self.firstMatch(Self.executionRegex, html) ?? "e1s2"
+                throw NetworkError.needSecondAuth()
+            }
+
             if let raw = Self.firstMatch(Self.casErrorRegex, html) {
                 let msg = raw
                     .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if !msg.isEmpty && !msg.contains("null") {
                     if msg.contains("账号不存在") {
-                        throw NetworkError(message: "账号不存在：若当前使用移动网络或在校外，学校统一认证会拦截公网直连鉴权（返回账号不存在）。请切换至校园网 WiFi，或先连接校园 WebVPN。")
+                        throw NetworkError(message: "账号不存在：若当前使用移动网络或在校外，学校统一认证会拦截公网直连鉴权（返回账号不存在）。请切换至校园网 WiFi 后重试。")
                     }
                     throw NetworkError(message: msg)
                 }
             }
-            throw NetworkError(message: "账号或密码错误（如需二次短信验证，请先在网页端完成设备信任绑定）")
+            throw NetworkError(message: "账号或密码错误")
         }
 
+        if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
+           let user = Self.extractUser(fromHTML: post.text) {
+            return user
+        }
+        return try await fetchUserInfo()
+    }
+
+    // MARK: - 新设备二次认证（图形码 + 短信）
+
+    /// 二次认证挑战页的 execution（e1s2），登录成功或清会话后置空。
+    private var secondAuthExecution: String?
+
+    var hasPendingSecondAuth: Bool { secondAuthExecution != nil }
+
+    /// 拉取二次认证图形码（与登录共用 JSESSIONID 会话）。
+    func fetchSecondAuthCaptcha() async throws -> Data {
+        guard secondAuthExecution != nil else {
+            throw NetworkError(message: "当前没有待验证的登录，请先登录")
+        }
+        let url = URL(string: "https://pass.neu.edu.cn/tpass/code?_=\(Int(Date().timeIntervalSince1970 * 1000))")!
+        let resp = try await http.get(url)
+        guard resp.status == 200, !resp.body.isEmpty else {
+            throw NetworkError(message: "图形码获取失败，请重试")
+        }
+        return resp.body
+    }
+
+    /// 提交图形码，请求下发短信验证码。
+    func requestSecondAuthSMS(graphicCode: String) async throws {
+        guard secondAuthExecution != nil else {
+            throw NetworkError(message: "当前没有待验证的登录，请先登录")
+        }
+        let url = URL(string: "https://pass.neu.edu.cn/tpass/secondAuthCode")!
+        let resp = try await http.postForm(url, fields: [
+            "code": graphicCode,
+            "method": "mobile",
+        ])
+        let text = resp.text.lowercased()
+        if resp.status != 200 || text.contains("false") || text.contains("验证码错误") || text.contains("失败") {
+            throw NetworkError(message: "短信发送失败：请检查图形码是否正确后重试")
+        }
+    }
+
+    /// 提交短信验证码完成二次认证并继续登录。
+    func submitSecondAuth(smsCode: String) async throws -> PortalUser {
+        guard let execution = secondAuthExecution else {
+            throw NetworkError(message: "当前没有待验证的登录，请先登录")
+        }
+        let post = try await http.postForm(CasCrypto.casLoginURL, fields: [
+            "execution": execution,
+            "RelayState": execution,
+            "_eventId": "submit",
+            "scendAuthCode": smsCode,
+        ])
+        if post.finalURL.host?.contains("pass.neu.edu.cn") == true
+            || post.finalURL.path.contains("/tpass/login") {
+            let html = post.text
+            if html.contains("second_auth_form") || html.contains("当前设备需进行身份验证") {
+                secondAuthExecution = Self.firstMatch(Self.executionRegex, html) ?? execution
+                throw NetworkError(message: "短信验证码不正确，请重新输入")
+            }
+            if let raw = Self.firstMatch(Self.casErrorRegex, html) {
+                let msg = raw
+                    .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !msg.isEmpty && !msg.contains("null") {
+                    throw NetworkError(message: msg)
+                }
+            }
+            throw NetworkError(message: "二次认证失败，请重新登录")
+        }
+        secondAuthExecution = nil
         if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
            let user = Self.extractUser(fromHTML: post.text) {
             return user
@@ -422,68 +502,79 @@ final class PortalClient {
 
     // MARK: - 教务系统（金智 jwapp）真实成绩
 
-    /// 跟随重定向 SSO 进入教务系统（CASTGC 被 CAS 识别，建立 jwapp 会话）。
-    /// 注意：教务的 302 会跳 http:// 明文地址（ATS 例外已在 Info.plist 放开）；
-    /// 校外直连不通时自动经 WebVPN 网关改写。
+    private var jwxtAppBase = PortalClient.jwxtBase + "/jwapp/sys/homeapp"
+
+    /// 从真实的学生首页建立会话，并沿用落地后的协议/网关前缀。
     private func jwxtSSO() async throws {
         await prepareAccess()
-        _ = try await http.get(URL(string: maybeWrap(Self.jwxtBase + "/"))!)
+        let response = try await http.get(URL(string: maybeWrap(Self.jwxtBase + "/jwapp/sys/homeapp/index.do"))!)
+        if response.finalURL.host == "pass.neu.edu.cn" { throw NetworkError.sessionExpired() }
+        let landed = response.finalURL.absoluteString
+        if let range = landed.range(of: "/jwapp/") {
+            jwxtAppBase = String(landed[..<range.lowerBound]) + "/jwapp/sys/homeapp"
+        } else {
+            throw NetworkError(message: "教务首页未能建立会话，请打开教务网页完成认证后同步")
+        }
     }
 
-    private static let jwxtHeaders = ["Fetch-Api": "true"]
-
-    /// jwapp JSON 接口：若被重定向回 CAS 登录页说明会话未建立，抛会话失效以触发静默重登。
-    private func jwxtGet(_ urlString: String) async throws -> Any {
-        let resp = try await http.get(URL(string: maybeWrap(urlString))!, extraHeaders: Self.jwxtHeaders)
-        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
-            || resp.finalURL.path.contains("/tpass/login") {
+    private func jwxtGet(_ path: String) async throws -> Any {
+        let url = URL(string: maybeWrap(jwxtAppBase + "/" + path))!
+        let response = try await http.get(url, xhr: true, extraHeaders: [
+            "Fetch-Api": "true", "Accept": "application/json", "Referer": jwxtAppBase + "/index.do"
+        ])
+        if response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
         }
+        guard (200..<300).contains(response.status) else {
+            throw NetworkError(message: "教务接口 HTTP \(response.status)，可打开教务网页后同步")
+        }
+        guard let json = try? http.json(response) else {
+            let html = response.text.lowercased()
+            if html.contains("tpass/login") || html.contains("name=\"lt\"") { throw NetworkError.sessionExpired() }
+            throw NetworkError(message: "教务接口返回了网页，未能取得成绩数据。请打开教务网页完成认证后同步")
+        }
+        return json
+    }
+
+    func fetchJwxtGrades() async throws -> GradeReport {
         do {
-            return try http.json(resp)
+            return try await fetchGradeReport()
         } catch {
-            throw NetworkError(message: "教务系统返回异常，请稍后重试")
+            // 可访问登录页不代表可访问校内成绩接口；直连失败后仅尝试一次网关。
+            guard !webvpnOn, await ensureWebVPN() else { throw error }
+            return try await fetchGradeReport()
         }
     }
 
-    /// 全部学期的真实成绩（成绩可能为数字或五级制文本，如「良」）。
-    func fetchJwxtGrades() async throws -> [GradeSemester] {
+    private func fetchGradeReport() async throws -> GradeReport {
         try await jwxtSSO()
-        let cal = try await jwxtGet("\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/schoolCalendars.do")
-        guard let calJ = cal as? [String: Any], calJ.str("code") == "0" else {
-            throw NetworkError(message: "学期列表获取失败")
-        }
-        let terms = (calJ["datas"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
-        var out: [GradeSemester] = []
-        out.reserveCapacity(terms.count)
-        for t in terms {
-            let code = t.str("itemCode").trimmingCharacters(in: .whitespaces)
-            let name0 = t.str("itemName").trimmingCharacters(in: .whitespaces)
-            let name = name0.isEmpty ? code : name0
-            if code.isEmpty { continue }
-            let raw = try await jwxtGet("\(Self.jwxtBase)/jwapp/sys/homeapp/api/home/student/scores.do?termCode=\(code.urlFormEncoded)")
-            guard let jJ = raw as? [String: Any], jJ.str("code") == "0" else { continue }
-            let list = (jJ["datas"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
-            let courses = list.compactMap { c -> GradeCourse? in
-                let courseName = c.str("courseName")
-                guard !courseName.isEmpty else { return nil }
-                let scoreRawText = c.str("score").trimmingCharacters(in: .whitespaces)
-                let scoreNum = Double(scoreRawText)
-                return GradeCourse(
-                    name: courseName,
-                    credit: c.dbl("credit") ?? 0,
-                    category: c.str("courseType"),
-                    score: scoreNum,
-                    scoreRaw: scoreNum == nil ? scoreRawText : ""
-                )
+        let raw = try await jwxtGet("api/home/student/schoolCalendars.do")
+        let terms = try AcademicResponse.terms(raw)
+        var semesters: [GradeSemester] = []
+        var failed: [String] = []
+        for term in terms {
+            do {
+                let raw = try await jwxtGet("api/home/student/scores.do?termCode=\(term.code.urlFormEncoded)")
+                let courses = try AcademicResponse.courses(raw)
+                semesters.append(GradeSemester(name: term.name, termCode: term.code, current: term.current, courses: courses))
+            } catch {
+                if NetworkError.from(error).isSessionExpired { throw error }
+                failed.append(term.name)
             }
-            out.append(GradeSemester(name: name, termCode: code, current: t.bool("selected") == true, courses: courses))
         }
-        if out.isEmpty {
-            throw NetworkError(message: "未获取到成绩数据")
-        }
-        return out
+        guard !semesters.isEmpty else { throw NetworkError(message: "未获取到成绩数据，请打开教务网页后同步") }
+        return GradeReport(semesters: semesters, failedTerms: failed)
     }
+
+    func prepareBrowserURL(_ url: URL) async -> URL {
+        guard WebVPN.isIntranet(url.absoluteString) else { return url }
+        await prepareAccess()
+        return URL(string: maybeWrap(url.absoluteString)) ?? url
+    }
+
+    func browserCookies() -> [HTTPCookie] { http.cookies.allCookies() }
+
+    func absorbBrowserCookies(_ cookies: [HTTPCookie]) { http.cookies.absorb(cookies) }
 
     // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
 

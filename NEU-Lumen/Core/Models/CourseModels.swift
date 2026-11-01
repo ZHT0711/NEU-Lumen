@@ -31,7 +31,7 @@ struct CourseOccurrence: Identifiable, Hashable {
     let slot: CourseSlot
 
     var id: String {
-        "\(PortalDate.isoDay(date))|\(slot.startMinutes)|\(slot.name)|\(slot.room)|\(slot.kind)|\(slot.eventID ?? "")"
+        "\(PortalDate.isoDay(date))|\(slot.startMinutes)|\(slot.endMinutes)|\(slot.teacher)|\(slot.name)|\(slot.room)|\(slot.kind)|\(slot.eventID ?? "")"
     }
 
     var isOngoing: Bool {
@@ -42,42 +42,85 @@ struct CourseOccurrence: Identifiable, Hashable {
     }
 }
 
+private struct CourseMergeKey: Hashable {
+    let day: Date
+    let name: String
+    let room: String
+    let teacher: String
+    let kind: String
+    let eventID: String?
+}
+
 extension Array where Element == CourseOccurrence {
-    /// 合并同一天相邻且同名同地点的节次（如第 1 节与第 2 节合为 1-2 节），排序一次完成。
+    /// 先按日期和课程身份分组，再合并连续/重叠节次，避免整周课程互相打断。
     func mergeConsecutive() -> [CourseOccurrence] {
-        guard count > 1 else { return self }
-        let sorted = sorted { $0.slot.startMinutes < $1.slot.startMinutes }
-        var merged: [CourseOccurrence] = []
-        for curr in sorted {
-            guard let prev = merged.last else {
-                merged.append(curr)
-                continue
-            }
-            let cal = Calendar.current
-            let sameDate = cal.isDate(prev.date, inSameDayAs: curr.date)
-            let sameName = prev.slot.name.trimmingCharacters(in: .whitespaces) == curr.slot.name.trimmingCharacters(in: .whitespaces)
-            let sameKind = prev.slot.kind == curr.slot.kind
-            let sameRoom = prev.slot.room.trimmingCharacters(in: .whitespaces) == curr.slot.room.trimmingCharacters(in: .whitespaces)
-            let gap = curr.slot.startMinutes - prev.slot.endMinutes
-            if sameDate && sameName && sameKind && sameRoom && gap >= 0 && gap <= 35 {
-                let combined = CourseSlot(
-                    weekday: prev.slot.weekday,
-                    startMinutes: prev.slot.startMinutes,
-                    endMinutes: curr.slot.endMinutes,
-                    name: prev.slot.name,
-                    room: prev.slot.room,
-                    teacher: prev.slot.teacher.isEmpty ? curr.slot.teacher : prev.slot.teacher,
-                    kind: prev.slot.kind,
-                    weekStart: Swift.min(prev.slot.weekStart, curr.slot.weekStart),
-                    weekEnd: Swift.max(prev.slot.weekEnd, curr.slot.weekEnd),
-                    eventID: prev.slot.eventID ?? curr.slot.eventID
-                )
-                merged[merged.count - 1] = CourseOccurrence(date: prev.date, slot: combined)
-            } else {
-                merged.append(curr)
-            }
+        func normalized(_ value: String) -> String {
+            value.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined()
         }
-        return merged
+        let calendar = Calendar.current
+        let groups = Dictionary(grouping: self) { occurrence in
+            CourseMergeKey(day: calendar.startOfDay(for: occurrence.date),
+                name: normalized(occurrence.slot.name), room: normalized(occurrence.slot.room),
+                teacher: normalized(occurrence.slot.teacher), kind: occurrence.slot.kind,
+                eventID: occurrence.slot.kind == "custom" ? occurrence.slot.eventID : nil)
+        }
+        var result: [CourseOccurrence] = []
+        for group in groups.values {
+            var merged: [CourseOccurrence] = []
+            for current in group.sorted(by: {
+                $0.slot.startMinutes == $1.slot.startMinutes
+                    ? $0.slot.endMinutes < $1.slot.endMinutes
+                    : $0.slot.startMinutes < $1.slot.startMinutes
+            }) {
+                if let previous = merged.last,
+                   current.slot.startMinutes <= previous.slot.endMinutes + 35 {
+                    var slot = previous.slot
+                    slot.endMinutes = Swift.max(slot.endMinutes, current.slot.endMinutes)
+                    slot.weekStart = Swift.min(slot.weekStart, current.slot.weekStart)
+                    slot.weekEnd = Swift.max(slot.weekEnd, current.slot.weekEnd)
+                    merged[merged.count - 1] = CourseOccurrence(date: previous.date, slot: slot)
+                } else {
+                    merged.append(current)
+                }
+            }
+            result.append(contentsOf: merged)
+        }
+        return result.sorted {
+            let lhs = calendar.startOfDay(for: $0.date)
+            let rhs = calendar.startOfDay(for: $1.date)
+            if lhs != rhs { return lhs < rhs }
+            if $0.slot.startMinutes != $1.slot.startMinutes { return $0.slot.startMinutes < $1.slot.startMinutes }
+            return $0.id < $1.id
+        }
+    }
+}
+
+/// 同一事件只生成一个跨节次的块；冲突事件占独立列，均可点开。
+struct TimetablePlacement: Identifiable {
+    let occurrence: CourseOccurrence
+    let firstPeriod: Int
+    let lastPeriod: Int
+    let lane: Int
+    let laneCount: Int
+
+    var id: String { occurrence.id }
+    var periodCount: Int { lastPeriod - firstPeriod + 1 }
+
+    static func layout(_ occurrences: [CourseOccurrence], on date: Date) -> [TimetablePlacement] {
+        let daily = occurrences.mergeConsecutive().filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
+        var assigned: [(CourseOccurrence, Int, Int, Int)] = []
+        var laneEnds: [Int] = []
+        for occurrence in daily {
+            let first = Semester.periodOf(startMinutes: occurrence.slot.startMinutes)
+            let last = Swift.max(first, Semester.endPeriod(of: occurrence.slot.endMinutes))
+            let lane = laneEnds.firstIndex { $0 < first } ?? laneEnds.count
+            if lane == laneEnds.count { laneEnds.append(last) } else { laneEnds[lane] = last }
+            assigned.append((occurrence, first, last, lane))
+        }
+        return assigned.map {
+            TimetablePlacement(occurrence: $0.0, firstPeriod: $0.1, lastPeriod: $0.2,
+                               lane: $0.3, laneCount: Swift.max(1, laneEnds.count))
+        }
     }
 }
 

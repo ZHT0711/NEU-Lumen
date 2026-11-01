@@ -28,7 +28,9 @@ final class PortalRepository {
     private(set) var weekState: LoadState = .idle
 
     private var gradesCache: [GradeSemester]?
+    private var gradeRequestID = 0
     private(set) var gradesState: LoadState = .idle
+    private(set) var gradesWarning: String?
 
     // MARK: 一卡通 / 网费 / 电费
 
@@ -81,6 +83,8 @@ final class PortalRepository {
         weekCache.removeAll()
         loadingWeeks.removeAll()
         gradesCache = nil
+        gradeRequestID += 1
+        gradesWarning = nil
         cardBalance = nil
         cardBills = []
         billsCache.removeAll()
@@ -265,15 +269,29 @@ final class PortalRepository {
         }
         if gradesState == .loading { return }
         gradesState = .loading
+        let requestID = gradeRequestID
         do {
             let list = try await withRecovery {
                 try await self.session.client.fetchJwxtGrades()
             }
-            gradesCache = list
-            gradesState = .loaded
+            guard requestID == gradeRequestID else { return }
+            applyGradeReport(list)
         } catch {
-            gradesState = .failed(NetworkError.from(error).message)
+            guard requestID == gradeRequestID else { return }
+            if gradesCache?.isEmpty == false {
+                gradesWarning = "本次同步失败，保留上次结果：" + NetworkError.from(error).message
+                gradesState = .loaded
+            } else {
+                gradesState = .failed(NetworkError.from(error).message)
+            }
         }
+    }
+
+    func applyGradeReport(_ report: GradeReport) {
+        gradeRequestID += 1
+        gradesCache = report.semesters
+        gradesWarning = report.failedTerms.isEmpty ? nil : "部分学期未能同步：" + report.failedTerms.joined(separator: "、")
+        gradesState = .loaded
     }
 
     // MARK: - 一卡通 / 网费 / 电费

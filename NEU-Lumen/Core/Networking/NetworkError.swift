@@ -3,6 +3,15 @@ import Foundation
 /// 网络与业务错误。message 直接面向用户展示。
 struct NetworkError: LocalizedError {
     let message: String
+    /// 统一认证要求新设备短信二次认证。
+    var needsSecondAuth = false
+
+    static func needSecondAuth() -> NetworkError {
+        var error = NetworkError(message: "需要完成短信二次认证")
+        error.needsSecondAuth = true
+        return error
+    }
+
     var errorDescription: String? { message }
 
     /// 统一身份认证会话失效，需要重新登录。

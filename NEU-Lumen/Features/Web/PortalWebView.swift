@@ -1,105 +1,356 @@
 import SwiftUI
 import WebKit
+import Observation
 
-/// 应用内浏览器页：注入 CAS 会话 Cookie，各业务系统 SSO 免登录直达。
+/// 校园浏览器：保留网页当前地址、历史和会话，提供原生导航与页面工具。
 struct PortalWebViewScreen: View {
     let url: URL
+    var academicMode = false
     @Environment(AppEnvironment.self) private var environment
-    @State private var progress: Double = 0
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
+    @State private var browser = PortalBrowser()
+    @State private var syncError: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            if progress > 0.01 && progress < 0.99 {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
+            HStack(spacing: 7) {
+                Image(systemName: browser.currentURL?.scheme == "https" ? "lock.fill" : "network")
+                Text(browser.currentURL?.host ?? url.host ?? "校园网页")
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+                if browser.downloadCount > 0 { Text("正在下载…") }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            if browser.isLoading {
+                ProgressView(value: browser.progress)
+                    .tint(AppTheme.accent)
                     .frame(height: 2)
             }
-            PortalWebView(
-                url: url,
-                cookies: environment.session.client.cookieSnapshot(),
-                progress: $progress
-            )
+            PortalWebView(browser: browser)
+                .overlay {
+                    if let error = browser.error {
+                        ErrorStateView(message: error, retryTitle: "重新加载") { browser.reload() }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(.regularMaterial)
+                    }
+                }
         }
         .background(Color(.systemBackground))
-        .ignoresSafeArea(edges: .bottom)
-        .navigationTitle(url.host ?? "校园网页")
+        .navigationTitle(browser.title.isEmpty ? "校园网页" : browser.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    openURL(url)
-                } label: {
-                    Image(systemName: "arrow.up.forward.app")
-                }
+                Menu {
+                    Button("在页面中查找", systemImage: "doc.text.magnifyingglass") {
+                        browser.webView.findInteraction?.presentFindNavigator(showingReplace: false)
+                    }
+                    Menu {
+                        ForEach([0.8, 1.0, 1.15, 1.3, 1.5], id: \.self) { zoom in
+                            Button {
+                                browser.zoom = zoom
+                                browser.webView.pageZoom = zoom
+                            } label: {
+                                if browser.zoom == zoom { Label("\(Int(zoom * 100))%", systemImage: "checkmark") }
+                                else { Text("\(Int(zoom * 100))%") }
+                            }
+                        }
+                    } label: { Label("页面缩放", systemImage: "textformat.size") }
+                    Button(browser.desktopMode ? "请求移动版网页" : "请求桌面版网页",
+                           systemImage: browser.desktopMode ? "iphone" : "desktopcomputer") { browser.toggleDesktop() }
+                    Button("复制当前链接", systemImage: "link") { UIPasteboard.general.url = browser.currentURL ?? url }
+                    Button("在 Safari 中打开", systemImage: "safari") { openURL(browser.currentURL ?? url) }
+                    Button("导出当前页为 PDF", systemImage: "doc.richtext") {
+                        Task { await browser.exportPDF() }
+                    }
+                    Button("回到应用入口", systemImage: "house") { browser.goToEntry() }
+                } label: { Image(systemName: "ellipsis.circle") }
+                .accessibilityLabel("网页工具")
+            }
+            if academicMode {
+                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if academicMode {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(syncError ?? "进入教务学生首页后，将网页中的成绩同步到应用。")
+                            .font(.caption).foregroundStyle(syncError == nil ? Color.secondary : Color.orange)
+                        Button {
+                            Task {
+                                syncError = nil
+                                do {
+                                    let report = try await browser.syncGrades()
+                                    environment.repository.applyGradeReport(report)
+                                    dismiss()
+                                } catch { syncError = NetworkError.from(error).message }
+                            }
+                        } label: {
+                            HStack {
+                                if browser.isSyncing { ProgressView().tint(.white) }
+                                Text(browser.isSyncing ? "正在同步全部学期…" : "同步成绩到应用")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(browser.isSyncing || browser.isLoading)
+                    }
+                    .padding(12)
+                }
+                HStack {
+                    toolButton("后退", icon: "chevron.left", disabled: !browser.canGoBack) { browser.webView.goBack() }
+                    Spacer(minLength: 0)
+                    toolButton("前进", icon: "chevron.right", disabled: !browser.canGoForward) { browser.webView.goForward() }
+                    Spacer(minLength: 0)
+                    toolButton(browser.isLoading ? "停止" : "刷新", icon: browser.isLoading ? "xmark" : "arrow.clockwise") {
+                        if browser.isLoading { browser.webView.stopLoading() } else { browser.reload() }
+                    }
+                    Spacer(minLength: 0)
+                    ShareLink(item: browser.currentURL ?? url) {
+                        Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel("分享当前网页")
+                }
+                .padding(.horizontal, 18)
+            }
+            .background(.bar)
+        }
+        .sheet(item: $browser.sharedFile) { file in
+            BrowserShareSheet(url: file.url)
+                .presentationDetents([.medium, .large])
+        }
+        .task { await browser.start(url, client: environment.session.client) }
+        .onDisappear { browser.webView.stopLoading() }
+    }
+
+    private func toolButton(_ title: String, icon: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: icon).frame(width: 44, height: 44) }
+            .disabled(disabled).accessibilityLabel(title)
     }
 }
 
 struct PortalWebView: UIViewRepresentable {
+    let browser: PortalBrowser
+    func makeUIView(context: Context) -> WKWebView { browser.webView }
+    func updateUIView(_ view: WKWebView, context: Context) {}
+}
+
+struct BrowserSharedFile: Identifiable {
     let url: URL
-    let cookies: [String: [String: String]]
-    @Binding var progress: Double
+    var id: String { url.absoluteString }
+}
 
-    func makeUIView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = WKWebsiteDataStore.default()
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = context.coordinator
+private struct BrowserShareSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+@MainActor
+@Observable
+final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    let webView: WKWebView
+    var currentURL: URL?
+    var title = ""
+    var progress = 0.0
+    var isLoading = false
+    var canGoBack = false
+    var canGoForward = false
+    var error: String?
+    var desktopMode = false
+    var zoom = 1.0
+    var isSyncing = false
+    var sharedFile: BrowserSharedFile?
+    var downloadCount = 0
+    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
+    @ObservationIgnored private weak var client: PortalClient?
+    @ObservationIgnored private var entryURL: URL?
+    @ObservationIgnored private var started = false
+    @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
+
+    override init() {
+        let config = WKWebViewConfiguration()
+        // 每个浏览器仅使用当前账号的 Cookie，关闭后不保留到下一个账号。
+        config.websiteDataStore = .nonPersistent()
+        config.defaultWebpagePreferences.preferredContentMode = .mobile
+        webView = WKWebView(frame: .zero, configuration: config)
+        super.init()
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
-        context.coordinator.observe(webView, progress: $progress)
-
-        let snapshot = cookies
-        Task { @MainActor in
-            await Self.injectCookies(snapshot, into: webView)
-            webView.load(URLRequest(url: url))
-        }
-        return webView
+        webView.isFindInteractionEnabled = true
+        webView.scrollView.keyboardDismissMode = .interactive
+        observations = [
+            webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.isLoading, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.url, options: [.new]) { [weak self] _, _ in self?.updateState() },
+            webView.observe(\.title, options: [.new]) { [weak self] _, _ in self?.updateState() },
+        ]
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    /// 把会话快照写入 WKHTTPCookieStore（跳过已存在的同名同值 Cookie）。
-    @MainActor
-    static func injectCookies(_ snapshot: [String: [String: String]], into webView: WKWebView) async {
+    func start(_ url: URL, client: PortalClient) async {
+        guard !started else { return }
+        started = true
+        self.client = client
+        isLoading = true
+        let destination = await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
-        let existing = await store.allCookies()
-        for (domain, map) in snapshot {
-            for (name, value) in map {
-                let duplicated = existing.contains {
-                    $0.domain == domain && $0.name == name && $0.value == value
-                }
-                guard !duplicated,
-                      let cookie = HTTPCookie(properties: [
-                          .domain: domain,
-                          .path: "/",
-                          .name: name,
-                          .value: value,
-                      ]) else { continue }
-                await store.setCookie(cookie)
-            }
+        for cookie in client.browserCookies() { await store.setCookie(cookie) }
+        guard !Task.isCancelled else { return }
+        entryURL = destination
+        currentURL = destination
+        webView.load(URLRequest(url: destination))
+    }
+
+    private func updateState() {
+        currentURL = webView.url ?? entryURL
+        title = webView.title ?? ""
+        progress = webView.estimatedProgress
+        isLoading = webView.isLoading
+        canGoBack = webView.canGoBack
+        canGoForward = webView.canGoForward
+    }
+
+    func reload() {
+        error = nil
+        if webView.url != nil { webView.reload() } else { goToEntry() }
+    }
+
+    func goToEntry() {
+        guard let entryURL else { return }
+        error = nil
+        webView.load(URLRequest(url: entryURL))
+    }
+
+    func toggleDesktop() {
+        desktopMode.toggle()
+        webView.configuration.defaultWebpagePreferences.preferredContentMode = desktopMode ? .desktop : .mobile
+        reload()
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        preferences.preferredContentMode = desktopMode ? .desktop : .mobile
+        guard let url = navigationAction.request.url else { decisionHandler(.cancel, preferences); return }
+        let scheme = url.scheme?.lowercased() ?? ""
+        if ["http", "https", "about", "blob", "data"].contains(scheme) {
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
+        } else {
+            if ["tel", "mailto", "sms", "weixin", "alipay", "alipays"].contains(scheme) {
+                UIApplication.shared.open(url)
+            } else { error = "当前链接需要其他应用打开，可从菜单复制链接" }
+            decisionHandler(.cancel, preferences)
         }
     }
 
-    @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        private var observation: NSKeyValueObservation?
-        private var progressBinding: Binding<Double>?
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        return !response.canShowMIMEType || disposition.lowercased().contains("attachment") ? .download : .allow
+    }
 
-        func observe(_ webView: WKWebView, progress: Binding<Double>) {
-            progressBinding = progress
-            observation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] web, _ in
-                self?.progressBinding?.wrappedValue = web.estimatedProgress
-            }
-        }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        updateState()
+        Task { await syncCookies() }
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { show(error) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { error = "网页进程已停止，请重新加载" }
 
-        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {
-            .allow
+    private func show(_ failure: Error) {
+        if (failure as NSError).code == NSURLErrorCancelled { return }
+        error = NetworkError.from(failure).message
+        isLoading = false
+    }
+
+    private func syncCookies() async {
+        let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        client?.absorbBrowserCookies(cookies)
+    }
+
+    func syncGrades() async throws -> GradeReport {
+        guard let url = webView.url,
+              url.host == "jwxt.neu.edu.cn" || (url.host == "webvpn.neu.edu.cn" && url.path.contains("/jwapp/")) else {
+            throw NetworkError(message: "请先完成认证，进入教务系统学生首页")
         }
+        isSyncing = true
+        defer { isSyncing = false }
+        let raw = try await webView.callAsyncJavaScript(AcademicResponse.browserScript, arguments: [:], in: nil, contentWorld: .page)
+        await syncCookies()
+        return try AcademicResponse.browserReport(raw ?? [:])
+    }
+
+    func exportPDF() async {
+        do {
+            let data = try await webView.pdf(configuration: WKPDFConfiguration())
+            let destination = FileManager.default.temporaryDirectory.appendingPathComponent("NEU-Lumen-\(UUID().uuidString).pdf")
+            try data.write(to: destination)
+            sharedFile = BrowserSharedFile(url: destination)
+        } catch { self.error = "PDF 导出失败，请等待网页加载完成后重试" }
+    }
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if action.targetFrame == nil { webView.load(action.request) }
+        return nil
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
+    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,
+                  completionHandler: @escaping (URL?) -> Void) {
+        do {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let name = URL(fileURLWithPath: suggestedFilename).lastPathComponent
+            let destination = directory.appendingPathComponent(name.isEmpty ? "download" : name)
+            downloads[ObjectIdentifier(download)] = destination
+            downloadCount = downloads.count
+            completionHandler(destination)
+        } catch { self.error = "无法创建下载文件"; completionHandler(nil) }
+    }
+    func downloadDidFinish(_ download: WKDownload) {
+        if let url = downloads.removeValue(forKey: ObjectIdentifier(download)) { sharedFile = BrowserSharedFile(url: url) }
+        downloadCount = downloads.count
+    }
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloads[ObjectIdentifier(download)] = nil
+        downloadCount = downloads.count
+        self.error = "下载失败：" + error.localizedDescription
+    }
+
+    private func present(_ alert: UIAlertController, fallback: () -> Void) {
+        guard var controller = webView.window?.rootViewController else { fallback(); return }
+        while let presented = controller.presentedViewController { controller = presented }
+        guard !(controller is UIAlertController) else { fallback(); return }
+        controller.present(alert, animated: true)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let alert = UIAlertController(title: webView.url?.host, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "好", style: .default) { _ in completionHandler() })
+        present(alert, fallback: completionHandler)
+    }
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let alert = UIAlertController(title: webView.url?.host, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler(true) })
+        present(alert) { completionHandler(false) }
+    }
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let alert = UIAlertController(title: webView.url?.host, message: prompt, preferredStyle: .alert)
+        alert.addTextField { $0.text = defaultText }
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(nil) })
+        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak alert] _ in completionHandler(alert?.textFields?.first?.text) })
+        present(alert) { completionHandler(nil) }
     }
 }
