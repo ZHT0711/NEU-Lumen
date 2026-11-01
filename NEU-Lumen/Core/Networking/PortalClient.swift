@@ -30,8 +30,13 @@ final class PortalClient {
         if let probe = campusProbe, Date().timeIntervalSince(probe.date) < 600 {
             return probe.isCampus
         }
-        let ok = await quickReachable("http://ecard.neu.edu.cn/")
-            || await quickReachable("https://jwxt.neu.edu.cn/")
+        let ecardReachable = await quickReachable("http://ecard.neu.edu.cn/")
+        let ok: Bool
+        if ecardReachable {
+            ok = true
+        } else {
+            ok = await quickReachable("https://jwxt.neu.edu.cn/")
+        }
         campusProbe = (Date(), ok)
         if ok { webvpnOn = false }
         return ok
