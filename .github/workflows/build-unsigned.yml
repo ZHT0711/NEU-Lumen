@@ -100,6 +100,20 @@ jobs:
           "${RUNNER_TEMP}/service-catalog-tests"
           node Tests/AcademicBridge/check.mjs
 
+      - name: Test off-campus login and service preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc \
+            NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Models/*.swift \
+            NEU-Lumen/Core/Networking/*.swift \
+            NEU-Lumen/Core/Services/DemoData.swift \
+            NEU-Lumen/Core/Services/Semester.swift \
+            Tests/OffCampusLogin/main.swift \
+            -o "${RUNNER_TEMP}/off-campus-tests"
+          "${RUNNER_TEMP}/off-campus-tests"
+
       - name: Build unsigned IPA
         run: bash build_ios_unsigned.sh
 

@@ -11,15 +11,44 @@ struct PortalUser: Equatable {
     let avatarUrl: String
 
     static func fromInfoJson(_ j: [String: Any]) -> PortalUser {
-        PortalUser(
-            uid: j.str("uid"),
-            name: j.str("name"),
-            sid: j.str("xgh"),
-            identity: j.str("identity"),
-            department: j.str("depart"),
-            email: j.str("email"),
-            avatarUrl: j.str("avatar")
+        func value(_ key: String) -> String { j.str(key).trimmingCharacters(in: .whitespacesAndNewlines) }
+        return PortalUser(
+            uid: value("uid"),
+            name: value("name"),
+            sid: value("xgh"),
+            identity: value("identity"),
+            department: value("depart"),
+            email: value("email"),
+            avatarUrl: value("avatar")
         )
+    }
+
+    var hasProfile: Bool { !name.isEmpty || !sid.isEmpty }
+    var hasCoreProfile: Bool { !name.isEmpty && !sid.isEmpty && !identity.isEmpty && !department.isEmpty }
+    var displayName: String { name.isEmpty ? (sid.isEmpty ? "东大师生" : sid) : name }
+    var identityDetails: String { [identity, department].filter { !$0.isEmpty }.joined(separator: " · ") }
+
+    static let pending = PortalUser(uid: "", name: "", sid: "", identity: "", department: "", email: "", avatarUrl: "")
+
+    func merging(_ newer: PortalUser) -> PortalUser {
+        if (!uid.isEmpty && !newer.uid.isEmpty && uid != newer.uid)
+            || (!sid.isEmpty && !newer.sid.isEmpty && sid != newer.sid) { return newer }
+        func pick(_ old: String, _ next: String) -> String { next.isEmpty ? old : next }
+        return PortalUser(uid: pick(uid, newer.uid), name: pick(name, newer.name), sid: pick(sid, newer.sid),
+                          identity: pick(identity, newer.identity), department: pick(department, newer.department),
+                          email: pick(email, newer.email), avatarUrl: pick(avatarUrl, newer.avatarUrl))
+    }
+
+    static func fromBrowserJSON(_ raw: String) -> PortalUser? {
+        guard let data = raw.data(using: .utf8),
+              let decoded = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else { return nil }
+        let object: [String: Any]?
+        if let nested = decoded as? String, let nestedData = nested.data(using: .utf8) {
+            object = (try? JSONSerialization.jsonObject(with: nestedData)) as? [String: Any]
+        } else { object = decoded as? [String: Any] }
+        guard let object else { return nil }
+        let user = fromInfoJson(object)
+        return user.hasProfile ? user : nil
     }
 }
 
@@ -34,7 +63,7 @@ struct NewsItem: Identifiable, Hashable {
 }
 
 /// 服务大厅里的门户应用。
-struct PortalApp: Identifiable, Hashable {
+struct PortalApp: Identifiable, Hashable, Codable {
     let name: String
     let appId: String
     let url: String

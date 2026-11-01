@@ -7,7 +7,7 @@ final class PortalClient {
     static let portalBase = "https://personal.neu.edu.cn/portal"
     static let jwxtBase = "https://jwxt.neu.edu.cn"
 
-    private let http = HTTPClient()
+    private let http: HTTPClient
 
     // MARK: - 校园网 / WebVPN
 
@@ -15,7 +15,8 @@ final class PortalClient {
     private(set) var webvpnOn = false
     private var campusProbe: (date: Date, isCampus: Bool)?
 
-    init() {
+    init(http: HTTPClient = HTTPClient()) {
+        self.http = http
         http.redirectRewriter = { [weak self] url in
             guard let self,
                   self.webvpnOn,
@@ -95,6 +96,17 @@ final class PortalClient {
         http.cookies.hasWebVPNTicket()
     }
 
+    var hasCasSession: Bool {
+        http.cookies.hasCookie(CasCrypto.casLoginURL, "CASTGC")
+    }
+
+    var hasLoginSession: Bool { isLoggedIn || hasCasSession || hasWebVPNTicket }
+
+    func setUserAgent(_ value: String) {
+        let agent = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !agent.isEmpty { http.userAgentOverride = agent }
+    }
+
     /// WebView 会话回收后：若已持有网关票据则直接进入网关模式
     /// （校外门户直连必被网关劫持，门户读取必须经网关）。
     func adoptGatewayTicket() {
@@ -132,6 +144,9 @@ final class PortalClient {
     func clearSession() {
         http.cookies.clear()
         secondAuthExecution = nil
+        webvpnOn = false
+        campusProbe = nil
+        http.userAgentOverride = nil
     }
 
     /// 吸收网页方式登录（WKWebView）里完成的会话 Cookie（含 CASTGC / SESS_ID）。
@@ -303,13 +318,11 @@ final class PortalClient {
     /// 校外门户 HTML 会被学校重定向进 WebVPN 网关：直连失败（落到 CAS/网关拦截页）
     /// 时自动切换到网关模式重试一次。
     func fetchUserInfo() async throws -> PortalUser {
-        var target = maybeWrap(Self.portalBase)
-        guard let url = URL(string: target) else {
-            throw NetworkError(message: "门户地址无效")
-        }
         // 三级自愈：直连 → 网关（现有票据）→ 丢弃票据强制重换（UA 绑定兜底）
         for attempt in 0..<3 {
             if attempt == 2 {
+                // 没有 CAS 就无法重换票据，不能为了补资料丢掉浏览器的可用会话。
+                guard hasCasSession else { break }
                 webvpnOn = false
                 http.cookies.removeWebVPNTickets()
             } else {
@@ -322,10 +335,7 @@ final class PortalClient {
                 throw NetworkError(message: "门户地址无效")
             }
             let resp = try await http.get(requestURL)
-            if !Self.isPortalSessionFailure(resp) {
-                guard let user = Self.extractUser(fromHTML: resp.text) else {
-                    throw NetworkError(message: "会话未能正常建立，请重新登录")
-                }
+            if !Self.isPortalSessionFailure(resp), let user = Self.extractUser(fromHTML: resp.text) {
                 return user
             }
         }
@@ -347,7 +357,8 @@ final class PortalClient {
     private func api(_ path: String, query: [URLQueryItem] = []) async throws -> [String: Any] {
         var comps = URLComponents(string: Self.portalBase + "/" + path)!
         if !query.isEmpty { comps.queryItems = query }
-        let resp = try await http.get(comps.url!, xhr: true)
+        let requestURL = URL(string: maybeWrap(comps.url!.absoluteString))!
+        let resp = try await http.get(requestURL, xhr: true)
         if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
             || resp.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
@@ -1132,7 +1143,8 @@ final class PortalClient {
                               let obj = (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) as? [String: Any] else {
                             return nil
                         }
-                        return PortalUser.fromInfoJson(obj)
+                        let user = PortalUser.fromInfoJson(obj)
+                        return user.hasProfile ? user : nil
                     }
                 }
             }

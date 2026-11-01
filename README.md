@@ -71,7 +71,15 @@ bash build_ios_unsigned.sh
 - 校外对 `ecard` / `jwxt` 等校园网专属主机自动改写为 Wengine 网关地址
   （AES-128-CFB128、IV=密钥，密钥来自学校 WebVPN 前端，写在 `Core/Networking/WebVPN.swift`），
   票据用公网一号通的 CASTGC 经 `webvpn.neu.edu.cn/login?cas_login=true` 换取；
-- `portal` / `pass` / `pay` / `personal` 属公网可达主机，校外仍直连。
+- 网关模式下 `personal` / `portal` 的门户首页与 JSON 接口也统一经过网关；
+  CAS `pass` 和缴费 `pay` 保持各自的公网 HTTPS 入口。
+
+浏览器方式登录对齐 [NEUPortal 修复版 `1e4c787`](https://github.com/ZHT0711/neu-portal/commit/1e4c787)：
+先在同一 WKWebView 内完成网关 CAS 换票，再进入代理后的一号通门户；等待 `userInfoDSL`
+填充后，把个人资料、真实 WebKit UA 和完整 Cookie 一起交给原生客户端。网关首页不再被当作
+门户首页，登录失败后可以在面板中继续重试。已有登录会话时，资料暂未同步不会阻断进入应用，
+可在「我的」刷新资料。服务目录使用同版公共入口快照与账号缓存合并更新，防止公开短列表
+覆盖 VPN 等入口；显示入口不代表账号拥有该服务的访问权限。
 
 ## 性能设计
 

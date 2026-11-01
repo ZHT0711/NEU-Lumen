@@ -16,6 +16,8 @@ final class SessionStore {
     private(set) var phase: Phase = .booting
     private(set) var user: PortalUser?
     private(set) var lastError: String?
+    private(set) var refreshingProfile = false
+    private(set) var profileSyncError: String?
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
@@ -107,31 +109,52 @@ final class SessionStore {
     /// 网页方式登录完成：吸收 WKWebView 里的会话 Cookie 并拉取用户信息。
     /// 校外门户被学校重定向进 WebVPN 网关时，WebView 会落在网关域上：
     /// 此时 CASTGC 已到手，先换网关票据再经网关读取门户。
-    func completeWebLogin(cookies: [HTTPCookie]) async -> Bool {
+    func completeWebLogin(_ browser: WebLoginSession) async -> Bool {
         phase = .loggingIn
         lastError = nil
         needsSecondAuth = false
-        client.absorbCookies(cookies)
-        // WebView 里已拿到网关票据 → 直接进入网关模式（校外门户必须经网关读取）
+        profileSyncError = nil
+        client.clearSession()
+        client.setUserAgent(browser.userAgent)
+        client.absorbCookies(browser.cookies)
         client.adoptGatewayTicket()
-        do {
-            if !client.isLoggedIn && !client.webvpnOn {
-                guard await client.ensureWebVPN() else {
-                    throw NetworkError(message: "WebVPN 网关登录失败：请稍后重试，或连接校园网后直接登录")
-                }
+        guard client.hasLoginSession else {
+            lastError = "未取得登录会话，请在页面中完成统一身份认证"
+            phase = .loggedOut
+            return false
+        }
+        var info = browser.user
+        if info?.hasCoreProfile != true {
+            if !client.isLoggedIn && !client.webvpnOn { _ = await client.ensureWebVPN() }
+            if let fetched = try? await client.fetchUserInfo() {
+                info = info?.merging(fetched) ?? fetched
             }
-            let info = try await client.fetchUserInfo()
-            user = info
-            phase = .loggedIn
-            return true
-        } catch let e as NetworkError {
-            lastError = e.message
+        }
+        guard !Task.isCancelled else {
             phase = .loggedOut
             return false
+        }
+        // Cookie 会话已到手时不因门户 HTML 被风控拦截而否定整个登录。
+        user = info ?? .pending
+        if let sid = info?.sid, !sid.isEmpty {
+            if let saved = CredentialStore.load(), saved.username != sid { CredentialStore.clear() }
+            UserDefaults.standard.set(sid, forKey: Self.rememberedKey)
+        }
+        phase = .loggedIn
+        return true
+    }
+
+    /// 手动刷新可补齐网页登录时尚未提供的学院、身份和邮箱。
+    func refreshUserProfile() async {
+        guard phase == .loggedIn, !refreshingProfile else { return }
+        refreshingProfile = true
+        defer { refreshingProfile = false }
+        do {
+            let fetched = try await client.fetchUserInfo()
+            user = user?.merging(fetched) ?? fetched
+            profileSyncError = user?.hasCoreProfile == true ? nil : "门户尚未提供完整个人资料"
         } catch {
-            lastError = error.localizedDescription
-            phase = .loggedOut
-            return false
+            profileSyncError = "个人资料同步失败，请稍后重试"
         }
     }
 
@@ -152,6 +175,7 @@ final class SessionStore {
         CredentialStore.clear()
         client.clearSession()
         user = nil
+        profileSyncError = nil
         lastError = nil
         phase = .loggedOut
     }

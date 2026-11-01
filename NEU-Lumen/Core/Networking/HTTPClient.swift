@@ -25,9 +25,10 @@ final class HTTPClient {
     /// 重定向目标改写钩子：WebVPN 模式下把校内主机 Location 改写为网关地址。
     /// 返回 nil 表示不改写。
     var redirectRewriter: ((URL) -> URL?)?
+    var userAgentOverride: String?
 
-    init() {
-        let config = URLSessionConfiguration.ephemeral
+    init(configuration: URLSessionConfiguration = .ephemeral) {
+        let config = configuration
         config.httpShouldSetCookies = false
         config.timeoutIntervalForRequest = Self.timeout
         config.timeoutIntervalForResource = 60
@@ -41,7 +42,7 @@ final class HTTPClient {
         var current = request
         for _ in 0..<maxHops {
             if current.value(forHTTPHeaderField: "User-Agent") == nil {
-                current.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                current.setValue(userAgentOverride ?? Self.userAgent, forHTTPHeaderField: "User-Agent")
             }
             if current.value(forHTTPHeaderField: "Accept") == nil {
                 current.setValue("application/json, text/html, */*", forHTTPHeaderField: "Accept")

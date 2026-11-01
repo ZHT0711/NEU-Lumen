@@ -19,26 +19,38 @@ struct ProfileView: View {
                             .scaledToFit()
                             .frame(width: 52, height: 52)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(environment.session.user?.name ?? "未登录")
+                            Text(environment.session.user?.displayName ?? "未登录")
                                 .font(.headline)
                             Text(environment.session.user?.sid ?? "")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            if let identity = environment.session.user?.identity, !identity.isEmpty {
-                                Text("\(identity) · \(environment.session.user?.department ?? "")")
+                            if let details = environment.session.user?.identityDetails, !details.isEmpty {
+                                Text(details)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                            }
+                            if let email = environment.session.user?.email, !email.isEmpty {
+                                Text(email).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
                     .padding(.vertical, 4)
+                    if environment.session.user?.hasCoreProfile != true {
+                        Text("个人资料尚未同步完整").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if let error = environment.session.profileSyncError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
+                    Button(environment.session.refreshingProfile ? "正在同步…" : "刷新个人资料") {
+                        Task { await environment.session.refreshUserProfile() }
+                    }
+                    .disabled(environment.session.refreshingProfile)
                 }
 
                 Section("会话") {
                     LabeledContent("记住的账号", value: environment.session.rememberedUsername.isEmpty ? "未保存" : environment.session.rememberedUsername)
                     LabeledContent("保持登录", value: environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭")
-                    LabeledContent("门户会话", value: environment.session.client.isLoggedIn ? "有效" : "无效")
+                    LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
                     Button(role: .destructive) {
                         confirmLogout = true
                     } label: {

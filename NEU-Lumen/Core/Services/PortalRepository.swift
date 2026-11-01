@@ -64,6 +64,8 @@ final class PortalRepository {
     private var monthKey: String { Self.monthFormatter.string(from: Calendar.current.date(from: DateComponents(year: billsYear, month: billsMonth))!) }
 
     private var loadedForSID: String?
+    private var appsLoaded = false
+    private var appsLoading = false
 
     init(session: SessionStore) {
         self.session = session
@@ -73,10 +75,11 @@ final class PortalRepository {
 
     /// 登录用户变化时清空缓存，避免串号。
     func ensureLoadedForCurrentUser() async {
-        let sid = session.user?.sid ?? ""
+        let sid = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         guard loadedForSID != sid else { return }
         dataCards = []
-        apps = []
+        apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
+        appsLoaded = false
         news = []
         todos = []
         hotSearch = []
@@ -148,10 +151,12 @@ final class PortalRepository {
             dataCards = DemoData.dataCards
         }
         if let v = appsValue, !v.isEmpty {
-            apps = v
+            apps = ServiceCatalog.merging([DemoData.apps, cachedApps(), apps, v])
+            saveAppsCache()
+            appsLoaded = true
             anySuccess = true
         } else if apps.isEmpty {
-            apps = DemoData.apps
+            apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
         }
         if let v = newsValue, !v.isEmpty {
             news = v
@@ -168,19 +173,40 @@ final class PortalRepository {
             hotSearch = DemoData.hotSearch
         }
 
-        if user == nil { user = session.user ?? DemoData.user }
+        user = session.user
         usedOfflineFallback = !anySuccess
         homeState = anySuccess ? .loaded : .failed("门户接口不可用，正在展示离线演示数据")
     }
 
     /// 服务大厅按需加载应用列表（避免冷启动时重复请求）。
     func loadAppsIfNeeded() async {
-        guard apps.isEmpty else { return }
+        guard !appsLoaded, !appsLoading else { return }
+        appsLoading = true
+        defer { appsLoading = false }
         if let v = await run({ try await session.client.fetchApps() }), !v.isEmpty {
-            apps = v
+            apps = ServiceCatalog.merging([DemoData.apps, cachedApps(), v])
+            saveAppsCache()
+            appsLoaded = true
         } else {
-            apps = DemoData.apps
+            apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
         }
+    }
+
+    /// 服务入口按账号缓存；短公开列表、网络错误不能抹掉完整目录。
+    private var appsCacheKey: String? {
+        guard let user = session.user else { return nil }
+        let account = user.sid.isEmpty ? user.uid : user.sid
+        return account.isEmpty ? nil : "lumen.apps." + account
+    }
+
+    private func cachedApps() -> [PortalApp] {
+        guard let key = appsCacheKey, let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        return (try? JSONDecoder().decode([PortalApp].self, from: data)) ?? []
+    }
+
+    private func saveAppsCache() {
+        guard let key = appsCacheKey, let data = try? JSONEncoder().encode(apps) else { return }
+        UserDefaults.standard.set(data, forKey: key)
     }
 
     func loadHotSearchIfNeeded() async {

@@ -10,12 +10,12 @@ import WebKit
 struct WebLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppEnvironment.self) private var environment
-    var onCookies: ([HTTPCookie]) async -> Bool
+    var onCookies: (WebLoginSession) async -> Bool
 
     var body: some View {
         NavigationStack {
-            WebLoginWebView { cookies in
-                let ok = await onCookies(cookies)
+            WebLoginWebView { session in
+                let ok = await onCookies(session)
                 if ok { dismiss() }
                 // 失败时保持面板打开：页面内可重试，或左上角取消
                 return ok
@@ -29,7 +29,7 @@ struct WebLoginSheet: View {
                 }
             }
             .safeAreaInset(edge: .top) {
-                if let error = environment.session.lastError, environment.session.phase == .loggingIn {
+                if let error = environment.session.lastError {
                     Text(error)
                         .font(.caption2)
                         .foregroundStyle(.orange)
@@ -45,7 +45,7 @@ struct WebLoginSheet: View {
 }
 
 struct WebLoginWebView: UIViewRepresentable {
-    var onPortalLanding: ([HTTPCookie]) async -> Bool
+    var onPortalLanding: (WebLoginSession) async -> Bool
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -64,28 +64,56 @@ struct WebLoginWebView: UIViewRepresentable {
         Coordinator()
     }
 
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.captureTask?.cancel()
+        webView.navigationDelegate = nil
+    }
+
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate {
-        var onPortalLanding: (([HTTPCookie]) async -> Bool)?
+        var onPortalLanding: ((WebLoginSession) async -> Bool)?
+        var captureTask: Task<Void, Never>?
+        private var flow = PortalLoginFlow()
         private var completed = false
+        private var capturing = false
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard !completed, onPortalLanding != nil else { return }
-            guard let host = webView.url?.host?.lowercased() else { return }
-            // 两种成功/半成功落地都收会话：
-            // - personal：直连门户成功；
-            // - webvpn：校外门户被学校重定向进网关（CAS 已成功，CASTGC 已到手，
-            //   由 SessionStore 换网关票据后经网关完成登录），不要停在网关拦截页。
-            let landedPortal = host == "personal.neu.edu.cn"
-            let landedWebVPN = host == "webvpn.neu.edu.cn"
-            guard landedPortal || landedWebVPN else { return }
-            completed = true
-            let store = webView.configuration.websiteDataStore.httpCookieStore
-            store.getAllCookies { [weak self] cookies in
-                Task { @MainActor in
-                    guard let self, let handler = self.onPortalLanding else { return }
-                    _ = await handler(cookies)
+            guard !completed, !capturing, onPortalLanding != nil, let url = webView.url else { return }
+            switch flow.action(for: url) {
+            case .wait:
+                return
+            case .navigate(let destination):
+                webView.load(URLRequest(url: destination))
+            case .capture:
+                capture(webView)
+            }
+        }
+
+        private func capture(_ webView: WKWebView) {
+            capturing = true
+            captureTask = Task { @MainActor [weak self, weak webView] in
+                guard let self, let webView else { return }
+                defer { self.capturing = false }
+                var user: PortalUser?
+                // SPA 会先提供不完整 DSL；必须 await，并继续合并后续非空字段。
+                for _ in 0..<6 {
+                    guard !Task.isCancelled else { return }
+                    guard let url = webView.url, PortalLoginFlow.isPersonalPortal(url) else { break }
+                    if let raw = try? await webView.evaluateJavaScript("JSON.stringify(window.userInfoDSL || {})") as? String,
+                       let next = PortalUser.fromBrowserJSON(raw) {
+                        user = user?.merging(next) ?? next
+                        if user?.hasCoreProfile == true { break }
+                    }
+                    try? await Task.sleep(nanoseconds: 700_000_000)
                 }
+                guard !Task.isCancelled, let url = webView.url,
+                      ["personal.neu.edu.cn", "webvpn.neu.edu.cn", "portal.neu.edu.cn"].contains(url.host ?? "") else { return }
+                // 在门户加载完成后再收 Cookie，保留代理路径上的 SESS_ID。
+                let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+                let agent = (try? await webView.evaluateJavaScript("navigator.userAgent")) as? String ?? ""
+                guard !Task.isCancelled, let handler = self.onPortalLanding else { return }
+                self.completed = await handler(WebLoginSession(cookies: cookies, user: user, userAgent: agent))
+                if !self.completed { self.flow = PortalLoginFlow() }
             }
         }
     }

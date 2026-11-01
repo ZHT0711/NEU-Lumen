@@ -59,8 +59,8 @@ struct LoginView: View {
         .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showWebLogin) {
-            WebLoginSheet { cookies in
-                await environment.session.completeWebLogin(cookies: cookies)
+            WebLoginSheet { session in
+                await environment.session.completeWebLogin(session)
             }
         }
         .task {
