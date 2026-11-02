@@ -258,7 +258,8 @@ MockPortalProtocol.handle = { request in
         let body = requestBody(request)
         precondition(body.contains("username=20260042") && body.contains("timestamp=fixture-time"))
         precondition(body.contains("auid=fixture-auid%26token"), "必须解码 HTML 实体后再表单编码")
-        precondition(request.value(forHTTPHeaderField: "Referer") == url.absoluteString)
+        precondition(request.value(forHTTPHeaderField: "Referer")?.contains("/selflogin/login.aspx") == true)
+        precondition(request.value(forHTTPHeaderField: "Origin") == "http://ecard.neu.edu.cn")
         return (200, ["Set-Cookie":"ASP.NET_SessionId=card; Path=/selfsearch"], "<html>ok</html>")
     }
     precondition(url.path == "/selfsearch/User/baseinfo.aspx")
@@ -387,7 +388,7 @@ func verifySessionRestart() async throws {
     }
     let expiredAtServer = makeSession()
     await expiredAtServer.restoreSession()
-    precondition(expiredAtServer.phase == .loggedOut && vault.data == nil)
+    precondition(expiredAtServer.phase == .loggedIn && vault.data != nil, "单一路线返回认证页不能丢掉另一个网络的会话")
     print("Web session restart: serialization, session-only/HttpOnly/path cookies, UA, offline/403 recovery, expiry and logout passed")
 }
 try await verifySessionRestart()
@@ -398,3 +399,100 @@ precondition(ServiceCatalog(apps: DemoData.apps + [codeApp]).ecodeURL.absoluteSt
 precondition(ServiceCatalog(apps: DemoData.apps).ecodeURL.absoluteString == PortalClient.serviceCard)
 precondition(ServiceCatalog(apps: []).ecodeURL.absoluteString == PortalClient.serviceCard)
 print("Home e-code shortcut: official mobile entry and Flutter-compatible SSO fallback passed")
+
+// Homepage URLs resolve relative links and never treat a blank mobile URL as a destination.
+precondition(PortalLink.from([["form_mobile_url_view":" ", "form_url_view":"/portal/task/42"]])?.absoluteString == PortalClient.portalBase + "/task/42")
+precondition(PortalLink.resolve("detail/42")?.absoluteString == PortalClient.portalBase + "/detail/42")
+precondition(PortalLink.resolve("//neunews.neu.edu.cn/a.htm")?.host == "neunews.neu.edu.cn")
+precondition(PortalLink.resolve("javascript:alert(1)") == nil)
+precondition(PortalLink.resolve("data:text/html,x") == nil)
+let articleURL = URL(string: "https://neunews.neu.edu.cn/2026/1102/article.htm")!
+let articleHTML = #"""
+<header><img src="/logo.png"></header><script>const fake='<img src="/fake.jpg">';</script>
+<div class="wp_articlecontent"><p>新闻正文</p><img width="1" height="1" src="/counter.gif">
+<div><img src="data:image/gif;base64,AAAA" data-src="../../_upload/first.jpg?x=1&amp;y=2"></div>
+<img src="/second.jpg"></div><footer><img src="/footer.jpg"></footer>
+"""#
+precondition(NewsArticle.firstImage(in: articleHTML, base: articleURL)?.absoluteString == "https://neunews.neu.edu.cn/_upload/first.jpg?x=1&y=2")
+precondition(NewsArticle.firstImage(in: #"<img src='/logo.png'><div id='vsb_content'><p>无图文章</p></div><img src='/footer.jpg'>"#, base: articleURL) == nil)
+precondition(NewsArticle.firstImage(in: #"<meta property='og:image' content='/cover.jpg'><article><img src='/actual-first.jpg'></article>"#, base: articleURL)?.path == "/actual-first.jpg")
+print("Homepage links and article images: URL safety, mobile fallback, nested body, lazy image, tracking/header exclusion passed")
+
+@MainActor
+func verifyNetworkRoaming() async throws {
+    let vault = MemoryWebSessionStore()
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockPortalProtocol.self]
+    let roamingHTTP = HTTPClient(configuration: config)
+    let client = PortalClient(http: roamingHTTP)
+    let publicCAS = HTTPCookie(properties: [.name:"CASTGC", .value:"roaming-cas", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
+    try vault.save(SavedWebSession(user: user, userAgent: "Roaming WebKit UA", cookies: [ticket, publicCAS, proxyCASTGC]))
+    var campus = true
+    var exchanges = 0
+    MockPortalProtocol.handle = { request in
+        let url = request.url!
+        if url.host == "ecard.neu.edu.cn" || url.host == "jwxt.neu.edu.cn" {
+            return campus ? (302, ["Location":"/selflogin/login.aspx"], "") : (403, [:], "not on campus")
+        }
+        if url.host == "webvpn.neu.edu.cn", campus {
+            return (403, ["Set-Cookie":"wengine_vpn_ticket=; Max-Age=0; Path=/"], "仅用于我校师生在校外登录")
+        }
+        if url.host == "pass.neu.edu.cn" {
+            exchanges += 1
+            precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("roaming-cas") == true)
+            let service = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "service" }!.value!
+            return (302, ["Location":service + "&ticket=ST-roaming"], "")
+        }
+        if url.path.contains("/manage/common/cas_login/") {
+            return (302, ["Set-Cookie":"SESS_ID=campus-portal; Path=/portal; Secure", "Location":PortalClient.portalBase], "")
+        }
+        if url.host == "personal.neu.edu.cn", request.value(forHTTPHeaderField: "Cookie")?.contains("campus-portal") != true {
+            return (302, ["Location":CasCrypto.casLoginURL.absoluteString], "")
+        }
+        return (200, [:], "<script>const userInfoDSL = \(raw);</script>")
+    }
+    let session = SessionStore(client: client, webSessions: vault)
+    await session.restoreSession()
+    precondition(session.phase == .loggedIn && !client.webvpnOn && exchanges == 1)
+    precondition(client.hasWebVPNTicket && vault.load()!.cookies.contains { $0.value == "fixture-ticket" }, "校内网关拒绝不能清掉校外会话")
+    campus = false
+    let outside = await session.silentRelogin()
+    precondition(outside && session.phase == .loggedIn && client.webvpnOn && exchanges == 1, "再次出校应复用之前的网关票据")
+    campus = true
+    let inside = await session.silentRelogin()
+    precondition(inside && session.phase == .loggedIn && !client.webvpnOn && client.hasWebVPNTicket && exchanges == 1)
+    precondition(vault.load()!.restoredCookies().contains { $0.value == "campus-portal" })
+    let secondUser = PortalUser(uid: "99", name: "另一账号", sid: "20260099", identity: "本科生", department: "学院", email: "", avatarUrl: "")
+    let otherCAS = HTTPCookie(properties: [.name:"CASTGC", .value:"other-account", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
+    let changed = await session.completeWebLogin(WebLoginSession(cookies: [otherCAS], user: secondUser, userAgent: "Other UA"))
+    precondition(changed && !client.hasWebVPNTicket && vault.load()!.user == secondUser, "不同账号不能合并旧网络会话")
+    session.logout()
+    precondition(!client.hasLoginSession && vault.load() == nil)
+    print("Network roaming: gateway denial, direct CAS renewal, repeated campus/off-campus transitions, vault retention and account isolation passed")
+}
+try await verifyNetworkRoaming()
+
+let contentConfig = URLSessionConfiguration.ephemeral
+contentConfig.protocolClasses = [MockPortalProtocol.self]
+let contentClient = PortalClient(http: HTTPClient(configuration: contentConfig))
+MockPortalProtocol.handle = { request in
+    if request.url!.path.hasSuffix("/data/items") {
+        return (200, [:], #"{"e":0,"d":{"data":[{"id":"book","name":"图书借阅","url":"/portal/fallback"}]}}"#)
+    }
+    if request.url!.path.hasSuffix("/data/detail") {
+        return (200, [:], #"{"e":0,"d":{"data":{"value":3,"mobile_url":"/portal/books/detail"}}}"#)
+    }
+    precondition(request.url!.path.hasSuffix("/task/apply"))
+    return (200, [:], #"{"e":0,"d":{"list":[{"third_app_name":"测试事项","form_mobile_url_view":" ","form_url_view":"/portal/task/42"}]}}"#)
+}
+let dataCards = try await contentClient.fetchDataCards()
+let tasks = try await contentClient.fetchTodos()
+precondition(dataCards.first?.value == "3" && dataCards.first?.destination == PortalClient.portalBase + "/books/detail")
+precondition(tasks.first?.url == PortalClient.portalBase + "/task/42")
+MockPortalProtocol.handle = { _ in
+    contentClient.clearSession()
+    return (200, ["Set-Cookie":"SESS_ID=late-response; Path=/portal"], "<script>window.userInfoDSL = \(raw);</script>")
+}
+do { _ = try await contentClient.fetchUserInfo(); preconditionFailure("退出后不能接受旧网络响应") }
+catch { precondition(!contentClient.hasLoginSession) }
+print("Homepage API links and logout generation: detail links, relative task links and late-cookie isolation passed")

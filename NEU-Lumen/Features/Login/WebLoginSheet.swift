@@ -16,7 +16,7 @@ struct WebLoginSheet: View {
 
     var body: some View {
         NavigationStack {
-            WebLoginWebView(client: environment.session.client, gatewayOverride: gatewayOverride, onPrepared: { preparing = false }) { session in
+            WebLoginWebView(client: environment.session.client, reuseSession: environment.session.phase == .loggedIn, gatewayOverride: gatewayOverride, onPrepared: { preparing = false }) { session in
                 let ok = await onCookies(session)
                 if ok { dismiss() }
                 // 失败时保持面板打开：页面内可重试，或左上角取消
@@ -69,6 +69,7 @@ struct WebLoginSheet: View {
 
 struct WebLoginWebView: UIViewRepresentable {
     let client: PortalClient
+    var reuseSession: Bool
     var gatewayOverride: Bool?
     var onPrepared: () -> Void
     var onPortalLanding: (WebLoginSession) async -> Bool
@@ -78,9 +79,10 @@ struct WebLoginWebView: UIViewRepresentable {
         // 一次性存储：每次网页登录从干净的认证页开始，避免残留票据引起瞬时跳转
         configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.customUserAgent = client.browserUserAgent
         webView.navigationDelegate = context.coordinator
         context.coordinator.onPortalLanding = onPortalLanding
-        context.coordinator.begin(webView, client: client, gatewayOverride: gatewayOverride, onPrepared: onPrepared)
+        context.coordinator.begin(webView, client: client, reuseSession: reuseSession, gatewayOverride: gatewayOverride, onPrepared: onPrepared)
         return webView
     }
 
@@ -104,7 +106,7 @@ struct WebLoginWebView: UIViewRepresentable {
         private var completed = false
         private var capturing = false
 
-        func begin(_ webView: WKWebView, client: PortalClient, gatewayOverride: Bool?, onPrepared: @escaping () -> Void) {
+        func begin(_ webView: WKWebView, client: PortalClient, reuseSession: Bool, gatewayOverride: Bool?, onPrepared: @escaping () -> Void) {
             captureTask = Task { @MainActor [weak self, weak webView] in
                 let entry: URL
                 if let gatewayOverride { entry = gatewayOverride ? URL(string: WebVPN.casService)! : CasCrypto.casLoginURL }
@@ -112,6 +114,10 @@ struct WebLoginWebView: UIViewRepresentable {
                 guard !Task.isCancelled, let self, let webView else { return }
                 self.gatewayFirst = WebVPN.isWrapped(entry.absoluteString)
                 self.flow = PortalLoginFlow(gatewayFirst: self.gatewayFirst)
+                if reuseSession {
+                    for cookie in client.browserCookies() { await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) }
+                }
+                guard !Task.isCancelled else { return }
                 onPrepared()
                 webView.load(URLRequest(url: entry))
             }

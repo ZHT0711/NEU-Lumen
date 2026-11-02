@@ -268,6 +268,7 @@ struct HomeView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(spacing: 10) {
                             ForEach(repo.dataCards) { card in
+                                Button { path.append(.web(repo.dataCardURL(card))) } label: {
                                 GlassCard(cornerRadius: 16) {
                                     VStack(alignment: .leading, spacing: 6) {
                                         Text(card.name)
@@ -282,6 +283,8 @@ struct HomeView: View {
                                     .padding(12)
                                     .frame(width: 128, alignment: .topLeading)
                                 }
+                                }.buttonStyle(.plain)
+                                .accessibilityHint("打开对应校园数据网页")
                             }
                         }
                     }
@@ -377,7 +380,7 @@ struct HomeView: View {
                 LazyHStack(spacing: 10) {
                     ForEach(repo.todos) { todo in
                         Button {
-                            if let url = URL(string: withScheme(todo.url)) {
+                            if let url = PortalLink.resolve(todo.url) {
                                 path.append(.web(url))
                             }
                         } label: {
@@ -425,7 +428,7 @@ struct HomeView: View {
                     } else {
                         ForEach(Array(repo.news.enumerated()), id: \.element.id) { index, item in
                             Button {
-                                if let url = URL(string: withScheme(item.url)) {
+                                if let url = PortalLink.resolve(item.url) {
                                     path.append(.web(url))
                                 }
                             } label: {
@@ -558,6 +561,7 @@ struct TimelineRow: View {
 
 /// 资讯一行。
 struct NewsRow: View {
+    @Environment(AppEnvironment.self) private var environment
     let item: NewsItem
 
     var body: some View {
@@ -573,14 +577,28 @@ struct NewsRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if !item.picUrl.isEmpty {
-                RemoteImageView(path: item.picUrl)
-                    .frame(width: 52, height: 40)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Group {
+                if let data = environment.repository.newsThumbnails[item.id], let image = UIImage(data: data) {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(AppTheme.accent.opacity(0.06))
+                        .overlay {
+                            if environment.repository.newsThumbnails[item.id] == nil { ProgressView().controlSize(.small) }
+                            else { Text("暂无配图").font(.caption2).foregroundStyle(.secondary) }
+                        }
+                }
             }
+            .frame(width: 88, height: 64)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityHidden(true)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
+        .task(id: "\(item.id)|\(environment.repository.newsRevision)") {
+            await environment.repository.loadNewsThumbnail(item)
+        }
     }
 }

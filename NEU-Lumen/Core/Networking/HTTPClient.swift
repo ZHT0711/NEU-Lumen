@@ -39,8 +39,10 @@ final class HTTPClient {
     /// 手动跟随重定向（最多 10 跳），每跳吸收 Set-Cookie。
     @discardableResult
     func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true) async throws -> RawResponse {
+        let generation = cookies.generation
         var current = request
         for _ in 0..<maxHops {
+            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
             if current.value(forHTTPHeaderField: "User-Agent") == nil {
                 current.setValue(userAgentOverride ?? Self.userAgent, forHTTPHeaderField: "User-Agent")
             }
@@ -55,6 +57,7 @@ final class HTTPClient {
             }
 
             let (data, response) = try await session.data(for: current)
+            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
             guard let http = response as? HTTPURLResponse else {
                 throw NetworkError(message: "网络响应异常")
             }
@@ -111,11 +114,12 @@ final class HTTPClient {
         return try await send(req)
     }
 
-    func postForm(_ url: URL, fields: [String: String]) async throws -> RawResponse {
+    func postForm(_ url: URL, fields: [String: String], extraHeaders: [String: String] = [:]) async throws -> RawResponse {
         var req = URLRequest(url: url, timeoutInterval: Self.timeout)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         req.setValue(url.absoluteString, forHTTPHeaderField: "Referer")
+        for (key, value) in extraHeaders { req.setValue(value, forHTTPHeaderField: key) }
         let body = fields
             .map { "\($0.key.urlFormEncoded)=\($0.value.urlFormEncoded)" }
             .joined(separator: "&")

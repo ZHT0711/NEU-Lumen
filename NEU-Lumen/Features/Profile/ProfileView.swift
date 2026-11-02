@@ -8,6 +8,7 @@ struct ProfileView: View {
     private var campusInk: Color {
         colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
     }
+    @State private var showWebLogin = false
     @State private var confirmLogout = false
 
     private var version: String {
@@ -111,6 +112,7 @@ struct ProfileView: View {
                     if let error = environment.session.sessionSaveError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
+                    Button("更新网页登录（保留账号和收藏）") { showWebLogin = true }
                     LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
                     Button(role: .destructive) {
                         confirmLogout = true
@@ -149,6 +151,9 @@ struct ProfileView: View {
                 } header: {
                     Text("隐私与免责声明")
                 }
+            }
+            .sheet(isPresented: $showWebLogin) {
+                WebLoginSheet { await environment.session.completeWebLogin($0) }
             }
             .navigationTitle("我的")
             .navigationDestination(for: AppDestination.self) { destination in

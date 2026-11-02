@@ -9,11 +9,15 @@ final class PortalClient {
 
     private let http: HTTPClient
     private let casGate = CASRequestGate()
+    private let newsGate = CASRequestGate(limit: 3)
+    private var sessionEpoch = UUID()
+    var sessionGeneration: UUID { sessionEpoch }
 
     // MARK: - 校园网 / WebVPN
 
     /// WebVPN 模式开启后，校内主机的重定向与请求都会改写为网关地址。
     private(set) var webvpnOn = false
+    private var routeInvalidated = false
     private var campusProbe: (date: Date, isCampus: Bool)?
 
     init(http: HTTPClient = HTTPClient()) {
@@ -28,7 +32,13 @@ final class PortalClient {
     }
 
     /// 是否校园网：ecard:80 或 jwxt:443 任一可达（结果缓存 10 分钟）。
+    func invalidateAccessRoute() {
+        campusProbe = nil
+        routeInvalidated = true
+    }
+
     func isCampusNet() async -> Bool {
+        let epoch = sessionEpoch
         if let probe = campusProbe, Date().timeIntervalSince(probe.date) < 600 {
             return probe.isCampus
         }
@@ -39,7 +49,9 @@ final class PortalClient {
         } else {
             ok = await quickReachable("https://jwxt.neu.edu.cn/")
         }
+        guard epoch == sessionEpoch, !Task.isCancelled else { return ok }
         campusProbe = (Date(), ok)
+        routeInvalidated = false
         return ok
     }
 
@@ -60,8 +72,8 @@ final class PortalClient {
 
     /// 在已有 CAS 会话所在的认证域中换取 WebVPN 票据。
     @discardableResult
-    func ensureWebVPN() async -> Bool {
-        if webvpnOn && http.cookies.hasWebVPNTicket() { return true }
+    func ensureWebVPN(force: Bool = false) async -> Bool {
+        if !force && webvpnOn && http.cookies.hasWebVPNTicket() { return true }
         for _ in 0..<2 {
             let url = authenticationURL(for: WebVPN.casService)
             if let resp = try? await http.get(url) {
@@ -78,17 +90,11 @@ final class PortalClient {
 
     /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
     func prepareAccess() async {
-        // An authenticated gateway session is stronger evidence than a public WAF/probe response.
-        if webvpnOn || hasWebVPNTicket {
-            adoptGatewayTicket()
-            _ = await ensureWebVPN()
-            return
-        }
-        if await isCampusNet() { return }
-        // Keep the gateway destination even if background ticket exchange fails;
-        // WKWebView can finish authentication instead of falling back to an unreachable campus URL.
-        webvpnOn = true
-        _ = await ensureWebVPN()
+        let epoch = sessionEpoch
+        let campus = await isCampusNet()
+        guard epoch == sessionEpoch, !Task.isCancelled else { return }
+        webvpnOn = !campus
+        if !campus { _ = await ensureWebVPN() }
     }
 
     private func maybeWrap(_ url: String) -> String {
@@ -122,22 +128,16 @@ final class PortalClient {
 
     /// 重启验证只读取门户，不为了补资料销毁旧票据；拦截/断网不等同于退出。
     func validateSavedSession() async throws -> PortalUser? {
-        let response = try await http.get(URL(string: maybeWrap(Self.portalBase))!)
-        if response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login")
-            || Self.isSessionLostHTML(response.text) {
-            throw NetworkError.sessionExpired()
-        }
-        guard (200..<300).contains(response.status) else {
-            throw NetworkError(message: "门户暂时不可用，保留已保存的登录会话")
-        }
-        return Self.extractUser(fromHTML: response.text)
+        // A login page on one route cannot invalidate the other route's session.
+        try await fetchUserInfo()
     }
 
     /// WebView 会话回收后：若已持有网关票据则直接进入网关模式
     /// （校外门户直连必被网关劫持，门户读取必须经网关）。
     func adoptGatewayTicket() {
-        if http.cookies.hasWebVPNTicket() {
+        if http.cookies.hasWebVPNTicket(), campusProbe?.isCampus != true {
             webvpnOn = true
+            if campusProbe == nil && !routeInvalidated { campusProbe = (Date(), false) }
         }
     }
 
@@ -177,10 +177,12 @@ final class PortalClient {
     }
 
     func clearSession() {
+        sessionEpoch = UUID()
         http.cookies.clear()
         secondAuthExecution = nil
         webvpnOn = false
         campusProbe = nil
+        routeInvalidated = false
         http.userAgentOverride = nil
     }
 
@@ -198,6 +200,7 @@ final class PortalClient {
 
     /// CAS 登录。成功返回用户信息，失败抛 NetworkError。
     func login(username rawUsername: String, password: String) async throws -> PortalUser {
+        sessionEpoch = UUID()
         http.cookies.clear()
         let username = rawUsername
             .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
@@ -353,30 +356,39 @@ final class PortalClient {
     /// 校外门户 HTML 会被学校重定向进 WebVPN 网关：直连失败（落到 CAS/网关拦截页）
     /// 时自动切换到网关模式重试一次。
     func fetchUserInfo() async throws -> PortalUser {
-        // 三级自愈：直连 → 网关（现有票据）→ 丢弃票据强制重换（UA 绑定兜底）
+        let retained = browserCookies()
+        let epoch = sessionEpoch
+        defer { if epoch == sessionEpoch { retainMissingCookies(retained) } }
+        var lastError = NetworkError(message: "门户暂时无法验证，已保留登录信息")
         for attempt in 0..<3 {
+            guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+            if attempt == 1 {
+                invalidateAccessRoute()
+                await prepareAccess()
+            }
             if attempt == 2 {
-                // 没有 CAS 就无法重换票据，不能为了补资料丢掉浏览器的可用会话。
-                guard hasCasSession else { break }
-                webvpnOn = false
-                http.cookies.removeWebVPNTickets()
-            } else {
-                adoptGatewayTicket()
+                // Rebuild the portal service session without clearing either CAS cookie realm.
+                if webvpnOn { _ = await ensureWebVPN(force: true) }
+                guard let service = URLComponents(url: CasCrypto.casLoginURL, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "service" })?.value else { break }
+                _ = try? await casLand(service)
             }
-            if attempt >= 1 {
-                let gatewayReady = await ensureWebVPN()
-                if !gatewayReady { throw NetworkError.sessionExpired() }
-            }
-            guard let requestURL = URL(string: maybeWrap(Self.portalBase)) else {
-                throw NetworkError(message: "门户地址无效")
-            }
-            let resp = try await http.get(requestURL)
-            if !Self.isPortalSessionFailure(resp), let user = Self.extractUser(fromHTML: resp.text) {
-                return user
-            }
+            do {
+                let response = try await http.get(URL(string: maybeWrap(Self.portalBase))!)
+                if !Self.isPortalSessionFailure(response), let user = Self.extractUser(fromHTML: response.text) { return user }
+                if response.finalURL.path.contains("/tpass/login") || Self.isSessionLostHTML(response.text) {
+                    lastError = .sessionExpired()
+                }
+            } catch { lastError = NetworkError.from(error) }
         }
-        throw NetworkError.sessionExpired()
+        throw lastError
     }
+
+    /// Preserve the other network's cookies; a failed gateway response must not erase its saved realm.
+    func retainMissingCookies(_ retained: [HTTPCookie]) {
+        let present = Set(browserCookies().map { "\($0.domain)|\($0.path)|\($0.name)" })
+        http.cookies.absorb(retained.filter { !present.contains("\($0.domain)|\($0.path)|\($0.name)") })
+    }
+
 
     /// 直连门户是否失败：落在 CAS 登录页 / 网关拦截页 / 网关域。
     private static func isPortalSessionFailure(_ resp: HTTPClient.RawResponse) -> Bool {
@@ -545,10 +557,37 @@ final class PortalClient {
                 title: title,
                 date: n.str("publish_time").split(separator: " ").first.map(String.init) ?? "",
                 category: cname,
-                url: n.str("url"),
-                picUrl: n.str("picurl")
+                url: PortalLink.from([n])?.absoluteString ?? "",
+                picUrl: PortalLink.resolve(n.str("picurl"))?.absoluteString ?? ""
             )
         }
+    }
+
+    /// Article-body images load lazily with the same account cookies and route as the article.
+    func fetchNewsThumbnail(_ item: NewsItem) async -> Data? {
+        await newsGate.acquire()
+        let result = await readNewsThumbnail(item)
+        await newsGate.release()
+        return result
+    }
+
+    private func readNewsThumbnail(_ item: NewsItem) async -> Data? {
+        guard !Task.isCancelled else { return nil }
+        var image: URL?
+        var referer: String?
+        if let article = PortalLink.resolve(item.url),
+           let response = try? await http.get(browserDestination(for: article), extraHeaders: ["Accept": "text/html,application/xhtml+xml"]),
+           (200..<300).contains(response.status), response.body.count <= 4_000_000 {
+            let base = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+            image = NewsArticle.firstImage(in: response.text, base: base)
+            referer = response.finalURL.absoluteString
+        }
+        image = image ?? PortalLink.resolve(item.picUrl)
+        guard !Task.isCancelled, let image,
+              let response = try? await http.get(browserDestination(for: image), extraHeaders: [
+                "Accept": "image/avif,image/webp,image/*,*/*;q=0.8", "Referer": referer ?? item.url
+              ]), (200..<300).contains(response.status), !response.body.isEmpty, response.body.count <= 8_000_000 else { return nil }
+        return response.body
     }
 
     /// 办事动态（在办事项），失败时由调用方降级为空。
@@ -561,14 +600,14 @@ final class PortalClient {
         let list = (d["list"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
         return list.map { t in
             let nodes = (t["node_name"] as? [Any])?.compactMap { $0 as? String } ?? []
-            let mobileUrl = t.str("form_mobile_url_view")
+            let destination = PortalLink.from([t]) ?? PortalLink.appURL(id: t.str("third_app_id")) ?? URL(string: Self.portalBase)!
             return TodoItem(
                 title: t.str("third_app_name"),
                 instance: t.str("third_inst_name"),
                 node: nodes.last ?? "处理中",
                 percent: t.int("percent") ?? 0,
                 time: t.str("inst_created").split(separator: ".").first.map(String.init) ?? "",
-                url: mobileUrl.isEmpty ? t.str("form_url_view") : mobileUrl
+                url: destination.absoluteString
             )
         }
     }
@@ -585,10 +624,13 @@ final class PortalClient {
             let name = it.str("name")
             if name.isEmpty { continue }
             var value = "—"
+            var metadata = [it]
             let id = it.str("id")
             if !id.isEmpty,
                let det = try? await api("personal/frontend/data/detail", query: [URLQueryItem(name: "id", value: id)]),
                let inner = det["data"] as? [String: Any] {
+                metadata.insert(det, at: 0)
+                metadata.insert(inner, at: 0)
                 // 值在详情接口里，容错解析：value / data / text / 整体
                 for cand in [inner["value"], inner["data"], inner["text"], inner] {
                     guard let c = cand, !(c is NSNull) else { continue }
@@ -606,7 +648,8 @@ final class PortalClient {
                     }
                 }
             }
-            out.append(DataCard(name: name, value: value))
+            let destination = PortalLink.from(metadata) ?? PortalLink.appURL(id: it.str("app_id"))
+            out.append(DataCard(name: name, value: value, destination: destination?.absoluteString ?? ""))
         }
         return out
     }
@@ -706,7 +749,7 @@ final class PortalClient {
     private func authenticationURL(for service: String) -> URL {
         let direct = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
         // Gateway-first browser logins own a proxied CAS session, not a public CASTGC.
-        return URL(string: webvpnOn && !hasCasSession ? WebVPN.wrap(direct) : direct)!
+        return URL(string: (webvpnOn || hasWebVPNTicket) && !hasCasSession ? WebVPN.wrap(direct) : direct)!
     }
 
     func browserDestination(for url: URL) -> URL {
@@ -742,10 +785,14 @@ final class PortalClient {
 
     /// 一卡通余额：CAS 换票 → ecard 自动提交表单 → baseinfo 页解析输入框。
     func fetchCardBalance() async throws -> CardBalance {
+        await prepareAccess()
         do { return try await fetchCardBalanceOnce() }
         catch {
-            // A reachable campus probe does not guarantee the card host is reachable.
-            guard !webvpnOn, await ensureWebVPN() else { throw error }
+            let original = error
+            let previousRoute = webvpnOn
+            invalidateAccessRoute()
+            await prepareAccess()
+            guard previousRoute != webvpnOn else { throw original }
             return try await fetchCardBalanceOnce()
         }
     }
@@ -760,7 +807,11 @@ final class PortalClient {
                 throw NetworkError(message: "一卡通单点登录表单不完整")
             }
             if let url = URL(string: maybeWrap(Self.ecardBase + "/selfsearch/SSOLogin.aspx")) {
-                let response = try await http.postForm(url, fields: form)
+                let response = try await http.postForm(url, fields: form, extraHeaders: [
+                    "Referer": resp.finalURL.absoluteString,
+                    "Origin": URLComponents(url: url, resolvingAgainstBaseURL: false).map { "\($0.scheme!)://\($0.host!)" } ?? "",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                ])
                 guard (200..<400).contains(response.status) else {
                     throw NetworkError(message: "一卡通单点登录 HTTP \(response.status)")
                 }
@@ -794,22 +845,7 @@ final class PortalClient {
         _ = try? await fetchCardBalance() // 建立 ecard 会话（失败则复用现有会话）
         var html = try await ecardGet("/selfsearch/User/ConsumeInfo.aspx")
 
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.year, .month, .day], from: Date())
-        let lastDay = Self.daysInMonth(year: year, month: month)
-        let start = String(format: "%04d-%02d-01", year, month)
-        let end: String
-        if comps.year == year && comps.month == month {
-            end = String(format: "%04d-%02d-%02d", year, month, comps.day ?? lastDay)
-        } else {
-            end = String(format: "%04d-%02d-%02d", year, month, lastDay)
-        }
-
-        var fields = Self.hiddenFields(html)
-        fields["ctl00$ContentPlaceHolder1$rbtnType"] = "0"
-        fields["ctl00$ContentPlaceHolder1$txtStartDate"] = start
-        fields["ctl00$ContentPlaceHolder1$txtEndDate"] = end
-        fields["ctl00$ContentPlaceHolder1$btnSearch"] = "查  询"
+        let fields = Self.cardBillSearchFields(html: html, year: year, month: month)
 
         var response = try await postToEcard("/selfsearch/User/ConsumeInfo.aspx", fields)
         html = response.text
@@ -934,12 +970,13 @@ final class PortalClient {
         guard let url = URL(string: maybeWrap(Self.ecardBase + path)) else {
             throw NetworkError(message: "一卡通地址无效")
         }
-        let resp = try await http.get(url)
+        let resp = try await http.get(url, extraHeaders: ["Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            "Referer": maybeWrap(Self.ecardBase + "/selfsearch/")])
         guard (200..<300).contains(resp.status) else {
             throw NetworkError(message: "一卡通接口 HTTP \(resp.status)")
         }
         if Self.isSessionLostHTML(resp.text) {
-            throw NetworkError(message: "一卡通会话未建立，请重试（校外需走 WebVPN）")
+            throw NetworkError(message: "一卡通需要重新建立网页会话")
         }
         return resp.text
     }
@@ -948,7 +985,11 @@ final class PortalClient {
         guard let url = URL(string: maybeWrap(Self.ecardBase + path)) else {
             throw NetworkError(message: "一卡通地址无效")
         }
-        return try await http.postForm(url, fields: fields)
+        let response = try await http.postForm(url, fields: fields)
+        guard (200..<300).contains(response.status), !Self.isSessionLostHTML(response.text) else {
+            throw NetworkError(message: "一卡通查询 HTTP \(response.status)，请使用网页会话同步")
+        }
+        return response
     }
 
     /// 门户 tp_up 网费用量：先种会话再 POST。返回 nil 表示还停在登录页。
@@ -986,6 +1027,27 @@ final class PortalClient {
             || html.contains("请求被拒绝") || html.contains("您的访问被拦截") || html.contains("非法访问")
     }
 
+    static func cardBillSearchFields(html: String, year: Int, month: Int) -> [String: String] {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.year, .month, .day], from: Date())
+        let lastDay = daysInMonth(year: year, month: month)
+        let start = String(format: "%04d-%02d-01", year, month)
+        let end: String
+        if comps.year == year && comps.month == month {
+            end = String(format: "%04d-%02d-%02d", year, month, comps.day ?? lastDay)
+        } else {
+            end = String(format: "%04d-%02d-%02d", year, month, lastDay)
+        }
+
+        var fields = hiddenFields(html)
+        fields["ctl00$ContentPlaceHolder1$rbtnType"] = "0"
+        fields["ctl00$ContentPlaceHolder1$txtStartDate"] = start
+        fields["ctl00$ContentPlaceHolder1$txtEndDate"] = end
+        fields["ctl00$ContentPlaceHolder1$btnSearch"] = "查  询"
+
+        return fields
+    }
+
     static func daysInMonth(year: Int, month: Int) -> Int {
         var comps = DateComponents()
         comps.year = year
@@ -1010,7 +1072,7 @@ final class PortalClient {
     }
 
     /// type=hidden 输入框：name -> value（ASP.NET 回发必需）。
-    private static func hiddenFields(_ html: String) -> [String: String] {
+    static func hiddenFields(_ html: String) -> [String: String] {
         var out: [String: String] = [:]
         for attrs in inputTags(html) where attrs["hidden"] == "1" {
             if let name = attrs["name"], !name.isEmpty {
@@ -1055,7 +1117,7 @@ final class PortalClient {
         return Double(String(raw[r]))
     }
 
-    private static func hasNextPage(_ html: String, _ page: Int) -> Bool {
+    static func hasNextPage(_ html: String, _ page: Int) -> Bool {
         html.contains("'\(page)'") || html.contains(">\(page)<")
     }
 
@@ -1086,7 +1148,7 @@ final class PortalClient {
         return junkDateSubjectRegex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
     }
 
-    private static func parseBillTable(_ html: String) -> [CardBill] {
+    static func parseBillTable(_ html: String) -> [CardBill] {
         var out: [CardBill] = []
         for m in trRegex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
             guard let rowRange = Range(m.range, in: html) else { continue }

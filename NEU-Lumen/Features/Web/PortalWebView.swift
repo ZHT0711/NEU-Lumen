@@ -6,6 +6,7 @@ import Observation
 struct PortalWebViewScreen: View {
     let url: URL
     var academicMode = false
+    var cardMode = false
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -96,6 +97,27 @@ struct PortalWebViewScreen: View {
 
     private var floatingControls: some View {
         VStack(spacing: 10) {
+            if cardMode {
+                GlassCard(cornerRadius: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(syncError ?? "完成一卡通认证后，同步网页中的真实余额到应用。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("同步校园卡到应用") {
+                            Task {
+                                syncError = nil
+                                let epoch = environment.session.client.sessionGeneration
+                                do {
+                                    let balance = try await browser.syncCardBalance()
+                                    guard epoch == environment.session.client.sessionGeneration else { return }
+                                    environment.repository.cardWebBridge.use(store: browser.webView.configuration.websiteDataStore)
+                                    environment.repository.applyCardBalance(balance)
+                                    dismiss()
+                                } catch { syncError = NetworkError.from(error).message }
+                            }
+                        }.buttonStyle(.borderedProminent).disabled(browser.isLoading || browser.isSyncing)
+                    }.padding(12)
+                }
+            }
             if academicMode {
                 GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -238,6 +260,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     var downloadCount = 0
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private weak var client: PortalClient?
+    @ObservationIgnored private var clientEpoch: UUID?
     @ObservationIgnored private var entryURL: URL?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
@@ -280,12 +303,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         guard !started else { return }
         started = true
         self.client = client
+        clientEpoch = client.sessionGeneration
         webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
         let destination = await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
         for cookie in client.browserCookies() { await store.setCookie(cookie) }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
         entryURL = destination
         currentURL = destination
         webView.load(URLRequest(url: destination))
@@ -367,7 +391,27 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
 
     private func syncCookies() async {
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
-        client?.absorbBrowserCookies(cookies)
+        guard let client, client.sessionGeneration == clientEpoch else { return }
+        client.absorbBrowserCookies(cookies)
+    }
+
+    func syncCardBalance() async throws -> CardBalance {
+        guard let client, client.sessionGeneration == clientEpoch, let current = webView.url else { throw CancellationError() }
+        let original = WebVPN.unwrap(current) ?? current
+        guard original.host == "ecard.neu.edu.cn" else {
+            throw NetworkError(message: "请先完成认证并进入一卡通网页")
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+        let target = await client.prepareBrowserURL(URL(string: "http://ecard.neu.edu.cn/selfsearch/User/baseinfo.aspx")!)
+        let raw = try await webView.callAsyncJavaScript(#"""
+        const response = await fetch(url, {credentials:'include'});
+        if (!response.ok || response.url.includes('/tpass/login')) throw new Error('一卡通网页尚未完成认证');
+        return await response.text();
+        """#, arguments: ["url": target.absoluteString], in: nil, contentWorld: .page)
+        guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
+        await syncCookies()
+        return try PortalClient.parseCardBalance(fromHTML: raw as? String ?? "")
     }
 
     func syncGrades() async throws -> GradeReport {

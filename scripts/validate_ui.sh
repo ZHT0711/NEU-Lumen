@@ -24,7 +24,7 @@ xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
   > "$OUTPUT/simulator-build.log" 2>&1
 xcrun simctl install "$SIM_ID" "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
-python3 -m http.server 8787 --bind 127.0.0.1 --directory "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
+python3 "$ROOT/scripts/ui_fixture_server.py" "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100

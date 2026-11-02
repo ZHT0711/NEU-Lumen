@@ -4,6 +4,7 @@ import SwiftUI
 /// 校园卡：余额、月流水、网费、电费（校外自动经 WebVPN 网关）。
 struct CardView: View {
     @Environment(AppEnvironment.self) private var environment
+    @State private var showCardWeb = false
     @State private var roomDraft = ""
     @State private var editingRoom = false
 
@@ -33,7 +34,13 @@ struct CardView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("校园卡")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showCardWeb) {
+            NavigationStack { PortalWebViewScreen(url: URL(string: PortalClient.serviceCard)!, cardMode: true) }
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("一卡通网页", systemImage: "safari") { showCardWeb = true }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {

@@ -20,7 +20,10 @@ extension PortalRepository {
         dataCards = DemoData.dataCards
         apps = DemoData.apps
         favorites.activate(account: "", apps: apps)
-        news = DemoData.news
+        news = DemoData.news.enumerated().map { index, item in
+            NewsItem(id: item.id, title: item.title, date: item.date, category: item.category,
+                url: "http://127.0.0.1:8787/article.html?id=\(index)", picUrl: "")
+        }
         hotSearch = DemoData.hotSearch
         homeState = .loaded
         gradesCache = [GradeSemester(name: "2026–2027 秋季学期", termCode: "fixture", current: true,
@@ -169,7 +172,14 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
               try String(contentsOf: download, encoding: .utf8) == "NEU-Lumen download fixture" else {
             throw NetworkError(message: "Download contents failed")
         }
-        try "PASS: page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        let cardBridge = CardWebBridge(baseURL: URL(string: "http://127.0.0.1:8787")!, entryURL: URL(string: "http://127.0.0.1:8787/card-login.html")!)
+        let balance = try await cardBridge.balance(client: client)
+        guard balance.balance == 66.5 && balance.subsidy == 7.5 else { throw NetworkError(message: "WebKit card balance incorrect") }
+        let statement = try await cardBridge.bills(client: client, year: 2026, month: 10)
+        guard statement.bills.count == 2 && !statement.truncated else { throw NetworkError(message: "WebKit card statement/paging incorrect") }
+        let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
+        guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
+        try "PASS: WebKit card SSO, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }
@@ -180,3 +190,7 @@ fixtures.mkdir(exist_ok=True)
 (fixtures / "index.html").write_text('''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园网页功能验证</title><style>body{font:17px -apple-system;padding:24px;color:#213060;background:#f3f5fb}h1{font-size:28px}a{display:block;background:white;border-radius:16px;padding:18px;margin:14px 0;color:#3553a2;text-decoration:none}small{color:#6d7487}</style><small>NEU · 校园浏览器</small><h1>更顺手的校园网页</h1><p>查找、缩放、分享和下载，都在手边。</p><a id="popup" target="_blank" href="second.html">打开新窗口链接 ↗</a><a id="download" download="campus-guide.txt" href="download.txt">下载校园指南 ↓</a><p>下方工具栏提供前进、后退、刷新与分享。</p></html>''', encoding="utf-8")
 (fixtures / "second.html").write_text('<meta charset="utf-8"><title>第二页</title><h1>导航成功</h1>', encoding="utf-8")
 (fixtures / "download.txt").write_text("NEU-Lumen download fixture", encoding="utf-8")
+
+shutil.copyfile(root / "NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png", fixtures / "article-first.png")
+(fixtures / "article.html").write_text('<html><header><img src="/missing-logo.png"></header><div class="wp_articlecontent"><p>正文</p><img src="article-first.png"></div></html>', encoding="utf-8")
+(fixtures / "card-login.html").write_text('<html><form action="/selfsearch/SSOLogin.aspx" method="post"><input name="username" value="fixture"><input name="timestamp" value="123"><input name="auid" value="signed"></form><script>document.forms[0].submit()</script></html>', encoding="utf-8")

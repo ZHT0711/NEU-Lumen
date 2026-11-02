@@ -30,6 +30,11 @@ struct PortalUser: Equatable, Codable {
 
     static let pending = PortalUser(uid: "", name: "", sid: "", identity: "", department: "", email: "", avatarUrl: "")
 
+    func isSameAccount(as other: PortalUser) -> Bool {
+        if !sid.isEmpty && !other.sid.isEmpty { return sid == other.sid }
+        return !uid.isEmpty && !other.uid.isEmpty && uid == other.uid
+    }
+
     func merging(_ newer: PortalUser) -> PortalUser {
         if (!uid.isEmpty && !newer.uid.isEmpty && uid != newer.uid)
             || (!sid.isEmpty && !newer.sid.isEmpty && sid != newer.sid) { return newer }
@@ -102,6 +107,7 @@ struct TodoItem: Identifiable, Hashable {
 struct DataCard: Identifiable, Hashable {
     let name: String
     let value: String
+    var destination: String = ""
 
     var id: String { name }
 }

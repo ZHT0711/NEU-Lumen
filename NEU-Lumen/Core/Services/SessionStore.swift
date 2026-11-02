@@ -23,6 +23,10 @@ final class SessionStore {
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
+    private var sessionEpoch = UUID()
+    private var keepSession = false
+    private var recoveryTask: Task<Bool, Never>?
+    private var lastNetworkRecovery = Date.distantPast
     private var pendingUsername: String?
     private var pendingPassword: String?
 
@@ -60,6 +64,12 @@ final class SessionStore {
 
     @discardableResult
     func performLogin(username: String, password: String, keep: Bool) async -> Bool {
+        sessionEpoch = UUID()
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        let previous = webSessions.load()
+        let previousUser = user ?? previous?.user
+        let retained = (previous?.restoredCookies() ?? []) + client.browserCookies()
         phase = .loggingIn
         lastError = nil
         needsSecondAuth = false
@@ -73,10 +83,13 @@ final class SessionStore {
                 CredentialStore.clear()
             }
             UserDefaults.standard.set(username, forKey: Self.rememberedKey)
+            if previousUser?.isSameAccount(as: info) == true { client.retainMissingCookies(retained) }
             user = info
             usesWebSession = false
-            webSessions.clear()
+            keepSession = keep
+            if !keep { webSessions.clear() }
             phase = .loggedIn
+            persistWebSession()
             return true
         } catch let e as NetworkError where e.needsSecondAuth {
             // 新设备二次认证：凭据先本机记住，图形码+短信完成后回填
@@ -101,6 +114,7 @@ final class SessionStore {
 
     /// 二次认证（图形码 + 短信）完成后的收尾：保存凭据并进入主界面。
     func completeSecondAuth(username: String, password: String, keep: Bool, user: PortalUser) {
+        sessionEpoch = UUID()
         let finalUsername = username.isEmpty ? (pendingUsername ?? "") : username
         let finalPassword = password.isEmpty ? (pendingPassword ?? "") : password
         if keep, !finalUsername.isEmpty, !finalPassword.isEmpty {
@@ -111,12 +125,17 @@ final class SessionStore {
         }
         pendingUsername = nil
         pendingPassword = nil
+        if let saved = webSessions.load(), saved.user.isSameAccount(as: user) {
+            client.retainMissingCookies(saved.restoredCookies())
+        }
         self.user = user
         usesWebSession = false
-        webSessions.clear()
+        keepSession = keep
+        if !keep { webSessions.clear() }
         needsSecondAuth = false
         lastError = nil
         phase = .loggedIn
+        persistWebSession()
     }
 
     /// 网页方式登录完成：吸收 WKWebView 里的会话 Cookie 并拉取用户信息。
@@ -128,7 +147,15 @@ final class SessionStore {
             lastError = "请先在网页中完成认证，登录页会保持打开"
             return false
         }
-        phase = .loggingIn
+        let wasLoggedIn = phase == .loggedIn
+        let previousAgent = client.browserUserAgent
+        sessionEpoch = UUID()
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        let previous = webSessions.load()
+        let previousUser = user ?? previous?.user
+        let retained = (previous?.restoredCookies() ?? []) + client.browserCookies()
+        if !wasLoggedIn { phase = .loggingIn }
         lastError = nil
         needsSecondAuth = false
         profileSyncError = nil
@@ -138,7 +165,13 @@ final class SessionStore {
         client.adoptGatewayTicket()
         guard client.hasLoginSession else {
             lastError = "未取得登录会话，请在页面中完成统一身份认证"
-            phase = .loggedOut
+            if wasLoggedIn {
+                client.clearSession()
+                client.setUserAgent(previousAgent ?? HTTPClient.userAgent)
+                client.absorbCookies(retained)
+                client.adoptGatewayTicket()
+            }
+            phase = wasLoggedIn ? .loggedIn : .loggedOut
             return false
         }
         var info = browser.user
@@ -149,16 +182,32 @@ final class SessionStore {
             }
         }
         guard !Task.isCancelled else {
-            phase = .loggedOut
+            if wasLoggedIn {
+                client.clearSession()
+                client.setUserAgent(previousAgent ?? HTTPClient.userAgent)
+                client.absorbCookies(retained)
+                client.adoptGatewayTicket()
+            }
+            phase = wasLoggedIn ? .loggedIn : .loggedOut
+            return false
+        }
+        if wasLoggedIn, info?.hasProfile != true {
+            client.clearSession()
+            client.setUserAgent(previousAgent ?? HTTPClient.userAgent)
+            client.absorbCookies(retained)
+            client.adoptGatewayTicket()
+            lastError = "暂未确认账号资料，请进入门户页面后重试"
             return false
         }
         // Cookie 会话已到手时不因门户 HTML 被风控拦截而否定整个登录。
+        if let info, previousUser?.isSameAccount(as: info) == true { client.retainMissingCookies(retained) }
         user = info ?? .pending
         if let sid = info?.sid, !sid.isEmpty {
             if let saved = CredentialStore.load(), saved.username != sid { CredentialStore.clear() }
             UserDefaults.standard.set(sid, forKey: Self.rememberedKey)
         }
         usesWebSession = true
+        keepSession = true
         phase = .loggedIn
         persistWebSession()
         return true
@@ -178,16 +227,15 @@ final class SessionStore {
         var restoredUser = saved.user
         do {
             if let fresh = try await client.validateSavedSession() { restoredUser = restoredUser.merging(fresh) }
-        } catch let error as NetworkError where error.isSessionExpired {
-            webSessions.clear()
-            client.clearSession()
-            lastError = "保存的登录会话已过期，请重新登录"
-            return false
         } catch {
-            profileSyncError = "暂时无法同步个人资料，已恢复上次登录"
+            // Route-specific login pages / campus gateway restrictions do not revoke the other realm.
+            profileSyncError = NetworkError.from(error).isSessionExpired
+                ? "当前网络需要更新认证，可在下方更新网页登录；已保留其它网络的会话"
+                : "暂时无法同步个人资料，已保留登录会话"
         }
         user = restoredUser
         usesWebSession = true
+        keepSession = true
         phase = .loggedIn
         persistWebSession()
         return true
@@ -195,9 +243,9 @@ final class SessionStore {
 
     /// 登录成功立即保存，切到后台时再保存一次续期后的 Cookie。
     func persistWebSession() {
-        guard usesWebSession, phase == .loggedIn, let user else { return }
+        guard keepSession, phase == .loggedIn, let user else { return }
         do {
-            try webSessions.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? "",
+            try webSessions.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent,
                                                  cookies: client.browserCookies()))
             sessionSaveError = nil
         } catch { sessionSaveError = NetworkError.from(error).message }
@@ -227,11 +275,58 @@ final class SessionStore {
 
     /// 会话过期后的静默重登（接口报会话失效时由仓储调用并重试一次）。
     func silentRelogin() async -> Bool {
-        guard let cred = CredentialStore.load() else { return false }
-        return await performLogin(username: cred.username, password: cred.password, keep: true)
+        if let task = recoveryTask { return await task.value }
+        let epoch = sessionEpoch
+        let task = Task { @MainActor [weak self] () -> Bool in
+            guard let self, self.phase == .loggedIn else { return false }
+            let retained = self.client.browserCookies()
+            defer {
+                if epoch == self.sessionEpoch, self.phase == .loggedIn {
+                    self.client.retainMissingCookies(retained)
+                    self.persistWebSession()
+                }
+            }
+            self.client.invalidateAccessRoute()
+            await self.client.prepareAccess()
+            if let fresh = try? await self.client.fetchUserInfo(), epoch == self.sessionEpoch, !Task.isCancelled,
+               self.user?.isSameAccount(as: fresh) != false {
+                self.user = self.user?.merging(fresh) ?? fresh
+                self.profileSyncError = nil
+                return true
+            }
+            guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
+            // Native credentials are a last resort, without changing the app's root navigation.
+            if let cred = CredentialStore.load(), self.user?.sid.isEmpty != false || self.user?.sid == cred.username {
+                do {
+                    let fresh = try await self.client.login(username: cred.username, password: cred.password)
+                    guard epoch == self.sessionEpoch, !Task.isCancelled, self.user?.isSameAccount(as: fresh) != false else { return false }
+                    self.user = self.user?.merging(fresh) ?? fresh
+                    self.profileSyncError = nil
+                    return true
+                } catch { }
+            }
+            guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
+            self.profileSyncError = "当前网络的认证暂不可用，已保留登录信息；可更新网页登录"
+            return false
+        }
+        recoveryTask = task
+        let result = await task.value
+        if epoch == sessionEpoch { recoveryTask = nil }
+        return result
+    }
+
+    func networkDidChange() {
+        client.invalidateAccessRoute()
+        guard phase == .loggedIn, Date().timeIntervalSince(lastNetworkRecovery) > 10 else { return }
+        lastNetworkRecovery = Date()
+        Task { _ = await silentRelogin() }
     }
 
     func logout() {
+        sessionEpoch = UUID()
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        keepSession = false
         webSessions.clear()
         usesWebSession = false
         sessionSaveError = nil

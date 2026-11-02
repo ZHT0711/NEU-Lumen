@@ -14,6 +14,11 @@ final class PortalRepository {
     let favorites = ServiceFavorites()
     let holidays = HolidayStore()
     let systemCalendar = SystemCalendarBridge()
+    let cardWebBridge = CardWebBridge()
+    private var cardUsesWebKit = false
+    private(set) var newsThumbnails: [String: Data] = [:]
+    private var loadingNewsThumbnails: Set<String> = []
+    private(set) var newsRevision = 0
 
     private let session: SessionStore
 
@@ -86,6 +91,10 @@ final class PortalRepository {
         let sid = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         guard loadedForSID != sid else { return }
         accountGeneration = UUID()
+        cardWebBridge.reset()
+        cardUsesWebKit = false
+        newsThumbnails = [:]
+        loadingNewsThumbnails = []
         dataCards = []
         apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
         appsLoaded = false
@@ -174,6 +183,8 @@ final class PortalRepository {
         }
         if let v = newsValue, !v.isEmpty {
             news = v
+            newsRevision += 1
+            newsThumbnails = newsThumbnails.filter { !$0.value.isEmpty }
             anySuccess = true
         } else if news.isEmpty {
             news = DemoData.news
@@ -190,6 +201,49 @@ final class PortalRepository {
         user = session.user
         usedOfflineFallback = !anySuccess
         homeState = anySuccess ? .loaded : .failed("门户接口不可用，正在展示离线演示数据")
+    }
+
+    func dataCardURL(_ card: DataCard) -> URL {
+        if let url = PortalLink.resolve(card.destination) { return url }
+        if card.name.contains("卡") && (card.name.contains("余额") || card.name.contains("补助")) { return URL(string: PortalClient.serviceCard)! }
+        let terms: [String]
+        if card.name.contains("图书") || card.name.contains("借阅") { terms = ["图书馆"] }
+        else if card.name.contains("网费") || card.name.contains("流量") { terms = ["网络计费", "网费"] }
+        else if card.name.contains("电费") { terms = ["缴费", "电费"] }
+        else if card.name.contains("成绩") || card.name.contains("学分") || card.name.contains("绩点") { terms = ["教务系统（新）", "教务系统"] }
+        else { terms = [card.name] }
+        if let app = apps.first(where: { app in terms.contains { app.name.contains($0) } }), let url = PortalLink.resolve(app.entryUrl()) { return url }
+        return URL(string: PortalClient.portalBase)!
+    }
+
+    func loadNewsThumbnail(_ item: NewsItem) async {
+        guard newsThumbnails[item.id] == nil, !loadingNewsThumbnails.contains(item.id) else { return }
+        let generation = accountGeneration
+        loadingNewsThumbnails.insert(item.id)
+        defer { if generation == accountGeneration { loadingNewsThumbnails.remove(item.id) } }
+        let data = await session.client.fetchNewsThumbnail(item)
+        guard generation == accountGeneration, !Task.isCancelled else { return }
+        newsThumbnails[item.id] = data ?? Data()
+    }
+
+    func applyCardBalance(_ balance: CardBalance) {
+        cardUsesWebKit = true
+        cardBalance = balance
+        cardState = .loaded
+        cardWarning = nil
+        cardUpdatedAt = Date()
+        session.persistWebSession()
+    }
+
+    private func cardBalanceWithWebRecovery() async throws -> CardBalance {
+        if cardUsesWebKit { return try await cardWebBridge.balance(client: session.client) }
+        do { return try await session.client.fetchCardBalance() }
+        catch {
+            guard !Task.isCancelled else { throw CancellationError() }
+            let balance = try await cardWebBridge.balance(client: session.client)
+            cardUsesWebKit = true
+            return balance
+        }
     }
 
     /// 服务大厅按需加载应用列表（避免冷启动时重复请求）。
@@ -405,10 +459,13 @@ final class PortalRepository {
         let client = session.client
         // 与泥洞一致，先固定这一轮的校内/校外路由，再并发取业务数据。
         await client.prepareAccess()
-        async let fetchedCard = cardResult { try await client.fetchCardBalance() }
+        let generation = accountGeneration
+        async let fetchedCard = cardResult { try await self.cardBalanceWithWebRecovery() }
         async let fetchedNet = cardResult { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
         async let fetchedElectric = cardResult { try await client.fetchElectric(room: electricRoomCode) }
         let (card, net, elec) = await (fetchedCard, fetchedNet, fetchedElectric)
+        guard generation == accountGeneration else { return }
+        session.persistWebSession()
         switch card {
         case .success(let value):
             cardBalance = value
@@ -443,16 +500,27 @@ final class PortalRepository {
         }
         if billsState == .loading { return }
         billsState = .loading
+        let generation = accountGeneration
         do {
             let result = try await withRecovery {
-                try await self.session.client.fetchCardBills(year: year, month: month)
+                if self.cardUsesWebKit { return try await self.cardWebBridge.bills(client: self.session.client, year: year, month: month) }
+                do { return try await self.session.client.fetchCardBills(year: year, month: month) }
+                catch {
+                    guard !Task.isCancelled else { throw CancellationError() }
+                    let statement = try await self.cardWebBridge.bills(client: self.session.client, year: year, month: month)
+                    self.cardUsesWebKit = true
+                    return statement
+                }
             }
+            guard generation == accountGeneration else { return }
+            session.persistWebSession()
             billsCache[key] = result.bills
             truncatedCache[key] = result.truncated
             cardBills = result.bills
             billTruncated = result.truncated
             billsState = .loaded
         } catch {
+            guard generation == accountGeneration else { return }
             if billsCache[key] == nil {
                 billsState = .failed(NetworkError.from(error).message)
             } else {

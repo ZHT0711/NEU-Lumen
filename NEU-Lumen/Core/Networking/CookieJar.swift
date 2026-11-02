@@ -8,6 +8,8 @@ final class CookieJar {
     }
     private var store: [String: Entry] = [:]
     private let lock = NSLock()
+    private var epoch = UUID()
+    var generation: UUID { locked { epoch } }
 
     private func locked<T>(_ work: () -> T) -> T {
         lock.lock()
@@ -61,7 +63,7 @@ final class CookieJar {
         for cookie in cookies { save(cookie, hostOnly: !cookie.domain.hasPrefix(".")) }
     }
 
-    func clear() { locked { store.removeAll() } }
+    func clear() { locked { store.removeAll(); epoch = UUID() } }
 
     func allCookies() -> [HTTPCookie] {
         locked { store.values.map(\.cookie).filter { !($0.expiresDate.map { $0 <= Date() } ?? false) } }
