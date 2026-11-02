@@ -3,6 +3,11 @@ import SwiftUI
 /// 我的：账号信息、会话管理、关于与免责声明。
 struct ProfileView: View {
     @Environment(AppEnvironment.self) private var environment
+    @State private var path: [AppDestination] = []
+    @Environment(\.colorScheme) private var colorScheme
+    private var campusInk: Color {
+        colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
+    }
     @State private var confirmLogout = false
 
     private var version: String {
@@ -11,8 +16,58 @@ struct ProfileView: View {
         return "\(name) (\(build))"
     }
 
+    private var campusExploreSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("走进东大", systemImage: "building.columns").font(.headline)
+            Button {
+                path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("自强不息\n知行合一")
+                            .font(.system(.title3, design: .serif).weight(.semibold))
+                            .tracking(4)
+                        Label("东大精神，日常相伴", systemImage: "arrow.up.right")
+                            .font(.caption)
+                    }
+                    Spacer()
+                }
+                .foregroundStyle(campusInk)
+                .padding(20)
+                .frame(minHeight: 136)
+                .background {
+                    ZStack {
+                    AppTheme.accent.opacity(0.045)
+                    GeometryReader { geometry in
+                        CampusLineArt()
+                            .stroke(campusInk.opacity(0.12), lineWidth: 1)
+                            .frame(width: geometry.size.width * 0.62, height: 145)
+                            .offset(x: geometry.size.width * 0.44, y: 10)
+                    }
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+            }
+            .buttonStyle(.plain)
+            HStack {
+                campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
+                campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
+            }
+        }
+    }
+
+    private func campusLink(_ title: String, icon: String, url: String) -> some View {
+        Button { path.append(.web(URL(string: url)!)) } label: {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(AppTheme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
                     HStack(spacing: 14) {
@@ -64,6 +119,8 @@ struct ProfileView: View {
                     }
                 }
 
+                Section { campusExploreSection }
+
                 Section("关于") {
                     VStack(spacing: 10) {
                         Image("NEULogo")
@@ -94,6 +151,12 @@ struct ProfileView: View {
                 }
             }
             .navigationTitle("我的")
+            .navigationDestination(for: AppDestination.self) { destination in
+                switch destination {
+                case .web(let url): PortalWebViewScreen(url: url)
+                case .card: CardView()
+                }
+            }
             .alert("退出登录？", isPresented: $confirmLogout) {
                 Button("退出", role: .destructive) {
                     environment.session.logout()

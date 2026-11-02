@@ -37,6 +37,10 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>读取你选择的系统日历，并将课表同步到 NEU-Lumen 专用日历。</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>在课表中显示和完成所选提醒事项，并将课程写入 NEU-Lumen 专用提醒清单。</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchScreen</key>

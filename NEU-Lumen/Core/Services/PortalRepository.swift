@@ -11,6 +11,9 @@ import Observation
 @Observable
 final class PortalRepository {
     let planner = PlannerEventStore.shared
+    let favorites = ServiceFavorites()
+    let holidays = HolidayStore()
+    let systemCalendar = SystemCalendarBridge()
 
     private let session: SessionStore
 
@@ -65,6 +68,7 @@ final class PortalRepository {
 
     private var monthKey: String { Self.monthFormatter.string(from: Calendar.current.date(from: DateComponents(year: billsYear, month: billsMonth))!) }
 
+    private var accountGeneration = UUID()
     private var loadedForSID: String?
     private var appsLoaded = false
     private var appsLoading = false
@@ -81,6 +85,7 @@ final class PortalRepository {
     func ensureLoadedForCurrentUser() async {
         let sid = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         guard loadedForSID != sid else { return }
+        accountGeneration = UUID()
         dataCards = []
         apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
         appsLoaded = false
@@ -109,6 +114,9 @@ final class PortalRepository {
         gradesState = .idle
         usedOfflineFallback = false
         user = session.user
+        favorites.activate(account: sid, apps: apps)
+        holidays.activate(account: sid)
+        systemCalendar.activate(account: sid)
         loadedForSID = sid
     }
 
@@ -229,6 +237,7 @@ final class PortalRepository {
     /// 拉取某天所在教学周；命中缓存直接返回，不重复请求教务。
     /// 同一周已有在途加载时等待其完成，避免快速翻周时请求被吞掉。
     func loadWeek(containing date: Date, force: Bool = false) async {
+        let generation = accountGeneration
         let weekStart = Semester.weekStart(forDay: date)
         if !force, weekCache[weekStart] != nil {
             weekState = .loaded
@@ -236,6 +245,7 @@ final class PortalRepository {
         }
         if !force, loadingWeeks.contains(weekStart) {
             while loadingWeeks.contains(weekStart) {
+                guard generation == accountGeneration, !Task.isCancelled else { return }
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 if weekCache[weekStart] != nil { break }
             }
@@ -250,14 +260,16 @@ final class PortalRepository {
         }
         loadingWeeks.insert(weekStart)
         weekState = .loading
-        defer { loadingWeeks.remove(weekStart) }
+        defer { if generation == accountGeneration { loadingWeeks.remove(weekStart) } }
         do {
             let list = try await withRecovery {
                 try await self.session.client.fetchWeek(anyDayInWeek: date)
             }
+            guard generation == accountGeneration else { return }
             weekCache[weekStart] = list
             weekState = .loaded
         } catch {
+            guard generation == accountGeneration else { return }
             // 有缓存就继续用缓存，无缓存才报错
             if weekCache[weekStart] == nil {
                 weekState = .failed(NetworkError.from(error).message)
@@ -269,16 +281,66 @@ final class PortalRepository {
 
     /// 某教学周（周日开始）的门户事件；无缓存返回 nil。
     func portalOccurrences(weekStarting weekStart: Date) -> [CourseOccurrence]? {
-        weekCache[weekStart]
+        weekCache[weekStart].map { holidays.apply($0) }
+    }
+
+    func loadDisplayWeek(starting sunday: Date, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        let generation = accountGeneration
+        await loadWeek(containing: sunday, force: force)
+        guard generation == accountGeneration, !Task.isCancelled else { return }
+        let nextSunday = Calendar.current.date(byAdding: .day, value: 7, to: sunday)!
+        await loadWeek(containing: nextSunday, force: force)
+        guard generation == accountGeneration, !Task.isCancelled else { return }
+        let first = Calendar.current.date(byAdding: .day, value: 1, to: sunday)!
+        let end = Calendar.current.date(byAdding: .day, value: 8, to: sunday)!
+        for (target, source) in holidays.replacementDates {
+            guard let targetDate = PortalDate.day(target), targetDate >= first, targetDate < end,
+                  let sourceDate = PortalDate.day(source) else { continue }
+            let sourceWeek = Semester.weekStart(forDay: sourceDate)
+            if sourceWeek != sunday && sourceWeek != nextSunday {
+                await loadWeek(containing: sourceDate, force: force)
+            }
+        }
+        for year in Set([sunday, nextSunday].map { Calendar.current.component(.year, from: $0) }) {
+            await holidays.refresh(year: year)
+        }
+    }
+
+    func displayWeekOccurrences(starting sunday: Date) -> [CourseOccurrence] {
+        let cal = Calendar.current
+        let first = cal.date(byAdding: .day, value: 1, to: sunday)!
+        let end = cal.date(byAdding: .day, value: 8, to: sunday)!
+        let portal = effectivePortalOccurrences(from: first, to: end)
+        let custom = planner.events.compactMap { event -> CourseOccurrence? in
+            guard let date = PortalDate.day(event.dateIso) else { return nil }
+            return CourseOccurrence(date: date, slot: event.toSlot())
+        }
+        return (portal + custom).filter { $0.date >= first && $0.date < end }.mergeConsecutive()
+    }
+
+    func displayWeekIsLoaded(starting sunday: Date) -> Bool {
+        let next = Calendar.current.date(byAdding: .day, value: 7, to: sunday)!
+        let first = Calendar.current.date(byAdding: .day, value: 1, to: sunday)!
+        let end = Calendar.current.date(byAdding: .day, value: 8, to: sunday)!
+        let replacementsLoaded = holidays.replacementDates.allSatisfy { target, source in
+            guard let date = PortalDate.day(target), date >= first && date < end,
+                  let sourceDate = PortalDate.day(source) else { return true }
+            return weekCache[Semester.weekStart(forDay: sourceDate)] != nil
+        }
+        return weekCache[sunday] != nil && weekCache[next] != nil && replacementsLoaded
+    }
+
+    private func effectivePortalOccurrences(from first: Date, to end: Date) -> [CourseOccurrence] {
+        holidays.apply(HolidayRules.project(weekCache.values.flatMap { $0 }, from: first, to: end,
+            replacements: holidays.replacementDates))
     }
 
     /// 今日时间轴：门户周缓存 ∩ 今天 + 本机日程，合并相邻节次。
     func todayTimeline() -> [CourseOccurrence] {
         let today = Calendar.current.startOfDay(for: Date())
-        let weekStart = Semester.weekStart(forDay: today)
-        let portal = (weekCache[weekStart] ?? []).filter {
-            Calendar.current.isDate($0.date, inSameDayAs: today)
-        }
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
+        let portal = effectivePortalOccurrences(from: today, to: tomorrow)
         return (portal + planner.occurrences(onDay: today)).mergeConsecutive()
     }
 

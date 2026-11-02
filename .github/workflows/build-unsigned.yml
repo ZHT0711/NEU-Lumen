@@ -10,6 +10,9 @@ on:
     branches:
       - main
   workflow_dispatch:
+  schedule:
+    # UTC 19:17 = 次日北京时间 03:17，避开整点高峰。
+    - cron: "17 19 * * *"
 
 permissions:
   contents: read
@@ -102,6 +105,23 @@ jobs:
           node Tests/OffCampusLogin/document.mjs
           python3 -m unittest discover -s scripts -p 'test_*.py'
 
+      - name: Test holidays, favorites and card form parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc \
+            NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Models/PortalModels.swift \
+            NEU-Lumen/Core/Models/CourseModels.swift \
+            NEU-Lumen/Core/Models/HTMLInputFields.swift \
+            NEU-Lumen/Core/Models/HolidayRules.swift \
+            NEU-Lumen/Core/Services/Semester.swift \
+            NEU-Lumen/Core/Services/HolidayStore.swift \
+            NEU-Lumen/Core/Persistence/ServiceFavorites.swift \
+            Tests/Planner/main.swift \
+            -o "${RUNNER_TEMP}/planner-tests"
+          "${RUNNER_TEMP}/planner-tests"
+
       - name: Test off-campus login and service preservation
         shell: bash
         run: |
@@ -174,7 +194,7 @@ jobs:
           TAG_NAME="${GITHUB_REF_NAME}"
           RELEASE_TAGS="$(
             gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false) | .tag_name'
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
           )"
           PREVIOUS_TAG="$(
             awk -v current="${TAG_NAME}" '$0 != current { print; exit }' <<< "${RELEASE_TAGS}"
@@ -227,3 +247,54 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: release-assets/NEU-Lumen-iOS-unsigned.ipa
+
+  nightly:
+    name: Publish rolling nightly IPA
+    needs: build
+    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-nightly
+      cancel-in-progress: false
+    steps:
+      - name: Download verified unsigned IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: NEU-Lumen-iOS-unsigned-${{ github.run_number }}
+          path: release-assets
+
+      - name: Publish nightly prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GH_REPO}/git/ref/tags/nightly" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/nightly" \
+              -f sha="${GITHUB_SHA}" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/${GH_REPO}/git/refs" \
+              -f ref=refs/tags/nightly -f sha="${GITHUB_SHA}" >/dev/null
+          fi
+
+          cat > nightly-notes.md <<EOF
+          NEU-Lumen 每夜构建（滚动更新的预发布版本）。
+
+          - 定时构建：北京时间每日 03:17；main 更新也会构建。
+          - 提交：${GITHUB_SHA}
+          - 构建：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - 产物：NEU-Lumen-iOS-unsigned.ipa，需自行签名安装。
+          - 仅在回归、IPA 构建和模拟器检查全部通过后更新下载包。
+          EOF
+
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly --title "NEU-Lumen Nightly" \
+              --notes-file nightly-notes.md --prerelease --latest=false
+          else
+            gh release create nightly --verify-tag --title "NEU-Lumen Nightly" \
+              --notes-file nightly-notes.md --prerelease --latest=false
+          fi
+          gh release upload nightly release-assets/NEU-Lumen-iOS-unsigned.ipa --clobber

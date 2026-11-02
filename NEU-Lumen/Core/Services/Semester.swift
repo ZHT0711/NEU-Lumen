@@ -30,16 +30,6 @@ enum Semester {
         weekStart(of: weekNumberOf(day))
     }
 
-    /// 放假日（停课）：国庆周 + 元旦。
-    static let holidays: Set<String> = [
-        "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-        "2026-10-05", "2026-10-06", "2026-10-07", "2027-01-01",
-    ]
-
-    static func isHoliday(_ day: Date) -> Bool {
-        holidays.contains(PortalDate.isoDay(day))
-    }
-
     static func isExamWeek(_ week: Int) -> Bool {
         week > teachingWeeks && week <= totalWeeks
     }

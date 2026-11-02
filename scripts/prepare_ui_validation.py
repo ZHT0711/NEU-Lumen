@@ -19,6 +19,7 @@ extension PortalRepository {
         user = DemoData.user
         dataCards = DemoData.dataCards
         apps = DemoData.apps
+        favorites.activate(account: "", apps: apps)
         news = DemoData.news
         hotSearch = DemoData.hotSearch
         homeState = .loaded
@@ -66,6 +67,10 @@ struct UIValidationRoot: View {
                 switch screen {
                 case "schedule": ScheduleView()
                 case "services": ServicesView()
+                case "profile": ProfileView()
+                case "favorites": FavoritesEditor()
+                case "holidays": ScheduleSettingsSheet()
+                case "calendar": SystemCalendarSheet(sunday: Semester.weekStart(forDay: Date()))
                 case "grades": GradesView()
                 case "browser":
                     TabView {

@@ -29,7 +29,7 @@ SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in home schedule services grades; do
+for SCREEN in home schedule services grades profile favorites holidays calendar; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"

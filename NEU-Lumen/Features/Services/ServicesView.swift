@@ -4,6 +4,8 @@ import SwiftUI
 struct ServicesView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var path: [AppDestination] = []
+    @State private var showFavorites = false
+    @State private var favoritesOnly = false
     @State private var query = ""
     @State private var selectedCategory: String?
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 76
@@ -19,7 +21,8 @@ struct ServicesView: View {
     }
 
     private var filtered: [PortalApp] {
-        catalog.filtered(query: query, category: selectedCategory)
+        ServiceCatalog(apps: favoritesOnly ? repo.favorites.apps(in: repo.apps) : repo.apps)
+            .filtered(query: query, category: selectedCategory)
     }
 
     var body: some View {
@@ -31,6 +34,11 @@ struct ServicesView: View {
                     if keyword.isEmpty && !repo.hotSearch.isEmpty {
                         hotChips
                     }
+                    HStack {
+                        Toggle("只看收藏", isOn: $favoritesOnly).toggleStyle(.button)
+                        Spacer()
+                        Button("管理收藏") { showFavorites = true }
+                    }.font(.subheadline)
                     categoryChips
                     smartSearchCard
                     appsSection
@@ -40,6 +48,7 @@ struct ServicesView: View {
                 .padding(.bottom, 32)
             }
             .background(Color(.systemGroupedBackground))
+            .sheet(isPresented: $showFavorites) { FavoritesEditor() }
             .navigationTitle("服务大厅")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
@@ -206,12 +215,13 @@ struct ServicesView: View {
     private var appsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(selectedCategory ?? "全部应用")（\(filtered.count)）")
+                Text("\(selectedCategory ?? (favoritesOnly ? "我的收藏" : "全部应用"))（\(filtered.count)）")
                     .font(.subheadline.bold())
                 Spacer()
-                if selectedCategory != nil || !keyword.isEmpty {
+                if selectedCategory != nil || !keyword.isEmpty || favoritesOnly {
                     Button("重置") {
                         query = ""
+                        favoritesOnly = false
                         selectedCategory = nil
                     }
                     .font(.caption.weight(.medium))
@@ -222,7 +232,7 @@ struct ServicesView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                    Text(keyword.isEmpty ? "暂无可用应用" : "没有匹配「\(keyword)」的应用")
+                    Text(keyword.isEmpty ? (favoritesOnly ? "暂无收藏，点击应用右上角的星标添加" : "暂无可用应用") : "没有匹配「\(keyword)」的应用")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -255,6 +265,16 @@ struct ServicesView: View {
                                 .padding(.horizontal, 4)
                             }
                             .buttonStyle(.plain)
+                            .overlay(alignment: .topTrailing) {
+                                Button { repo.favorites.toggle(app) } label: {
+                                    Image(systemName: repo.favorites.contains(app) ? "star.fill" : "star")
+                                        .foregroundStyle(repo.favorites.contains(app) ? Color.orange : Color.secondary)
+                                        .frame(width: 32, height: 32)
+                                        .background(.regularMaterial, in: Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel((repo.favorites.contains(app) ? "取消收藏" : "收藏") + app.name)
+                            }
                         }
                     }
                     .padding(12)

@@ -1,8 +1,13 @@
 import SwiftUI
+import EventKit
 
 /// 课表：教学周网格（第1-2节…第9-10节），门户事件 + 本机日程上格。
 struct ScheduleView: View {
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showHolidaySettings = false
+    @State private var showSystemCalendar = false
+    @State private var selectedSystemItem: SystemAgendaItem?
     @State private var weekOffset = 0
     @State private var showAddEvent = false
     @State private var selected: CourseOccurrence?
@@ -29,9 +34,7 @@ struct ScheduleView: View {
     }
 
     private var occurrences: [CourseOccurrence] {
-        let portal = repo.portalOccurrences(weekStarting: weekStartSunday) ?? []
-        let custom = repo.planner.occurrences(inWeekStarting: weekStartSunday)
-        return (portal + custom).mergeConsecutive()
+        repo.displayWeekOccurrences(starting: weekStartSunday)
     }
 
     var body: some View {
@@ -44,7 +47,9 @@ struct ScheduleView: View {
                     } else if Semester.isExamWeek(displayWeek) {
                         banner("考试周", icon: "pencil.line", color: .red)
                     }
+                    holidaySummary
                     grid
+                    systemAgenda
                     loadStateFooter
                 }
                 .padding(.horizontal, 12)
@@ -55,9 +60,16 @@ struct ScheduleView: View {
             .navigationTitle("课表")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Button("节假日与调课", systemImage: "sun.max") { showHolidaySettings = true }
+                        Button("日历与提醒事项", systemImage: "calendar.badge.clock") { showSystemCalendar = true }
+                    } label: { Image(systemName: "slider.horizontal.3") }
+                    .accessibilityLabel("课表设置")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await repo.loadWeek(containing: weekDates[0], force: true) }
+                        Task { await repo.loadDisplayWeek(starting: weekStartSunday, force: true) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -71,8 +83,28 @@ struct ScheduleView: View {
                 }
             }
             .task(id: weekOffset) {
-                await repo.loadWeek(containing: weekDates[0])
+                await repo.loadDisplayWeek(starting: weekStartSunday)
+                await refreshSystemAgenda()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshSystemAgenda() } }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            Task { await refreshSystemAgenda() }
+        }
+        .sheet(isPresented: $showHolidaySettings, onDismiss: {
+            Task { await repo.loadDisplayWeek(starting: weekStartSunday) }
+        }) { ScheduleSettingsSheet() }
+        .sheet(isPresented: $showSystemCalendar, onDismiss: {
+            Task { await refreshSystemAgenda() }
+        }) { SystemCalendarSheet(sunday: weekStartSunday) }
+        .sheet(item: $selectedSystemItem, onDismiss: {
+            Task { await refreshSystemAgenda() }
+        }) { item in
+            if let event = repo.systemCalendar.event(for: item) {
+                SystemEventEditor(event: event, store: repo.systemCalendar.store) { selectedSystemItem = nil }
+            } else { Text("此日程已更新，请刷新课表。").padding() }
         }
         .sheet(item: $selected) { occ in
             CourseDetailSheet(occurrence: occ) { id in
@@ -84,6 +116,58 @@ struct ScheduleView: View {
                 repo.planner.add(event)
             }
         }
+    }
+
+    private func refreshSystemAgenda() async {
+        await repo.systemCalendar.refresh(start: weekDates[0], end: Calendar.current.date(byAdding: .day, value: 7, to: weekDates[0])!)
+    }
+
+    private var holidaySummary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(weekDates, id: \.self) { date in
+                if let label = repo.holidays.label(on: date) {
+                    Text("\(PortalDate.isoDay(date))  \(label)").font(.caption).foregroundStyle(.orange)
+                }
+            }
+            if !repo.holidays.enabled {
+                Text("自动节假日休息已关闭").font(.caption).foregroundStyle(.secondary)
+            }
+            if !repo.holidays.status.isEmpty {
+                Text(repo.holidays.status).font(.caption2).foregroundStyle(.secondary)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var systemAgenda: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("系统日历与提醒").font(.headline)
+                Spacer()
+                Button("管理") { showSystemCalendar = true }.font(.caption)
+            }
+            if repo.systemCalendar.agenda.isEmpty {
+                Text("本周暂无所选系统日程，可在管理中连接并选择来源。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(repo.systemCalendar.agenda) { item in
+                HStack(spacing: 10) {
+                    if item.isReminder {
+                        Button { repo.systemCalendar.completeReminder(id: item.id) } label: { Image(systemName: "circle").font(.title2) }
+                            .accessibilityLabel("完成提醒：" + item.title)
+                    } else { Image(systemName: "calendar").foregroundStyle(AppTheme.accent) }
+                    Button {
+                        if !item.isReminder { selectedSystemItem = item }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title).font(.subheadline).foregroundStyle(.primary)
+                            Text("\(PortalDate.isoDay(item.date)) · \(item.allDay ? "全天" : item.date.formatted(date: .omitted, time: .shortened)) · \(item.source)")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if !item.location.isEmpty { Text(item.location).font(.caption).foregroundStyle(.secondary) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                }.padding(12).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }.padding(.top, 8)
     }
 
     // MARK: - 周条
@@ -212,7 +296,7 @@ struct ScheduleView: View {
             .padding(.top, 14)
         case .failed(let message):
             ErrorStateView(message: message) {
-                Task { await repo.loadWeek(containing: weekDates[0], force: true) }
+                Task { await repo.loadDisplayWeek(starting: weekStartSunday, force: true) }
             }
         default:
             EmptyView()

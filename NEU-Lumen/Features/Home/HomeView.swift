@@ -6,10 +6,16 @@ struct HomeView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var selection: AppTab
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 72
+    @State private var showFavorites = false
     @State private var path: [AppDestination] = []
 
     private var campusInk: Color {
         colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
+    }
+
+    private var accountID: String {
+        guard let user = environment.session.user else { return "" }
+        return user.sid.isEmpty ? user.uid : user.sid
     }
 
     private var repo: PortalRepository {
@@ -29,7 +35,6 @@ struct HomeView: View {
                     quickAppsSection
                     todaySection
                     dataCardsSection
-                    campusExploreSection
                     if !repo.todos.isEmpty {
                         todosSection
                     }
@@ -73,13 +78,13 @@ struct HomeView: View {
             .refreshable {
                 await repo.refreshHome()
             }
-            .task {
+            .task(id: accountID) {
                 await repo.ensureLoadedForCurrentUser()
                 if repo.homeState == .idle {
                     await repo.refreshHome()
                 }
                 async let card: Void = repo.loadCardOverview()
-                async let week: Void = repo.loadWeek(containing: Date())
+                async let week: Void = repo.loadDisplayWeek(starting: Semester.weekStart(forDay: Date()))
                 _ = await (card, week)
             }
             .navigationDestination(for: AppDestination.self) { dest in
@@ -91,6 +96,7 @@ struct HomeView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFavorites) { FavoritesEditor() }
         .tint(campusInk)
     }
 
@@ -168,56 +174,6 @@ struct HomeView: View {
         .accessibilityLabel("东北大学建筑，e码通快捷入口")
         .accessibilityHint("打开校园码")
         .accessibilityIdentifier("home.ecode")
-    }
-
-    private var campusExploreSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("走进东大", icon: "building.columns")
-            Button {
-                path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("自强不息\n知行合一")
-                            .font(.system(.title3, design: .serif).weight(.semibold))
-                            .tracking(4)
-                        Label("东大精神，日常相伴", systemImage: "arrow.up.right")
-                            .font(.caption)
-                    }
-                    Spacer()
-                }
-                .foregroundStyle(campusInk)
-                .padding(20)
-                .frame(minHeight: 136)
-                .background {
-                    ZStack {
-                    AppTheme.accent.opacity(0.045)
-                    GeometryReader { geometry in
-                        CampusLineArt()
-                            .stroke(campusInk.opacity(0.12), lineWidth: 1)
-                            .frame(width: geometry.size.width * 0.62, height: 145)
-                            .offset(x: geometry.size.width * 0.44, y: 10)
-                    }
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-            }
-            .buttonStyle(.plain)
-            HStack {
-                campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
-                campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
-            }
-        }
-    }
-
-    private func campusLink(_ title: String, icon: String, url: String) -> some View {
-        Button { path.append(.web(URL(string: url)!)) } label: {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(AppTheme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-        }
-        .buttonStyle(.plain)
     }
 
     private func greeting(at date: Date) -> String {
@@ -374,6 +330,7 @@ struct HomeView: View {
             HStack {
                 sectionHeader("常用应用", icon: "square.grid.2x2")
                 Spacer()
+                Button("编辑") { showFavorites = true }.font(.caption.weight(.medium))
                 Button { selection = .services } label: {
                     HStack(spacing: 4) {
                         Text("全部服务")
@@ -382,9 +339,12 @@ struct HomeView: View {
                     .font(.caption.weight(.medium))
                 }
             }
+            if repo.favorites.apps(in: repo.apps).isEmpty {
+                Button("添加常用应用") { showFavorites = true }.font(.subheadline).padding()
+            }
             GlassCard {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
-                    ForEach(Array(repo.apps.prefix(8))) { app in
+                    ForEach(Array(repo.favorites.apps(in: repo.apps).prefix(8))) { app in
                         Button {
                             open(app)
                         } label: {

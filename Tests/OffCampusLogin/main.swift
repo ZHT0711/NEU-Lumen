@@ -45,6 +45,21 @@ let restored = try JSONDecoder().decode([PortalApp].self, from: JSONEncoder().en
 precondition(restored == merged)
 print("Service catalog preservation: 5 checks passed")
 
+func requestBody(_ request: URLRequest) -> String {
+    if let data = request.httpBody { return String(decoding: data, as: UTF8.self) }
+    guard let stream = request.httpBodyStream else { return "" }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    var bytes = [UInt8](repeating: 0, count: 1024)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&bytes, maxLength: bytes.count)
+        if count <= 0 { break }
+        data.append(contentsOf: bytes.prefix(count))
+    }
+    return String(decoding: data, as: UTF8.self)
+}
+
 final class MockPortalProtocol: URLProtocol {
     static var handle: ((URLRequest) -> (Int, [String: String], String))!
     static var failure: Error?
@@ -151,10 +166,13 @@ MockPortalProtocol.handle = { request in
     }
     precondition(url.host == "ecard.neu.edu.cn" && exchangedCard)
     if url.path == "/selflogin/login.aspx" {
-        return (200, [:], #"<form><input name="username" value="20260042"><input name="timestamp" value="fixture-time"><input name="auid" value="fixture-auid"></form>"#)
+        return (200, [:], #"<form><INPUT VALUE='20260042' NAME='username'><input value=fixture-time name=timestamp><input name='auid' value='fixture&#45;auid&amp;token'></form>"#)
     }
     if url.path == "/selfsearch/SSOLogin.aspx" {
         precondition(request.httpMethod == "POST")
+        let body = requestBody(request)
+        precondition(body.contains("username=20260042") && body.contains("timestamp=fixture-time"))
+        precondition(body.contains("auid=fixture-auid%26token"), "必须解码 HTML 实体后再表单编码")
         precondition(request.value(forHTTPHeaderField: "Referer") == url.absoluteString)
         return (200, ["Set-Cookie":"ASP.NET_SessionId=card; Path=/selfsearch"], "<html>ok</html>")
     }

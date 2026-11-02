@@ -451,7 +451,8 @@ final class PortalClient {
                         startMinutes: (sc.hour ?? 0) * 60 + (sc.minute ?? 0),
                         endMinutes: (ec.hour ?? 0) * 60 + (ec.minute ?? 0),
                         name: con,
-                        room: room.isEmpty ? "待定" : room
+                        room: room.isEmpty ? "待定" : room,
+                        kind: con.contains("考试") || con.contains("补考") ? "exam" : "course"
                     )
                 ))
             }
@@ -709,11 +710,20 @@ final class PortalClient {
 
     /// 一卡通余额：CAS 换票 → ecard 自动提交表单 → baseinfo 页解析输入框。
     func fetchCardBalance() async throws -> CardBalance {
+        do { return try await fetchCardBalanceOnce() }
+        catch {
+            // A reachable campus probe does not guarantee the card host is reachable.
+            guard !webvpnOn, await ensureWebVPN() else { throw error }
+            return try await fetchCardBalanceOnce()
+        }
+    }
+
+    private func fetchCardBalanceOnce() async throws -> CardBalance {
         await prepareAccess()
         let resp = try await casLand(Self.serviceCard)
         let ssoHTML = resp.text
-        if ssoHTML.contains("username") && ssoHTML.contains("auid") {
-            let form = Self.inputValuesByName(ssoHTML, names: ["username", "timestamp", "auid"])
+        let form = Self.inputValuesByName(ssoHTML, names: ["username", "timestamp", "auid"])
+        if !form.isEmpty {
             guard ["username", "timestamp", "auid"].allSatisfy({ form[$0]?.isEmpty == false }) else {
                 throw NetworkError(message: "一卡通单点登录表单不完整")
             }
@@ -956,11 +966,6 @@ final class PortalClient {
 
     // MARK: - 一卡通 HTML 解析（ASP.NET 页面，容错优先）
 
-    private static let inputTagRegex = try! NSRegularExpression(pattern: #"<input\b[^>]*>"#, options: [.caseInsensitive])
-    private static let attrNameRegex = try! NSRegularExpression(pattern: #"\bname\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
-    private static let attrValueRegex = try! NSRegularExpression(pattern: #"\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
-    private static let attrIDRegex = try! NSRegularExpression(pattern: #"\bid\s*=\s*(?:"([^"]*)"|'([^']*)')"#, options: [.caseInsensitive])
-    private static let attrHiddenRegex = try! NSRegularExpression(pattern: #"\btype\s*=\s*(?:"hidden"|'hidden'|hidden\b)"#, options: [.caseInsensitive])
     private static let trRegex = try! NSRegularExpression(pattern: #"<tr\b[^>]*>[\s\S]*?</tr>"#, options: [.caseInsensitive])
     private static let tdRegex = try! NSRegularExpression(pattern: #"<td\b[^>]*>[\s\S]*?</td>"#, options: [.caseInsensitive])
     private static let tagStripRegex = try! NSRegularExpression(pattern: #"<[^>]*>"#)
@@ -968,29 +973,8 @@ final class PortalClient {
     private static let junkDateSubjectRegex = try! NSRegularExpression(pattern: #"^\d{4}\s*[-/年.]\s*\d{1,2}\s*[-/月.]\s*\d{1,2}"#)
     private static let numberRegex = try! NSRegularExpression(pattern: #"[0-9]+(?:\.[0-9]+)?"#)
 
-    private static func attr(_ tag: String, _ regex: NSRegularExpression) -> String? {
-        guard let m = regex.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
-              m.numberOfRanges > 1,
-              let r = Range(m.range(at: 1), in: tag) else { return nil }
-        return String(tag[r])
-    }
-
     private static func inputTags(_ html: String) -> [[String: String]] {
-        let range = NSRange(html.startIndex..., in: html)
-        let matches = inputTagRegex.matches(in: html, range: range)
-        var out: [[String: String]] = []
-        out.reserveCapacity(matches.count)
-        for m in matches {
-            guard let tagRange = Range(m.range, in: html) else { continue }
-            let tag = String(html[tagRange])
-            var attrs: [String: String] = [:]
-            attrs["name"] = attr(tag, attrNameRegex)
-            attrs["value"] = attr(tag, attrValueRegex)
-            attrs["id"] = attr(tag, attrIDRegex)
-            attrs["hidden"] = attr(tag, attrHiddenRegex) != nil ? "1" : "0"
-            out.append(attrs)
-        }
-        return out
+        HTMLInputFields.parse(html)
     }
 
     /// type=hidden 输入框：name -> value（ASP.NET 回发必需）。
