@@ -404,6 +404,7 @@ print("Home e-code shortcut: official mobile entry and Flutter-compatible SSO fa
 precondition(PortalLink.from([["form_mobile_url_view":" ", "form_url_view":"/portal/task/42"]])?.absoluteString == PortalClient.portalBase + "/task/42")
 precondition(PortalLink.resolve("detail/42")?.absoluteString == PortalClient.portalBase + "/detail/42")
 precondition(PortalLink.resolve("/first.jpg")?.absoluteString == "https://personal.neu.edu.cn/first.jpg")
+precondition(PortalLink.resolve("first.jpg")?.absoluteString == PortalClient.portalBase + "/first.jpg")
 precondition(PortalLink.resolve("//neunews.neu.edu.cn/a.htm")?.host == "neunews.neu.edu.cn")
 precondition(PortalLink.resolve("javascript:alert(1)") == nil)
 precondition(PortalLink.resolve("data:text/html,x") == nil)

@@ -4,11 +4,13 @@ enum PortalLink {
     static func resolve(_ raw: String, base: URL = URL(string: PortalClient.portalBase + "/")!) -> URL? {
         let value = HTMLInputFields.decode(raw).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, !value.hasPrefix("#") else { return nil }
+        let fileExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "webp", "avif", "svg", "bmp", "heic", "htm", "html", "aspx", "jsp", "php", "do", "pdf"]
+        let isFile = fileExtensions.contains(URL(string: value)?.pathExtension.lowercased() ?? "")
         let absolute: URL?
         if value.hasPrefix("//") { absolute = URL(string: (base.scheme ?? "https") + ":" + value) }
         else if value.contains("://") { absolute = URL(string: value) }
         else if value.range(of: #"^[a-zA-Z][a-zA-Z0-9+.-]*:"#, options: .regularExpression) != nil { return nil }
-        else if value.split(separator: "/").first?.contains(".") == true && !value.hasPrefix(".") && !value.hasPrefix("/") {
+        else if value.split(separator: "/").first?.contains(".") == true && !value.hasPrefix(".") && !value.hasPrefix("/") && !isFile {
             absolute = URL(string: withScheme(value))
         } else { absolute = URL(string: value, relativeTo: base)?.absoluteURL }
         guard let url = absolute, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
