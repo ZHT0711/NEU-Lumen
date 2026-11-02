@@ -17,6 +17,46 @@ precondition(flow.action(for: gateway) == .capture, "失败兜底不循环跳转
 precondition(flow.action(for: CasCrypto.casLoginURL) == .wait)
 print("Off-campus routing: 9 checks passed")
 
+// Gateway-first must never send the user through another gateway login after authentication.
+var singleLogin = PortalLoginFlow(gatewayFirst: true)
+let proxyCAS = URL(string: WebVPN.wrap(CasCrypto.casLoginURL.absoluteString))!
+precondition(singleLogin.action(for: proxyCAS, hasLoginForm: true) == .wait)
+precondition(singleLogin.action(for: gateway) == .navigate(wrapped))
+precondition(singleLogin.action(for: wrapped) == .capture)
+precondition(singleLogin.action(for: gateway) == .capture, "不能在认证完成后重新打开网关登录")
+let browserURLs = [
+    "https://bb.neu.edu.cn/webapps/bb-sso-BBLEARN/index.jsp",
+    "http://ipgw.neu.edu.cn:8800/sso/default/neusoft",
+    "http://210.30.206.223:8088/signal_web/into/201/3",
+    "http://219.216.96.64/redirect/cas/login",
+    "https://plat.neu.edu.cn/telephone-directory/",
+    "https://so.neu.edu.cn/#/accessLogin?searchWord=课表",
+    "https://personal.neu.edu.cn/portal/pages/mimipath/mimipath?appId=146",
+    "https://bb.neu.edu.cn/a%2Fb?q=a%26b#part%201",
+    "https://bb.neu.edu.cn#course"
+].map { URL(string: $0)! }
+for url in browserURLs {
+    precondition(WebVPN.shouldProxyBrowserURL(url))
+    let encoded = WebVPN.wrap(url.absoluteString)
+    precondition(WebVPN.wrap(encoded) == encoded)
+    precondition(WebVPN.unwrap(URL(string: encoded)!) == url, "端口、路径编码、查询及 SPA 锚点必须完整保留")
+}
+precondition(WebVPN.encryptHost("pass.neu.edu.cn") == "62304135386136393339346365373340a0e0b72cc4cb43c8bc1d6f66c806db", "与学校实际认证入口一致")
+for rawURL in ["https://example.com/", "http://127.0.0.1:8787/", "mailto:test@neu.edu.cn",
+               "https://neu.edu.cn.attacker.com/", "https://example.com/?next=https://webvpn.neu.edu.cn/"] {
+    precondition(!WebVPN.shouldProxyBrowserURL(URL(string: rawURL)!))
+    precondition(!WebVPN.isWrapped(rawURL))
+}
+precondition(!WebVPN.isIntranet("https://ecard.neu.edu.cn.attacker.com/"))
+precondition(WebVPN.unwrap(URL(string: "https://webvpn.neu.edu.cn/https/not-valid/x")!) == nil)
+let callback = URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do?a=1&b=2")!
+var proxiedAuth = URLComponents(url: proxyCAS, resolvingAgainstBaseURL: false)!
+proxiedAuth.queryItems = [URLQueryItem(name: "service", value: WebVPN.wrap(callback.absoluteString)), URLQueryItem(name: "method", value: "get")]
+let publicAuth = WebVPN.publicCASURL(from: proxiedAuth.url!)!
+precondition(publicAuth.host == "pass.neu.edu.cn" && publicAuth.path == "/tpass/login")
+precondition(URLComponents(url: publicAuth, resolvingAgainstBaseURL: false)!.queryItems!.first!.value == callback.absoluteString)
+print("Gateway-first login, complete campus URL routing, official codec vector, round trips and CAS callbacks passed")
+
 let raw = #"{"uid":"42","name":"测试同学","xgh":"20260042","identity":"本科生","depart":"计算机学院","email":"test@example.edu"}"#
 let user = PortalUser.fromBrowserJSON(raw)!
 precondition(user.hasCoreProfile && user.email == "test@example.edu")
@@ -84,6 +124,51 @@ let ticket = HTTPCookie(properties: [.name:"wengine_vpn_ticket", .value:"fixture
 client.absorbCookies([ticket])
 client.adoptGatewayTicket()
 client.setUserAgent("Fixture WebKit UA")
+// A gateway-authenticated user must not be reclassified by a fresh campus probe.
+MockPortalProtocol.handle = { _ in preconditionFailure("已有网关票据时不应再探测并覆盖校外路由") }
+let gatewayEntry = await client.browserLoginEntryURL()
+precondition(gatewayEntry == URL(string: WebVPN.casService)!)
+for url in browserURLs {
+    let destination = await client.prepareBrowserURL(url)
+    precondition(destination.absoluteString == WebVPN.wrap(url.absoluteString))
+}
+for app in DemoData.apps {
+    guard let url = URL(string: app.entryUrl()) else { continue }
+    let expected = WebVPN.shouldProxyBrowserURL(url) ? URL(string: WebVPN.wrap(url.absoluteString))! : url
+    let routed = await client.prepareBrowserURL(url)
+    precondition(routed == expected, "完整服务目录必须统一使用校外路由：" + app.name)
+}
+precondition(client.browserDestination(for: proxyCAS) == proxyCAS, "网关登录继续使用同域 CAS")
+let nativeConfig = URLSessionConfiguration.ephemeral
+nativeConfig.protocolClasses = [MockPortalProtocol.self]
+let nativeRealm = PortalClient(http: HTTPClient(configuration: nativeConfig))
+nativeRealm.absorbCookies([ticket, HTTPCookie(properties: [.name:"CASTGC", .value:"native-cas", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!])
+nativeRealm.adoptGatewayTicket()
+precondition(nativeRealm.browserDestination(for: proxiedAuth.url!) == publicAuth, "原生登录复用公网 CAS，不要求重新在代理域输入密码")
+nativeRealm.clearSession()
+precondition(nativeRealm.browserDestination(for: browserURLs[0]) == browserURLs[0])
+
+// Public denial pages are not evidence of an on-campus connection.
+let probeConfig = URLSessionConfiguration.ephemeral
+probeConfig.protocolClasses = [MockPortalProtocol.self]
+let probeClient = PortalClient(http: HTTPClient(configuration: probeConfig))
+var probes = 0
+MockPortalProtocol.handle = { request in
+    precondition(["ecard.neu.edu.cn", "jwxt.neu.edu.cn"].contains(request.url!.host!))
+    probes += 1
+    return (403, [:], "Access Denied")
+}
+let detectedEntry = await probeClient.browserLoginEntryURL()
+precondition(detectedEntry == URL(string: WebVPN.casService)! && probes == 2)
+MockPortalProtocol.handle = { request in
+    precondition(request.url?.host == "webvpn.neu.edu.cn")
+    return (200, [:], "<html>login required</html>")
+}
+let gatewayFallback = await probeClient.prepareBrowserURL(browserURLs[0])
+precondition(gatewayFallback.absoluteString == WebVPN.wrap(browserURLs[0].absoluteString))
+precondition(!probeClient.hasLoginSession, "选择校外地址不能伪造已登录状态")
+print("Login entry detection, sticky off-campus mode, account cleanup and public/native CAS realm reuse passed")
+
 var requests = 0
 MockPortalProtocol.handle = { request in
     requests += 1
@@ -182,6 +267,8 @@ MockPortalProtocol.handle = { request in
 }
 let onCampus = await schoolClient.isCampusNet()
 precondition(onCampus && !schoolClient.webvpnOn)
+let campusEntry = await schoolClient.browserLoginEntryURL()
+precondition(campusEntry == CasCrypto.casLoginURL)
 let grades = try await schoolClient.fetchJwxtGrades()
 precondition(grades.semesters.count == 1 && grades.semesters[0].courses.first?.score == 92)
 let card = try await schoolClient.fetchCardBalance()
@@ -194,6 +281,39 @@ let missingSubsidy = try PortalClient.parseCardBalance(fromHTML: #"<input id="Co
 precondition(missingSubsidy.balance == 0 && missingSubsidy.subsidy == nil)
 print("Campus grades/card: 302 probes, explicit CAS ST, session cookies, Referer, real balances and masked-data errors passed")
 
+
+// A gateway-only web login must also authenticate native academic APIs through that CAS realm.
+let gatewayConfig = URLSessionConfiguration.ephemeral
+gatewayConfig.protocolClasses = [MockPortalProtocol.self]
+let gatewayHTTP = HTTPClient(configuration: gatewayConfig)
+let gatewayNative = PortalClient(http: gatewayHTTP)
+let proxyCASPath = URL(string: WebVPN.wrap("https://pass.neu.edu.cn/tpass"))!.path
+let proxyCASTGC = HTTPCookie(properties: [.name:"CASTGC", .value:"proxy-only-cas", .domain:"webvpn.neu.edu.cn",
+    .path:proxyCASPath, .secure:"TRUE"])!
+gatewayNative.absorbCookies([ticket, proxyCASTGC])
+gatewayNative.adoptGatewayTicket()
+var proxyExchanges = 0
+MockPortalProtocol.handle = { request in
+    let url = request.url!
+    precondition(url.host == "webvpn.neu.edu.cn", "不能从代理登录切到没有会话的公网 CAS")
+    if url.path == proxyCASPath + "/login" {
+        precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("proxy-only-cas") == true)
+        let service = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "service" }!.value!
+        proxyExchanges += 1
+        return (302, ["Location":service + "?ticket=ST-proxy"], "")
+    }
+    precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("proxy-only-cas") != true, "CAS Cookie 不泄漏到业务路径")
+    if url.path.hasSuffix("/index.do") || url.path.hasSuffix("/home/index.html") { return (200, [:], "<html>student</html>") }
+    if url.path.hasSuffix("schoolCalendars.do") {
+        return (200, [:], #"{"code":0,"datas":[{"itemCode":"2026-1","itemName":"秋季"}]}"#)
+    }
+    precondition(url.path.hasSuffix("scores.do"))
+    return (200, [:], #"{"code":0,"datas":[{"courseName":"数学","credit":3,"score":"92"}]}"#)
+}
+let gatewayGrades = try await gatewayNative.fetchJwxtGrades()
+precondition(proxyExchanges == 1 && gatewayGrades.semesters.first?.courses.first?.score == 92)
+precondition(gatewayNative.browserDestination(for: proxyCAS) == proxyCAS)
+print("Gateway-only CAS: native academic SSO, rewritten redirects and cookie path isolation passed")
 
 final class MemoryWebSessionStore: WebSessionPersisting {
     var data: Data?

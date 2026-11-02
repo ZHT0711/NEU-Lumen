@@ -144,6 +144,8 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         await browser.start(URL(string: "http://127.0.0.1:8787/index.html")!, client: client)
         try await waitFor { browser.title == "校园网页功能验证" && !browser.isLoading }
         guard browser.webView.findInteraction != nil else { throw NetworkError(message: "Find unavailable") }
+        let userAgent = try await browser.webView.evaluateJavaScript("navigator.userAgent") as? String
+        guard userAgent == (client.browserUserAgent ?? HTTPClient.userAgent) else { throw NetworkError(message: "Browser and HTTP session UA mismatch") }
         _ = try await browser.webView.evaluateJavaScript("document.getElementById('popup').click()")
         try await waitFor { browser.title == "第二页" && browser.canGoBack }
         browser.webView.goBack()
@@ -167,7 +169,7 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
               try String(contentsOf: download, encoding: .utf8) == "NEU-Lumen download fixture" else {
             throw NetworkError(message: "Download contents failed")
         }
-        try "PASS: page load, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }

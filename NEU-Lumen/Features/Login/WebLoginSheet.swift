@@ -10,22 +10,39 @@ import WebKit
 struct WebLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppEnvironment.self) private var environment
+    @State private var preparing = true
+    @State private var gatewayOverride: Bool?
     var onCookies: (WebLoginSession) async -> Bool
 
     var body: some View {
         NavigationStack {
-            WebLoginWebView { session in
+            WebLoginWebView(client: environment.session.client, gatewayOverride: gatewayOverride, onPrepared: { preparing = false }) { session in
                 let ok = await onCookies(session)
                 if ok { dismiss() }
                 // 失败时保持面板打开：页面内可重试，或左上角取消
                 return ok
             }
+            .id(gatewayOverride)
             .ignoresSafeArea(edges: .bottom)
+            .overlay {
+                if preparing {
+                    ProgressView("正在选择校内 / 校外登录入口…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemBackground))
+                }
+            }
             .navigationTitle("统一身份认证")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu("登录入口", systemImage: "network") {
+                        Button("自动检测") { changeRoute(nil) }
+                        Button("校内直连") { changeRoute(false) }
+                        Button("校外 WebVPN") { changeRoute(true) }
+                    }
                 }
             }
             .safeAreaInset(edge: .top) {
@@ -42,9 +59,18 @@ struct WebLoginSheet: View {
             }
         }
     }
+
+    private func changeRoute(_ gateway: Bool?) {
+        guard gatewayOverride != gateway else { return }
+        preparing = true
+        gatewayOverride = gateway
+    }
 }
 
 struct WebLoginWebView: UIViewRepresentable {
+    let client: PortalClient
+    var gatewayOverride: Bool?
+    var onPrepared: () -> Void
     var onPortalLanding: (WebLoginSession) async -> Bool
 
     func makeUIView(context: Context) -> WKWebView {
@@ -54,7 +80,7 @@ struct WebLoginWebView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.onPortalLanding = onPortalLanding
-        webView.load(URLRequest(url: CasCrypto.casLoginURL))
+        context.coordinator.begin(webView, client: client, gatewayOverride: gatewayOverride, onPrepared: onPrepared)
         return webView
     }
 
@@ -74,8 +100,22 @@ struct WebLoginWebView: UIViewRepresentable {
         var onPortalLanding: ((WebLoginSession) async -> Bool)?
         var captureTask: Task<Void, Never>?
         private var flow = PortalLoginFlow()
+        private var gatewayFirst = false
         private var completed = false
         private var capturing = false
+
+        func begin(_ webView: WKWebView, client: PortalClient, gatewayOverride: Bool?, onPrepared: @escaping () -> Void) {
+            captureTask = Task { @MainActor [weak self, weak webView] in
+                let entry: URL
+                if let gatewayOverride { entry = gatewayOverride ? URL(string: WebVPN.casService)! : CasCrypto.casLoginURL }
+                else { entry = await client.browserLoginEntryURL() }
+                guard !Task.isCancelled, let self, let webView else { return }
+                self.gatewayFirst = WebVPN.isWrapped(entry.absoluteString)
+                self.flow = PortalLoginFlow(gatewayFirst: self.gatewayFirst)
+                onPrepared()
+                webView.load(URLRequest(url: entry))
+            }
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard !completed, !capturing, onPortalLanding != nil else { return }
@@ -119,7 +159,7 @@ struct WebLoginWebView: UIViewRepresentable {
             guard !Task.isCancelled, let handler = onPortalLanding else { return }
             completed = await handler(WebLoginSession(cookies: cookies, user: user, userAgent: agent,
                                                       hasLoginForm: current.hasLoginForm))
-            if !completed { flow = PortalLoginFlow() }
+            if !completed { flow = PortalLoginFlow(gatewayFirst: gatewayFirst) }
         }
 
     }

@@ -280,7 +280,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         guard !started else { return }
         started = true
         self.client = client
-        webView.customUserAgent = client.browserUserAgent
+        webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
         let destination = await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
@@ -321,6 +321,19 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
                  preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
         preferences.preferredContentMode = desktopMode ? .desktop : .mobile
         guard let url = navigationAction.request.url else { decisionHandler(.cancel, preferences); return }
+        // Gateway HTML rewrites most links; handle absolute links and popups that escape that rewriting.
+        // Never replay a POST: WebKit may not expose its body, and reloading it could lose a login form.
+        if navigationAction.targetFrame?.isMainFrame != false,
+           (navigationAction.request.httpMethod ?? "GET") == "GET",
+           let destination = client?.browserDestination(for: url), destination != url {
+            decisionHandler(.cancel, preferences)
+            var request = navigationAction.request
+            request.url = destination
+            request.setValue(nil, forHTTPHeaderField: "Cookie")
+            request.setValue(nil, forHTTPHeaderField: "Authorization")
+            webView.load(request)
+            return
+        }
         let scheme = url.scheme?.lowercased() ?? ""
         if ["http", "https", "about", "blob", "data"].contains(scheme) {
             decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)

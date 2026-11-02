@@ -19,6 +19,10 @@ struct PortalLoginFlow {
     private var gatewayAuthTried = false
     private var portalLandingTried = false
 
+    init(gatewayFirst: Bool = false) {
+        gatewayAuthTried = gatewayFirst
+    }
+
     static func isPersonalPortal(_ url: URL) -> Bool {
         guard url.scheme == "https" else { return false }
         if url.host == "personal.neu.edu.cn" {

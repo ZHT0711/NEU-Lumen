@@ -40,7 +40,6 @@ final class PortalClient {
             ok = await quickReachable("https://jwxt.neu.edu.cn/")
         }
         campusProbe = (Date(), ok)
-        if ok { webvpnOn = false }
         return ok
     }
 
@@ -48,24 +47,26 @@ final class PortalClient {
         guard let requestURL = URL(string: url) else { return false }
         let request = URLRequest(url: requestURL, timeoutInterval: 2.5)
         do {
-            _ = try await http.send(request, followRedirects: false)
+            let response = try await http.send(request, followRedirects: false)
+            guard (200..<400).contains(response.status) else { return false }
+            if let location = response.headers.first(where: { String(describing: $0.key).lowercased() == "location" })?.value as? String,
+               let target = URL(string: location, relativeTo: requestURL)?.absoluteURL,
+               WebVPN.isWrapped(target.absoluteString) { return false }
             return true
         } catch {
             return false
         }
     }
 
-    /// 用一号通 CASTGC 给 WebVPN 网关换票（必须走公网 pass，不能先开 webvpn 首页）。
+    /// 在已有 CAS 会话所在的认证域中换取 WebVPN 票据。
     @discardableResult
     func ensureWebVPN() async -> Bool {
         if webvpnOn && http.cookies.hasWebVPNTicket() { return true }
         for _ in 0..<2 {
-            let login = "https://pass.neu.edu.cn/tpass/login?service=\(WebVPN.casService.urlFormEncoded)"
-            if let url = URL(string: login),
-               let resp = try? await http.get(url) {
+            let url = authenticationURL(for: WebVPN.casService)
+            if let resp = try? await http.get(url) {
                 let landed = resp.finalURL.absoluteString
-                if http.cookies.hasWebVPNTicket()
-                    || (landed.contains("webvpn.neu.edu.cn") && !landed.contains("tpass/login")) {
+                if http.cookies.hasWebVPNTicket() && !landed.contains("/tpass/login") {
                     webvpnOn = true
                     return true
                 }
@@ -77,7 +78,16 @@ final class PortalClient {
 
     /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
     func prepareAccess() async {
+        // An authenticated gateway session is stronger evidence than a public WAF/probe response.
+        if webvpnOn || hasWebVPNTicket {
+            adoptGatewayTicket()
+            _ = await ensureWebVPN()
+            return
+        }
         if await isCampusNet() { return }
+        // Keep the gateway destination even if background ticket exchange fails;
+        // WKWebView can finish authentication instead of falling back to an unreachable campus URL.
+        webvpnOn = true
         _ = await ensureWebVPN()
     }
 
@@ -85,8 +95,8 @@ final class PortalClient {
         guard webvpnOn else { return url }
         if WebVPN.isIntranet(url) { return WebVPN.wrap(url) }
         // 校外门户 HTML 会被学校重定向进网关，门户域的请求统一改走网关
-        let lowered = url.lowercased()
-        if lowered.contains("personal.neu.edu.cn") || lowered.contains("portal.neu.edu.cn") {
+        let host = URL(string: url)?.host?.lowercased()
+        if host == "personal.neu.edu.cn" || host == "portal.neu.edu.cn" {
             return WebVPN.wrap(url)
         }
         return url
@@ -145,10 +155,7 @@ final class PortalClient {
     }
 
     private func performCASLanding(_ service: String) async throws -> HTTPClient.RawResponse {
-        let login = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
-        guard let url = URL(string: login) else {
-            throw NetworkError(message: "认证地址无效")
-        }
+        let url = authenticationURL(for: service)
         let resp = try await http.get(url)
         if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
             || resp.finalURL.path.contains("/tpass/login") {
@@ -690,15 +697,40 @@ final class PortalClient {
         return GradeReport(semesters: semesters, failedTerms: failed)
     }
 
+    /// Decide before showing any login form, so off-campus users authenticate in one cookie realm.
+    func browserLoginEntryURL() async -> URL {
+        if webvpnOn || hasWebVPNTicket { return URL(string: WebVPN.casService)! }
+        return await isCampusNet() ? CasCrypto.casLoginURL : URL(string: WebVPN.casService)!
+    }
+
+    private func authenticationURL(for service: String) -> URL {
+        let direct = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
+        // Gateway-first browser logins own a proxied CAS session, not a public CASTGC.
+        return URL(string: webvpnOn && !hasCasSession ? WebVPN.wrap(direct) : direct)!
+    }
+
+    func browserDestination(for url: URL) -> URL {
+        guard webvpnOn else { return url }
+        if hasCasSession {
+            if let publicCAS = WebVPN.publicCASURL(from: url) { return publicCAS }
+            if url.host?.lowercased() == "pass.neu.edu.cn" { return url }
+        }
+        guard WebVPN.shouldProxyBrowserURL(url) else { return url }
+        return URL(string: WebVPN.wrap(url.absoluteString)) ?? url
+    }
+
     func prepareBrowserURL(_ url: URL) async -> URL {
-        guard WebVPN.isIntranet(url.absoluteString) else { return url }
+        guard WebVPN.shouldProxyBrowserURL(url) || WebVPN.isWrapped(url.absoluteString) else { return url }
         await prepareAccess()
-        return URL(string: maybeWrap(url.absoluteString)) ?? url
+        return browserDestination(for: url)
     }
 
     func browserCookies() -> [HTTPCookie] { http.cookies.allCookies() }
 
-    func absorbBrowserCookies(_ cookies: [HTTPCookie]) { http.cookies.absorb(cookies) }
+    func absorbBrowserCookies(_ cookies: [HTTPCookie]) {
+        http.cookies.absorb(cookies)
+        adoptGatewayTicket()
+    }
 
     // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
 
