@@ -8,7 +8,7 @@ enum PortalLink {
         if value.hasPrefix("//") { absolute = URL(string: (base.scheme ?? "https") + ":" + value) }
         else if value.contains("://") { absolute = URL(string: value) }
         else if value.range(of: #"^[a-zA-Z][a-zA-Z0-9+.-]*:"#, options: .regularExpression) != nil { return nil }
-        else if value.split(separator: "/").first?.contains(".") == true && !value.hasPrefix(".") {
+        else if value.split(separator: "/").first?.contains(".") == true && !value.hasPrefix(".") && !value.hasPrefix("/") {
             absolute = URL(string: withScheme(value))
         } else { absolute = URL(string: value, relativeTo: base)?.absoluteURL }
         guard let url = absolute, ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
