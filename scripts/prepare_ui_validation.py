@@ -150,17 +150,16 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         scrollActivity.moved(by: -20)
         guard scrollActivity.direction == .up else { throw NetworkError(message: "Upward tab minimization failed") }
         // A held finger can pause without producing a new scroll phase.
-        try await Task.sleep(for: .milliseconds(800))
+        try await waitFor { scrollActivity.direction == nil }
         guard scrollActivity.direction == nil else { throw NetworkError(message: "Paused scroll did not restore tabs") }
         scrollActivity.moved(by: 20)
         scrollActivity.ended()
-        try await Task.sleep(for: .milliseconds(500))
+        try await waitFor { scrollActivity.direction == nil }
         guard scrollActivity.direction == nil else { throw NetworkError(message: "Idle scroll did not restore tabs") }
         scrollActivity.moved(by: 20)
         scrollActivity.ended()
-        try await Task.sleep(for: .milliseconds(250))
         scrollActivity.moved(by: -20)
-        try await Task.sleep(for: .milliseconds(200))
+        await Task.yield()
         guard scrollActivity.direction == .up else { throw NetworkError(message: "Cancelled restore interrupted a new scroll") }
         scrollActivity.restore()
         scrollActivity.moved(by: 0.1)
@@ -201,13 +200,21 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
             throw NetworkError(message: "Download contents failed")
         }
         let cardBridge = CardWebBridge(baseURL: URL(string: "http://127.0.0.1:8787")!, entryURL: URL(string: "http://127.0.0.1:8787/card-login.html")!)
+        let cardStore = WKWebsiteDataStore.nonPersistent()
+        cardBridge.use(store: cardStore)
         let balance = try await cardBridge.balance(client: client)
         guard balance.balance == 66.5 && balance.subsidy == 7.5 else { throw NetworkError(message: "WebKit card balance incorrect") }
+        let refreshed = try await cardBridge.balance(client: client)
+        guard refreshed.balance == balance.balance else { throw NetworkError(message: "Card refresh lost its authenticated session") }
         let statement = try await cardBridge.bills(client: client, year: 2026, month: 10)
         guard statement.bills.count == 2 && !statement.truncated else { throw NetworkError(message: "WebKit card statement/paging incorrect") }
+        let adopted = CardWebBridge(baseURL: URL(string: "http://127.0.0.1:8787")!, entryURL: URL(string: "http://127.0.0.1:8787/card-login.html")!)
+        adopted.use(store: cardStore, currentURL: URL(string: "http://127.0.0.1:8787/selfsearch/User/ConsumeInfo.aspx")!)
+        let adoptedBalance = try await adopted.balance(client: client)
+        guard adoptedBalance.balance == 66.5 else { throw NetworkError(message: "Adopted website session was replaced by SSO") }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
-        try "PASS: tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }

@@ -10,6 +10,9 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
     private var finished = false
     private var failure: Error?
     private var status = 0
+    private weak var client: PortalClient?
+    private var hasEstablishedSession = false
+    private var refererURL: URL?
     private let baseURL: URL
     private let entryURL: URL
 
@@ -24,15 +27,20 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView = nil
+        client = nil
+        hasEstablishedSession = false
+        refererURL = nil
     }
 
-    func use(store: WKWebsiteDataStore) {
+    func use(store: WKWebsiteDataStore, currentURL: URL? = nil) {
         reset()
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = store
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
         webView = view
+        hasEstablishedSession = true
+        refererURL = currentURL
     }
 
     func balance(client: PortalClient) async throws -> CardBalance {
@@ -81,6 +89,11 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
     private func establish(client: PortalClient) async throws -> CardBalance {
         let epoch = self.epoch
         let clientEpoch = client.sessionGeneration
+        self.client = client
+        // Route preparation can acquire a new gateway ticket. Copy cookies afterwards.
+        let entry = await client.prepareBrowserURL(entryURL)
+        let base = client.browserDestination(for: URL(string: "/selfsearch/User/baseinfo.aspx", relativeTo: baseURL)!.absoluteURL)
+        guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         if webView == nil {
             let configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = .nonPersistent()
@@ -90,8 +103,18 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         }
         guard let view = webView else { throw CancellationError() }
         view.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
+        // Keep the authenticated website session when refreshing or querying another month.
+        if hasEstablishedSession,
+           let html = try? await navigate(base),
+           let balance = try? PortalClient.parseCardBalance(fromHTML: html) {
+            await syncCookies(client, expected: clientEpoch)
+            guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
+            return balance
+        }
+        guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
+        hasEstablishedSession = false
         for cookie in client.browserCookies() { await view.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) }
-        let entry = await client.prepareBrowserURL(entryURL)
+        guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         _ = try await navigate(entry)
         // Only submit the school's signed card SSO form, never a password/SMS form.
         let submitted = try? await view.evaluateJavaScript(#"(() => { const input = document.querySelector('input[name="auid"]'); if (input && input.form && input.form.querySelector('input[name="timestamp"]')) { input.form.submit(); return true; } return false; })()"#)
@@ -99,19 +122,30 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
             try await Task.sleep(nanoseconds: 800_000_000)
             try await waitUntilFinished(view)
         }
-        let base = await client.prepareBrowserURL(URL(string: "/selfsearch/User/baseinfo.aspx", relativeTo: baseURL)!.absoluteURL)
         let html = try await navigate(base)
         guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         await syncCookies(client, expected: clientEpoch)
-        return try PortalClient.parseCardBalance(fromHTML: html)
+        let balance = try PortalClient.parseCardBalance(fromHTML: html)
+        hasEstablishedSession = true
+        return balance
     }
 
     private func navigate(_ url: URL) async throws -> String {
         guard let view = webView else { throw CancellationError() }
         finished = false; failure = nil; status = 0
-        view.load(URLRequest(url: url))
+        var request = URLRequest(url: url)
+        if let source = view.url ?? refererURL,
+           source.scheme == url.scheme, source.host == url.host, source.port == url.port {
+            request.setValue(source.absoluteString, forHTTPHeaderField: "Referer")
+        }
+        view.load(request)
         try await waitUntilFinished(view)
-        if status >= 400 { throw NetworkError(message: "一卡通网页 HTTP \(status)，可打开网页完成认证后同步") }
+        if status >= 400 {
+            let destination = view.url ?? url
+            let path = (WebVPN.unwrap(destination) ?? destination).path
+            throw NetworkError(message: "一卡通网页 HTTP \(status)（\(path)），可打开网页完成认证后同步")
+        }
+        refererURL = view.url
         let document = PortalLoginDocument.decode(try? await view.evaluateJavaScript(PortalLoginDocument.script))
         if document.hasLoginForm || view.url?.path.contains("/tpass/login") == true {
             throw NetworkError(message: "一卡通需要网页认证，请打开一卡通网页完成后同步")
@@ -158,15 +192,39 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         client.absorbBrowserCookies(cookies)
     }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { finished = false }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { finished = true }
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard webView === self.webView else { decisionHandler(.cancel); return }
+        if action.targetFrame?.isMainFrame != false,
+           (action.request.httpMethod ?? "GET") == "GET",
+           let source = action.request.url, let target = client?.browserDestination(for: source), source != target {
+            decisionHandler(.cancel)
+            var request = action.request
+            request.url = target
+            request.setValue(nil, forHTTPHeaderField: "Cookie")
+            request.setValue(nil, forHTTPHeaderField: "Authorization")
+            webView.load(request)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard webView === self.webView else { return }
+        finished = false
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView === self.webView else { return }
+        finished = true
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if (error as NSError).code != NSURLErrorCancelled { failure = error }
+        if webView === self.webView, (error as NSError).code != NSURLErrorCancelled { failure = error }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if (error as NSError).code != NSURLErrorCancelled { failure = error }
+        if webView === self.webView, (error as NSError).code != NSURLErrorCancelled { failure = error }
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+        guard webView === self.webView else { return .cancel }
         if navigationResponse.isForMainFrame { status = (navigationResponse.response as? HTTPURLResponse)?.statusCode ?? 0 }
         return .allow
     }

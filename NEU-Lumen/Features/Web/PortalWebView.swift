@@ -119,7 +119,8 @@ struct PortalWebViewScreen: View {
                                 do {
                                     let balance = try await browser.syncCardBalance()
                                     guard epoch == environment.session.client.sessionGeneration else { return }
-                                    environment.repository.cardWebBridge.use(store: browser.webView.configuration.websiteDataStore)
+                                    environment.repository.cardWebBridge.use(store: browser.webView.configuration.websiteDataStore,
+                                        currentURL: browser.webView.url)
                                     environment.repository.applyCardBalance(balance)
                                     dismiss()
                                 } catch { syncError = NetworkError.from(error).message }

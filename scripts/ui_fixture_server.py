@@ -21,9 +21,17 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path == '/card-login.html' and self.authenticated():
+            return self.html('Repeated SSO is forbidden while the card session is valid', 403)
         if path.startswith('/selfsearch/'):
             if not self.authenticated():
                 return self.html('Forbidden', 403)
+            referer = urlsplit(self.headers.get('Referer', ''))
+            if referer.netloc != self.headers.get('Host') or referer.path not in [
+                '/card-login.html', '/selfsearch/SSOLogin.aspx',
+                '/selfsearch/User/baseinfo.aspx', '/selfsearch/User/ConsumeInfo.aspx',
+            ]:
+                return self.html('Card navigation requires its authenticated page Referer', 403)
             if path.endswith('baseinfo.aspx'):
                 return self.html("<html><input id='ContentPlaceHolder1_txtOddFare' value='66.50'><input id='ContentPlaceHolder1_txtSpecialOddFare' value='7.50'></html>")
             if path.endswith('ConsumeInfo.aspx'):
@@ -37,7 +45,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not all(fields.get(key) for key in ['username', 'timestamp', 'auid']):
                 return self.html('Bad SSO', 400)
             self.send_response(302)
-            self.send_header('Set-Cookie', 'card-fixture=ready; Path=/selfsearch; HttpOnly')
+            self.send_header('Set-Cookie', 'card-fixture=ready; Path=/; HttpOnly')
             self.send_header('Location', '/selfsearch/User/baseinfo.aspx')
             self.end_headers()
             return

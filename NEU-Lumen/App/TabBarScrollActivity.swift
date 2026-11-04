@@ -28,8 +28,9 @@ final class TabBarScrollActivity {
 
     private func scheduleRestore(after delay: Duration) {
         restoreTask?.cancel()
+        let deadline = ContinuousClock.now.advanced(by: delay)
         restoreTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: delay) }
+            do { try await Task.sleep(until: deadline, clock: .continuous) }
             catch { return }
             self?.restore()
         }
