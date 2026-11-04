@@ -41,7 +41,7 @@ xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/home-dark.png"
 xcrun simctl ui "$SIM_ID" appearance light
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=browser --browser-checks
 CONTAINER="$(xcrun simctl get_app_container "$SIM_ID" edu.neu.lumen data)"
-for _ in $(seq 1 60); do
+for _ in $(seq 1 120); do
   if [[ -f "$CONTAINER/Documents/browser-checks.txt" ]]; then break; fi
   sleep 1
 done

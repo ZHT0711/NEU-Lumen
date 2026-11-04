@@ -18,7 +18,13 @@ enum MOOCScripts {
       } catch (_) {}
     }
     const own = /\/(?:mooc\/|spoc\/)?learn\//.test(location.pathname);
-    if (own) add(location.href, document.querySelector('.course-name, .f-cb .f-fl h4, h1')?.textContent || document.title);
+    if (own) {
+      add(location.href, document.querySelector('.course-name, .f-cb .f-fl h4, h1')?.textContent || document.title);
+      const active = window.moocTermDto?.id || window.termDto?.id;
+      if (location.pathname.includes('/spoc/') && active) {
+        for (const course of courses.values()) course.activeTermID = String(active);
+      }
+    }
     else for (const link of document.querySelectorAll('a[href*="/learn/"]')) {
       add(link.href, link.getAttribute('title') || link.textContent);
     }
@@ -99,7 +105,7 @@ const TOTAL_FIELDS = ['totalMark', 'totalScore', 'fullMark', 'allMark'];
 function firstNumber(obj, fields) {
   for (const f of fields) {
     const v = obj[f];
-    if (typeof v === 'number' && isFinite(v) && v > 0) return v;
+    if (typeof v === 'number' && isFinite(v) && v >= 0) return v;
     if (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v)) return parseFloat(v);
   }
   return null;
@@ -206,7 +212,6 @@ function extractHomeworkFromTermDto(input, course) {
   if (!data || !course) return [];
   const out = [];
   const seen = new Set();
-  const nearMisses = [];
   let visited = 0;
 
   function looksLikeChapter(node) {
@@ -230,11 +235,11 @@ function extractHomeworkFromTermDto(input, course) {
       || (node.test ? firstNumber(node.test, DEADLINE_FIELDS) : null)
       || firstPartNumber(node, DEADLINE_FIELDS);
     const score = firstNumber(node, SCORE_FIELDS)
-      || (node.test ? firstNumber(node.test, SCORE_FIELDS) : null)
-      || firstPartNumber(node, SCORE_FIELDS);
+      ?? (node.test ? firstNumber(node.test, SCORE_FIELDS) : null)
+      ?? firstPartNumber(node, SCORE_FIELDS);
     const totalScore = firstNumber(node, TOTAL_FIELDS)
-      || (node.test ? firstNumber(node.test, TOTAL_FIELDS) : null)
-      || firstPartNumber(node, TOTAL_FIELDS);
+      ?? (node.test ? firstNumber(node.test, TOTAL_FIELDS) : null)
+      ?? firstPartNumber(node, TOTAL_FIELDS);
     const hasSignal = deadlineMs != null || (score != null && totalScore != null);
     var ct = String(node.contentType || '');
     var ctIsAssessed = ct === '2' || ct === '3' || ct === '6';
@@ -294,18 +299,8 @@ function extractHomeworkFromTermDto(input, course) {
           apiCompleted: done
         });
       }
-    } else if (typeof name === 'string' && name.trim() && hasSignal) {
-      if (nearMisses.length < 5) {
-        nearMisses.push({
-          name: String(name).trim().slice(0, 40),
-          contentType: ct || null,
-          type: node.type != null ? node.type : null,
-          testType: (node.test && node.test.type != null) ? node.test.type : null
-        });
-      } else if (nearMisses.length === 5) {
-        nearMisses.push('…');
-      }
     }
+
     const nextChapter = node.chapterId || (looksLikeChapter(node) ? node.id : chapterId);
     const nextLesson = node.lessonId || (looksLikeLesson(node) ? node.id : lessonId);
     for (const key of Object.keys(node)) {
@@ -419,12 +414,6 @@ function findLearnOutlines(flightText) {
 }
 
 
-function findLearnOutline(flightText) {
-  const outlines = findLearnOutlines(flightText);
-  return outlines.find((outline) => Array.isArray(outline.exams) && outline.exams.length > 0)
-    || outlines[0]
-    || null;
-}
 
 
 function extractLearnOutlines(scriptText) {
@@ -432,15 +421,7 @@ function extractLearnOutlines(scriptText) {
 }
 
 
-function extractLearnOutline(scriptText) {
-  return findLearnOutline(decodeNextFlight(scriptText));
-}
 
 
-function hasUsableExam(outline) {
-  return !!(outline && Array.isArray(outline.exams) && outline.exams.some(
-    (exam) => exam && typeof exam === 'object' && (exam.name || exam.title)
-  ));
-}
 """#
 }

@@ -15,9 +15,12 @@ final class LearningWebReader {
         http.cookies.absorb(await webView.configuration.websiteDataStore.httpCookieStore.allCookies())
         http.userAgentOverride = webView.customUserAgent
         let identityNames = platform == .mooc ? ["NTESSTUDYSI"] : ["_uid", "UID"]
-        let identity = http.cookies.allCookies().filter {
-            identityNames.contains($0.name) && platform.accepts(URL(string: "https://" + $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))!)
-        }.sorted { $0.name < $1.name }.map { $0.name + "=" + $0.value }.joined(separator: "|")
+        func signature(_ cookies: [HTTPCookie]) -> String {
+            cookies.filter {
+                identityNames.contains($0.name) && platform.accepts(URL(string: "https://" + $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))!)
+            }.sorted { $0.name < $1.name }.map { $0.name + "=" + $0.value }.joined(separator: "|")
+        }
+        let identity = signature(http.cookies.allCookies())
         let accountKey = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
         var report: LearningAssignmentReport
         switch platform {
@@ -26,8 +29,12 @@ final class LearningWebReader {
         case .cg: throw NetworkError(message: "请通过 CG 实验平台同步")
         }
         report.accountKey = accountKey
+        let currentCookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+        guard signature(currentCookies) == identity, !Task.isCancelled else { throw CancellationError() }
         for cookie in http.cookies.allCookies() {
-            await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+            if let origin = URL(string: "https://" + cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))), platform.accepts(origin) {
+                await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+            }
         }
         return report
     }
@@ -51,7 +58,7 @@ final class LearningWebReader {
         var courses = rows.compactMap { row -> LearningCourse? in
             guard let id = row["id"], let term = row["termID"], let link = row["url"],
                   let url = URL(string: link), LearningPlatform.mooc.accepts(url) else { return nil }
-            return LearningCourse(id: id, termID: term, title: row["title"] ?? id, url: url)
+            return LearningCourse(id: id, termID: term, title: row["title"] ?? id, url: url, activeTermID: row["activeTermID"])
         }
         // The current personal center uses click handlers on cards with no href.
         // Resolve those in a separate browser, leaving the user's page available.
@@ -88,7 +95,7 @@ final class LearningWebReader {
                 var responses: [[String: String]] = []
                 if let csrf { responses = try await termResponses(course.termID, csrf: csrf, referer: course.url) }
                 var parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
-                if let active = parsed["activeTermID"] as? String, !active.isEmpty, active != course.termID, let csrf {
+                if let active = course.activeTermID ?? parsed["activeTermID"] as? String, !active.isEmpty, active != course.termID, let csrf {
                     responses += try await termResponses(active, csrf: csrf, referer: course.url)
                     parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
                 }
@@ -251,7 +258,15 @@ private final class MOOCCourseNavigator: NSObject, WKUIDelegate {
                 }
                 try await Task.sleep(for: .milliseconds(200))
             }
-            guard let resolved else { throw NetworkError(message: "慕课课程卡片未能打开，请在网页进入课程后同步") }
+            guard var resolved else { throw NetworkError(message: "慕课课程卡片未能打开，请在网页进入课程后同步") }
+            if resolved.url.path.contains("/spoc/") {
+                for _ in 0..<15 {
+                    try Task.checkCancellation()
+                    let active = try? await browser.evaluateJavaScript("String(window.moocTermDto?.id || window.termDto?.id || '')")
+                    if let id = active as? String, !id.isEmpty { resolved.activeTermID = id; break }
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+            }
             courses.append(resolved)
         }
         return courses

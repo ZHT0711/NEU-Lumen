@@ -381,7 +381,7 @@ with reader_source.open("a", encoding="utf-8") as stream:
 func verifyMOOCCourseCards(source: WKWebView) async throws {
     let courses = try await MOOCCourseNavigator(source: source).discover()
     guard courses.count == 2, courses[0].id == "NEU-1", courses[0].termID == "42",
-          courses[1].id == "NEU-2", courses[1].termID == "43" else {
+          courses[1].id == "NEU-2", courses[1].termID == "43", courses[1].activeTermID == "99" else {
         throw NetworkError(message: "MOOC no-href card discovery or target-blank navigation incorrect")
     }
 }

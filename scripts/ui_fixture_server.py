@@ -21,6 +21,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path.startswith('/mooc/learn/'):
+            return self.html('<title>MOOC course</title>')
+        if path.startswith('/spoc/learn/'):
+            return self.html('<title>SPOC course</title><script>window.moocTermDto={id:99};</script>')
         cg_path = path.removeprefix('/http/fixture')
         if cg_path.startswith('/assignment/'):
             number = parse_qs(urlsplit(self.path).query).get('assignID', ['1'])[0]

@@ -21,6 +21,10 @@ const peer = parse({ chapters: [{ id: 1, lessons: [], homeworks: [{ id: 3, name:
   deadline, enableEvaluation: true, evaluateStart: 1, evaluateEnd: Date.now() + 86400000, usedTryCount: 1 }] }] }, meta);
 assert.equal(peer[0].hwPhase, "peerreview");
 assert.equal(peer[0].checkedOff, false);
+const zero = parse({ chapters: [{ id: 1, lessons: [], homeworks: [{ id: 4, name: "零分作业", contentType: 3,
+  deadline, score: 0, totalScore: 10, usedTryCount: 1 }] }] }, meta);
+assert.equal(zero[0].score, 0);
+assert.equal(zero[0].checkedOff, true);
 
 const outline = { chapters: [], exams: [{ id: 99, name: "期末考试", taskType: "exam", parts: [{ endTime: deadline, usedTryCount: 1 }] }] };
 const flight = `self.__next_f.push([1,${JSON.stringify('14:["$","div",null,{"outline":' + JSON.stringify(outline) + '}]\n')}])`;

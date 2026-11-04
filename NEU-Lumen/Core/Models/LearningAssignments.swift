@@ -32,6 +32,7 @@ struct LearningCourse: Identifiable, Codable, Hashable {
     let termID: String
     let title: String
     let url: URL
+    var activeTermID: String? = nil
     var key: String { id + "." + termID }
 }
 
