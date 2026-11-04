@@ -94,13 +94,13 @@ struct ProfileView: View {
                     }
                     .padding(.vertical, 4)
                     .frame(minHeight: 110)
-                    .listRowBackground {
+                    .listRowBackground(
                         Color(.secondarySystemGroupedBackground)
                             .overlay(alignment: .trailing) {
                                 CampusLineArt().stroke(campusInk.opacity(0.12), lineWidth: 1)
                                     .frame(width: 260, height: 160).offset(x: 35, y: 12)
                             }.clipped().accessibilityHidden(true)
-                    }
+                    )
                     if environment.session.user?.hasCoreProfile != true {
                         Text("个人资料尚未同步完整").font(.caption).foregroundStyle(.secondary)
                     }

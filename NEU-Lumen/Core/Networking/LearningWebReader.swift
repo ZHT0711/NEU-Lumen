@@ -71,10 +71,12 @@ final class LearningWebReader {
             try Task.checkCancellation()
             do {
                 let page = try await get(course.url)
+                guard LearningPlatform.mooc.accepts(page.finalURL) else { throw NetworkError(message: "课程已跳转，请重新登录慕课") }
+                let resolvedCourse = LearningCourse(id: course.id, termID: course.termID, title: course.title, url: page.finalURL)
                 var html = page.text
                 // Exams in the new learn shell live in a separate server-rendered outline.
-                if !course.url.path.contains("/spoc/"), course.url.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil {
-                    var exams = URLComponents(url: course.url, resolvingAgainstBaseURL: false)!
+                if !resolvedCourse.url.path.contains("/spoc/"), resolvedCourse.url.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil {
+                    var exams = URLComponents(url: resolvedCourse.url, resolvingAgainstBaseURL: false)!
                     exams.path = exams.path.replacingOccurrences(of: #"(/learn/[^/]+)/.*"#, with: "$1/exams", options: .regularExpression)
                     exams.fragment = nil
                     do { html += try await get(exams.url!).text }
@@ -85,10 +87,10 @@ final class LearningWebReader {
                 }
                 var responses: [[String: String]] = []
                 if let csrf { responses = try await termResponses(course.termID, csrf: csrf, referer: course.url) }
-                var parsed = try await parseMOOC(course, html: html, responses: responses)
+                var parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
                 if let active = parsed["activeTermID"] as? String, !active.isEmpty, active != course.termID, let csrf {
                     responses += try await termResponses(active, csrf: csrf, referer: course.url)
-                    parsed = try await parseMOOC(course, html: html, responses: responses)
+                    parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
                 }
                 guard parsed["recognized"] as? Bool == true else {
                     throw NetworkError(message: "未读取到课程大纲，请打开课程完成登录后重试")
@@ -240,7 +242,7 @@ private final class MOOCCourseNavigator: NSObject, WKUIDelegate {
             var resolved: LearningCourse?
             for _ in 0..<75 {
                 try Task.checkCancellation()
-                if let url = browser.url, LearningPlatform.mooc.accepts(url),
+                if !browser.isLoading, let url = browser.url, LearningPlatform.mooc.accepts(url),
                    let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
                    let tid = components.queryItems?.first(where: { $0.name == "tid" })?.value,
                    let range = url.path.range(of: #"(?<=/learn/)[^/]+"#, options: .regularExpression) {
