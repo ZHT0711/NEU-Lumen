@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-ios-unsigned-${{ github.ref }}
+  group: build-ios-unsigned-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -88,6 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/catalog-tests.log") 2>&1
           swiftc \
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/PortalModels.swift \
@@ -110,6 +111,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/planner-tests.log") 2>&1
           swiftc \
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/PortalModels.swift \
@@ -127,6 +129,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/login-tests.log") 2>&1
           swiftc \
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/*.swift \
@@ -141,7 +144,11 @@ jobs:
           "${RUNNER_TEMP}/off-campus-tests"
 
       - name: Build unsigned IPA
-        run: bash build_ios_unsigned.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          bash build_ios_unsigned.sh 2>&1 | tee build/ios-build.log
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v7.0.2
@@ -154,13 +161,16 @@ jobs:
       - name: Validate simulator UI and browser behavior
         run: bash scripts/validate_ui.sh
 
+      - name: Require warning-free compiler logs
+        run: python3 scripts/check_build_diagnostics.py "${RUNNER_TEMP}/catalog-tests.log" "${RUNNER_TEMP}/planner-tests.log" "${RUNNER_TEMP}/login-tests.log" build/ios-build.log build/ui-preview/simulator-build.log
+
       - name: Upload UI screenshots and checks
-        if: always()
+        if: always() && hashFiles('build/ui-preview/**') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: NEU-Lumen-ui-preview-${{ github.run_number }}
           path: build/ui-preview/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   release:
@@ -251,6 +261,28 @@ jobs:
           fail_on_unmatched_files: true
           files: release-assets/NEU-Lumen-iOS-unsigned.ipa
 
+  manual_nightly:
+    name: Publish dated manual nightly
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Download verified unsigned IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
+      - name: Publish dated prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/publish_manual_nightly.py
+
   nightly:
     name: Publish rolling nightly IPA
     needs: build
@@ -263,7 +295,22 @@ jobs:
       group: publish-nightly
       cancel-in-progress: false
     steps:
+      - name: Check current main commit
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          CURRENT_SHA="$(gh api "repos/${GH_REPO}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "${CURRENT_SHA}" == "${GITHUB_SHA}" ]]; then
+            echo "publish=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "publish=false" >> "${GITHUB_OUTPUT}"
+            echo "main 已更新，滚动 nightly 等待当前 main 完成检查。"
+          fi
       - name: Download verified unsigned IPA
+        if: steps.current.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -271,6 +318,7 @@ jobs:
         run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
 
       - name: Publish nightly prerelease
+        if: steps.current.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
