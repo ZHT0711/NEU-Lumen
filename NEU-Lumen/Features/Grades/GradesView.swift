@@ -60,9 +60,9 @@ struct GradesView: View {
                     .accessibilityLabel("刷新学习数据")
                 }
             }
-            .task {
+            .task(id: section) {
                 await repo.ensureLoadedForCurrentUser()
-                await repo.loadGrades()
+                if section == "成绩" { await repo.loadGrades() }
             }
         }
         .sheet(isPresented: $showAcademicWeb) {
