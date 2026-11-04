@@ -273,6 +273,11 @@ final class SessionStore {
         client.clearSession()
     }
 
+    /// 等待正在进行的续登完成，避免业务请求使用即将失效的旧会话。
+    func waitForRecovery() async {
+        if let task = recoveryTask { _ = await task.value }
+    }
+
     /// 会话过期后的静默重登（接口报会话失效时由仓储调用并重试一次）。
     func silentRelogin() async -> Bool {
         if let task = recoveryTask { return await task.value }

@@ -282,6 +282,28 @@ let missingSubsidy = try PortalClient.parseCardBalance(fromHTML: #"<input id="Co
 precondition(missingSubsidy.balance == 0 && missingSubsidy.subsidy == nil)
 print("Campus grades/card: 302 probes, explicit CAS ST, session cookies, Referer, real balances and masked-data errors passed")
 
+let visibleWallet = try PortalClient.parseCardBalance(fromHTML: #"""
+<span>学号：20269999</span><span>卡状态：正常卡</span>
+<div><span>主钱包余额：</span><span>￥1,234.50元</span></div>
+<div>补助余额：0元</div>
+"""#)
+precondition(visibleWallet.balance == 1234.50 && visibleWallet.subsidy == 0 && visibleWallet.status == "正常卡")
+let labelWallet = try PortalClient.parseCardBalance(fromHTML: #"<span id='ctl00_NewContent_lblOddFare'>32.10</span><label id='NewContent_lblSpecialOddFare'>7.50</label>"#)
+precondition(labelWallet.balance == 32.10 && labelWallet.subsidy == 7.50)
+for invalid in ["***", "**.23", "12.345", "1,23.45"] {
+    do {
+        _ = try PortalClient.parseCardBalance(fromHTML: "<span>主钱包余额：\(invalid)元</span><span>学号：20269999</span>")
+        preconditionFailure("Masked or malformed amounts cannot become balances")
+    } catch { }
+}
+do {
+    _ = try PortalClient.parseCardBalance(fromHTML: #"<script>const example = '<input id="ContentPlaceHolder1_txtOddFare" value="99">';</script><span>补助余额：8元</span>"#)
+    preconditionFailure("Script examples and subsidy amounts cannot become wallet balances")
+} catch { }
+precondition(NetworkError.isCancellation(CancellationError()) && NetworkError.isCancellation(URLError(.cancelled)))
+precondition(!NetworkError.from(CancellationError()).message.contains("Swift"))
+print("Card visible labels, ASP.NET spans, thousands, zero subsidy, masked/malformed values and cancellation messages passed")
+
 
 // A gateway-only web login must also authenticate native academic APIs through that CAS realm.
 let gatewayConfig = URLSessionConfiguration.ephemeral

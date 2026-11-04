@@ -49,7 +49,10 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         await gate.acquire()
         do {
             guard epoch == self.epoch, clientEpoch == client.sessionGeneration else { throw CancellationError() }
-            let value = try await establish(client: client)
+            try await establish(client: client)
+            guard let view = webView else { throw CancellationError() }
+            let value = try await Self.readBalance(in: view)
+            guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
             await gate.release()
             return value
         } catch { await gate.release(); throw error }
@@ -61,7 +64,7 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         await gate.acquire()
         do {
             guard epoch == self.epoch, clientEpoch == client.sessionGeneration else { throw CancellationError() }
-            _ = try await establish(client: client)
+            try await establish(client: client)
             let url = await client.prepareBrowserURL(URL(string: "/selfsearch/User/ConsumeInfo.aspx", relativeTo: baseURL)!.absoluteURL)
             var html = try await navigate(url)
             var fields = PortalClient.cardBillSearchFields(html: html, year: year, month: month)
@@ -86,7 +89,7 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         } catch { await gate.release(); throw error }
     }
 
-    private func establish(client: PortalClient) async throws -> CardBalance {
+    private func establish(client: PortalClient) async throws {
         let epoch = self.epoch
         let clientEpoch = client.sessionGeneration
         self.client = client
@@ -105,11 +108,10 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         view.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         // Keep the authenticated website session when refreshing or querying another month.
         if hasEstablishedSession,
-           let html = try? await navigate(base),
-           let balance = try? PortalClient.parseCardBalance(fromHTML: html) {
+           (try? await navigate(base)) != nil {
             await syncCookies(client, expected: clientEpoch)
             guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
-            return balance
+            return
         }
         guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         hasEstablishedSession = false
@@ -122,12 +124,26 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
             try await Task.sleep(nanoseconds: 800_000_000)
             try await waitUntilFinished(view)
         }
-        let html = try await navigate(base)
+        _ = try await navigate(base)
         guard epoch == self.epoch, clientEpoch == client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
         await syncCookies(client, expected: clientEpoch)
-        let balance = try PortalClient.parseCardBalance(fromHTML: html)
         hasEstablishedSession = true
-        return balance
+    }
+
+    static func readBalance(in view: WKWebView, attempts: Int = 50) async throws -> CardBalance {
+        var lastError: Error = NetworkError(message: "一卡通网页尚未提供可读取的主钱包余额")
+        for attempt in 0..<attempts {
+            try Task.checkCancellation()
+            do {
+                let html = try await view.evaluateJavaScript(CardBalanceDocument.browserScript) as? String ?? ""
+                return try PortalClient.parseCardBalance(fromHTML: html)
+            } catch {
+                if NetworkError.isCancellation(error) { throw error }
+                lastError = error
+            }
+            if attempt + 1 < attempts { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        throw lastError
     }
 
     private func navigate(_ url: URL) async throws -> String {

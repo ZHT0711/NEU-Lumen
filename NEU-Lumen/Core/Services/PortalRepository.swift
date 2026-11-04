@@ -16,6 +16,7 @@ final class PortalRepository {
     let systemCalendar = SystemCalendarBridge()
     let cardWebBridge = CardWebBridge()
     private var cardUsesWebKit = false
+    private var cardBalanceRevision = UUID()
     private(set) var newsThumbnails: [String: Data] = [:]
     private var loadingNewsThumbnails: Set<String> = []
     private(set) var newsRevision = 0
@@ -131,12 +132,33 @@ final class PortalRepository {
 
     /// 会话过期 → 静默重登 → 重试一次。
     private func withRecovery<T>(_ operation: () async throws -> T) async throws -> T {
+        let generation = accountGeneration
+        let account = session.user
+        func checkRequest() throws {
+            try Task.checkCancellation()
+            let sameAccount = account.map { previous in
+                session.user.map { previous.isSameAccount(as: $0) } ?? false
+            } ?? (session.user == nil)
+            guard generation == accountGeneration, sameAccount else { throw CancellationError() }
+        }
+        await session.waitForRecovery()
         do {
+            try checkRequest()
             return try await operation()
-        } catch let e as NetworkError where e.isSessionExpired {
-            guard await session.silentRelogin() else { throw e }
-            user = session.user
-            return try await operation()
+        } catch {
+            try checkRequest()
+            if NetworkError.isCancellation(error) {
+                await session.waitForRecovery()
+                try checkRequest()
+                return try await operation()
+            }
+            if let e = error as? NetworkError, e.isSessionExpired {
+                guard await session.silentRelogin() else { throw e }
+                try checkRequest()
+                user = session.user
+                return try await operation()
+            }
+            throw error
         }
     }
 
@@ -227,6 +249,7 @@ final class PortalRepository {
     }
 
     func applyCardBalance(_ balance: CardBalance) {
+        cardBalanceRevision = UUID()
         cardUsesWebKit = true
         cardBalance = balance
         cardState = .loaded
@@ -239,7 +262,7 @@ final class PortalRepository {
         if cardUsesWebKit { return try await cardWebBridge.balance(client: session.client) }
         do { return try await session.client.fetchCardBalance() }
         catch {
-            guard !Task.isCancelled else { throw CancellationError() }
+            if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
             let balance = try await cardWebBridge.balance(client: session.client)
             cardUsesWebKit = true
             return balance
@@ -445,50 +468,61 @@ final class PortalRepository {
     // MARK: - 一卡通 / 网费 / 电费
 
     /// 一卡通总览：余额、网费、电费并行拉取（校内直连，校外自动走 WebVPN）。
-    private func cardResult<T>(_ operation: () async throws -> T) async -> Result<T, NetworkError> {
+    private func cardResult<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
         do { return .success(try await withRecovery(operation)) }
-        catch { return .failure(NetworkError.from(error)) }
+        catch { return .failure(error) }
     }
 
     func loadCardOverview() async {
+        await ensureLoadedForCurrentUser()
         if cardState == .loading { return }
         cardState = .loading
         cardWarning = nil
         netState = .loading
         electricState = .loading
         let client = session.client
+        let generation = accountGeneration
+        let balanceRevision = cardBalanceRevision
         // 与泥洞一致，先固定这一轮的校内/校外路由，再并发取业务数据。
         await client.prepareAccess()
-        let generation = accountGeneration
         async let fetchedCard = cardResult { try await self.cardBalanceWithWebRecovery() }
         async let fetchedNet = cardResult { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
         async let fetchedElectric = cardResult { try await client.fetchElectric(room: electricRoomCode) }
         let (card, net, elec) = await (fetchedCard, fetchedNet, fetchedElectric)
         guard generation == accountGeneration else { return }
         session.persistWebSession()
-        switch card {
-        case .success(let value):
-            cardBalance = value
-            cardUpdatedAt = Date()
-            cardState = .loaded
-        case .failure(let error):
-            if cardBalance != nil {
-                cardWarning = "本次同步失败，显示上次真实结果：" + error.message
+        if balanceRevision == cardBalanceRevision {
+            switch card {
+            case .success(let value):
+                cardBalance = value
+                cardUpdatedAt = Date()
                 cardState = .loaded
-            } else { cardState = .failed(error.message) }
+            case .failure(let error):
+                if NetworkError.isCancellation(error) {
+                    cardState = cardBalance == nil ? .idle : .loaded
+                } else if cardBalance != nil {
+                    cardWarning = "本次同步失败，显示上次真实结果：" + NetworkError.from(error).message
+                    cardState = .loaded
+                } else { cardState = .failed(NetworkError.from(error).message) }
+            }
         }
         switch net {
         case .success(let value): netInfo = value; netState = .loaded
-        case .failure(let error): netState = netInfo == nil ? .failed(error.message) : .loaded
+        case .failure(let error):
+            if NetworkError.isCancellation(error) { netState = netInfo == nil ? .idle : .loaded }
+            else { netState = netInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
         }
         switch elec {
         case .success(let value): electricInfo = value; electricState = .loaded
-        case .failure(let error): electricState = electricInfo == nil ? .failed(error.message) : .loaded
+        case .failure(let error):
+            if NetworkError.isCancellation(error) { electricState = electricInfo == nil ? .idle : .loaded }
+            else { electricState = electricInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
         }
     }
 
     /// 拉取某自然月流水（历史月落缓存，不再自动刷新）。
     func loadBills(year: Int, month: Int, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
         billsYear = year
         billsMonth = month
         let key = "\(year)-\(month)"
@@ -506,7 +540,7 @@ final class PortalRepository {
                 if self.cardUsesWebKit { return try await self.cardWebBridge.bills(client: self.session.client, year: year, month: month) }
                 do { return try await self.session.client.fetchCardBills(year: year, month: month) }
                 catch {
-                    guard !Task.isCancelled else { throw CancellationError() }
+                    if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
                     let statement = try await self.cardWebBridge.bills(client: self.session.client, year: year, month: month)
                     self.cardUsesWebKit = true
                     return statement
@@ -521,7 +555,9 @@ final class PortalRepository {
             billsState = .loaded
         } catch {
             guard generation == accountGeneration else { return }
-            if billsCache[key] == nil {
+            if NetworkError.isCancellation(error) {
+                billsState = billsCache[key] == nil ? .idle : .loaded
+            } else if billsCache[key] == nil {
                 billsState = .failed(NetworkError.from(error).message)
             } else {
                 billsState = .loaded

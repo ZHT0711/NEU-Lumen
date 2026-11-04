@@ -25,6 +25,7 @@ struct NetworkError: LocalizedError {
     /// 把底层错误翻译成用户能看懂的提示。
     static func from(_ error: Error) -> NetworkError {
         if let e = error as? NetworkError { return e }
+        if isCancellation(error) { return NetworkError(message: "请求已取消，请重试") }
         if let urlError = error as? URLError {
             switch urlError.code {
             case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed, .timedOut,
@@ -37,6 +38,10 @@ struct NetworkError: LocalizedError {
             }
         }
         return NetworkError(message: error.localizedDescription)
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     static func sessionExpired() -> NetworkError {

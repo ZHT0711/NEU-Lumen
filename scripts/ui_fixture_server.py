@@ -33,7 +33,16 @@ class Handler(SimpleHTTPRequestHandler):
             ]:
                 return self.html('Card navigation requires its authenticated page Referer', 403)
             if path.endswith('baseinfo.aspx'):
-                return self.html("<html><input id='ContentPlaceHolder1_txtOddFare' value='66.50'><input id='ContentPlaceHolder1_txtSpecialOddFare' value='7.50'></html>")
+                if 'hide-wallet=1' in self.headers.get('Cookie', ''):
+                    return self.html('<html><p>Authenticated card page without wallet fields</p></html>')
+                return self.html('<html><iframe src="wallet.aspx"></iframe></html>')
+            if path.endswith('wallet.aspx'):
+                return self.html("""<html><input id='NewContent_txtOddFare' value=''>
+                    <input id='NewContent_txtSpecialOddFare' value=''>
+                    <script>setTimeout(() => {
+                      document.querySelector('#NewContent_txtOddFare').value = '66.50';
+                      document.querySelector('#NewContent_txtSpecialOddFare').value = '7.50';
+                    }, 300);</script></html>""")
             if path.endswith('ConsumeInfo.aspx'):
                 return self.html("<html><input type='hidden' name='__VIEWSTATE' value='first&amp;state'></html>")
         super().do_GET()

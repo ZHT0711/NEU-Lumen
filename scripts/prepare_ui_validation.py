@@ -14,6 +14,43 @@ with repository.open("a", encoding="utf-8") as stream:
 
 // Only in the disposable UI validation copy.
 extension PortalRepository {
+    func verifyRequestRecovery() async throws {
+        var attempts = 0
+        let value = try await withRecovery { () async throws -> Int in
+            attempts += 1
+            if attempts == 1 { throw CancellationError() }
+            return 42
+        }
+        guard value == 42, attempts == 2 else { throw NetworkError(message: "Interrupted card request was not retried") }
+
+        var cancelledAttempts = 0
+        let cancelled = Task { @MainActor in
+            try await self.withRecovery { () async throws -> Int in
+                cancelledAttempts += 1
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw CancellationError()
+            }
+        }
+        do {
+            _ = try await cancelled.value
+            throw NetworkError(message: "Cancelled view task returned success")
+        } catch is CancellationError { }
+        guard cancelledAttempts == 1 else { throw NetworkError(message: "Cancelled view task was replayed") }
+
+        let savedGeneration = accountGeneration
+        defer { accountGeneration = savedGeneration }
+        var staleAttempts = 0
+        do {
+            _ = try await withRecovery { () async throws -> Int in
+                staleAttempts += 1
+                self.accountGeneration = UUID()
+                throw CancellationError()
+            }
+            throw NetworkError(message: "Old account request returned success")
+        } catch is CancellationError { }
+        guard staleAttempts == 1 else { throw NetworkError(message: "Old account request was replayed") }
+    }
+
     func seedUIValidation() {
         loadedForSID = ""
         user = DemoData.user
@@ -144,6 +181,8 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         throw NetworkError(message: "Browser check timed out, title=\(browser.title), error=\(browser.error ?? "none")")
     }
     do {
+        let requestRepository = PortalRepository(session: SessionStore(client: client))
+        try await requestRepository.verifyRequestRecovery()
         let scrollActivity = TabBarScrollActivity()
         scrollActivity.moved(by: 20)
         guard scrollActivity.direction == .down else { throw NetworkError(message: "Downward tab minimization failed") }
@@ -199,6 +238,12 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
               try String(contentsOf: download, encoding: .utf8) == "NEU-Lumen download fixture" else {
             throw NetworkError(message: "Download contents failed")
         }
+        browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/balance-labels.html")!))
+        try await waitFor { browser.title == "Visible wallet" && !browser.isLoading }
+        let visibleBalance = try await browser.syncCardBalance()
+        guard visibleBalance.balance == 32.10 && visibleBalance.subsidy == 0 && visibleBalance.status == "正常卡" else {
+            throw NetworkError(message: "Visible website wallet was not synchronized")
+        }
         let cardBridge = CardWebBridge(baseURL: URL(string: "http://127.0.0.1:8787")!, entryURL: URL(string: "http://127.0.0.1:8787/card-login.html")!)
         let cardStore = WKWebsiteDataStore.nonPersistent()
         cardBridge.use(store: cardStore)
@@ -208,13 +253,18 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         guard refreshed.balance == balance.balance else { throw NetworkError(message: "Card refresh lost its authenticated session") }
         let statement = try await cardBridge.bills(client: client, year: 2026, month: 10)
         guard statement.bills.count == 2 && !statement.truncated else { throw NetworkError(message: "WebKit card statement/paging incorrect") }
+        let hiddenWallet = HTTPCookie(properties: [.name: "hide-wallet", .value: "1", .domain: "127.0.0.1", .path: "/"])!
+        await cardStore.httpCookieStore.setCookie(hiddenWallet)
+        let withoutWallet = try await cardBridge.bills(client: client, year: 2026, month: 10)
+        guard withoutWallet.bills.count == 2 else { throw NetworkError(message: "Bills depended on wallet field parsing") }
+        await cardStore.httpCookieStore.deleteCookie(hiddenWallet)
         let adopted = CardWebBridge(baseURL: URL(string: "http://127.0.0.1:8787")!, entryURL: URL(string: "http://127.0.0.1:8787/card-login.html")!)
         adopted.use(store: cardStore, currentURL: URL(string: "http://127.0.0.1:8787/selfsearch/User/ConsumeInfo.aspx")!)
         let adoptedBalance = try await adopted.balance(client: client)
         guard adoptedBalance.balance == 66.5 else { throw NetworkError(message: "Adopted website session was replaced by SSO") }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
-        try "PASS: tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }
@@ -224,8 +274,15 @@ fixtures = destination / "fixtures"
 fixtures.mkdir(exist_ok=True)
 (fixtures / "index.html").write_text('''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园网页功能验证</title><style>body{font:17px -apple-system;padding:24px;color:#213060;background:#f3f5fb}h1{font-size:28px}a{display:block;background:white;border-radius:16px;padding:18px;margin:14px 0;color:#3553a2;text-decoration:none}small{color:#6d7487}</style><small>NEU · 校园浏览器</small><h1>更顺手的校园网页</h1><p>查找、缩放、分享和下载，都在手边。</p><a id="popup" target="_blank" href="second.html">打开新窗口链接 ↗</a><a id="download" download="campus-guide.txt" href="download.txt">下载校园指南 ↓</a><p>下方工具栏提供前进、后退、刷新与分享。</p></html>''', encoding="utf-8")
 (fixtures / "second.html").write_text('<meta charset="utf-8"><title>第二页</title><h1>导航成功</h1>', encoding="utf-8")
+(fixtures / "balance-labels.html").write_text('<meta charset="utf-8"><title>Visible wallet</title><div>卡状态：正常卡</div><div>主钱包余额：32.10元</div><div>补助余额：0元</div>', encoding="utf-8")
 (fixtures / "download.txt").write_text("NEU-Lumen download fixture", encoding="utf-8")
 
 shutil.copyfile(root / "NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png", fixtures / "article-first.png")
 (fixtures / "article.html").write_text('<html><header><img src="/missing-logo.png"></header><div class="wp_articlecontent"><p>正文</p><img src="article-first.png"></div></html>', encoding="utf-8")
 (fixtures / "card-login.html").write_text('<html><form action="/selfsearch/SSOLogin.aspx" method="post"><input name="username" value="fixture"><input name="timestamp" value="123"><input name="auid" value="signed"></form><script>document.forms[0].submit()</script></html>', encoding="utf-8")
+
+browser_source = destination / "NEU-Lumen/Features/Web/PortalWebView.swift"
+browser_source.write_text(browser_source.read_text(encoding="utf-8").replace(
+    'guard original.host == "ecard.neu.edu.cn" else {',
+    'guard ["ecard.neu.edu.cn", "127.0.0.1"].contains(original.host ?? "") else {'
+), encoding="utf-8")

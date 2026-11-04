@@ -788,6 +788,7 @@ final class PortalClient {
         await prepareAccess()
         do { return try await fetchCardBalanceOnce() }
         catch {
+            if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
             let original = error
             let previousRoute = webvpnOn
             invalidateAccessRoute()
@@ -822,27 +823,13 @@ final class PortalClient {
     }
 
     static func parseCardBalance(fromHTML page: String) throws -> CardBalance {
-        guard let odd = Self.inputValue(page, id: "ContentPlaceHolder1_txtOddFare")
-            ?? Self.inputValue(page, name: "ctl00$ContentPlaceHolder1$txtOddFare") else {
-            throw NetworkError(message: "一卡通页面上没有主钱包余额")
-        }
-        let subsidyValue = Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddFare")
-            ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSpecialOddfare")
-            ?? Self.inputValue(page, id: "ContentPlaceHolder1_txtSubsidy")
-        guard let amount = Self.parseMoneyLoose(odd) else {
-            throw NetworkError(message: "一卡通未返回可读取的真实余额")
-        }
-        let status = Self.inputValue(page, id: "ContentPlaceHolder1_txtStatus") ?? ""
-        return CardBalance(
-            balance: amount,
-            subsidy: subsidyValue.flatMap(Self.parseMoneyLoose),
-            status: status
-        )
+        try CardBalanceDocument.parse(page)
     }
 
     /// 某自然月的一卡通流水（单月最多 10 页，超出返回 truncated）。
     func fetchCardBills(year: Int, month: Int) async throws -> (bills: [CardBill], truncated: Bool) {
-        _ = try? await fetchCardBalance() // 建立 ecard 会话（失败则复用现有会话）
+        do { _ = try await fetchCardBalance() }
+        catch { if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() } }
         var html = try await ecardGet("/selfsearch/User/ConsumeInfo.aspx")
 
         let fields = Self.cardBillSearchFields(html: html, year: year, month: month)
@@ -1080,16 +1067,6 @@ final class PortalClient {
             }
         }
         return out
-    }
-
-    private static func inputValue(_ html: String, id: String) -> String? {
-        let value = inputTags(html).first { $0["id"] == id }?["value"]
-        return (value?.isEmpty == false) ? value : nil
-    }
-
-    private static func inputValue(_ html: String, name: String) -> String? {
-        let value = inputTags(html).first { $0["name"] == name }?["value"]
-        return (value?.isEmpty == false) ? value : nil
     }
 
     private static func inputValuesByName(_ html: String, names: [String]) -> [String: String] {

@@ -407,14 +407,23 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func syncCardBalance() async throws -> CardBalance {
-        guard let client, client.sessionGeneration == clientEpoch, let current = webView.url else { throw CancellationError() }
+        guard let client, client.sessionGeneration == clientEpoch, let current = webView.url else {
+            throw NetworkError(message: "登录状态已更新，请关闭并重新打开一卡通网页后同步")
+        }
         let original = WebVPN.unwrap(current) ?? current
         guard original.host == "ecard.neu.edu.cn" else {
             throw NetworkError(message: "请先完成认证并进入一卡通网页")
         }
         isSyncing = true
         defer { isSyncing = false }
-        let target = await client.prepareBrowserURL(URL(string: "http://ecard.neu.edu.cn/selfsearch/User/baseinfo.aspx")!)
+        if let visible = try? await CardWebBridge.readBalance(in: webView, attempts: 1) {
+            guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
+            await syncCookies()
+            return visible
+        }
+        try Task.checkCancellation()
+        let base = URL(string: "/selfsearch/User/baseinfo.aspx", relativeTo: original)!.absoluteURL
+        let target = WebVPN.isWrapped(current.absoluteString) ? URL(string: WebVPN.wrap(base.absoluteString))! : base
         let raw = try await webView.callAsyncJavaScript(#"""
         const response = await fetch(url, {credentials:'include'});
         if (!response.ok || response.url.includes('/tpass/login')) throw new Error('一卡通网页尚未完成认证');
@@ -422,7 +431,14 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         """#, arguments: ["url": target.absoluteString], in: nil, contentWorld: .page)
         guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
         await syncCookies()
-        return try PortalClient.parseCardBalance(fromHTML: raw as? String ?? "")
+        if let balance = try? PortalClient.parseCardBalance(fromHTML: raw as? String ?? "") { return balance }
+        var request = URLRequest(url: target)
+        request.setValue(current.absoluteString, forHTTPHeaderField: "Referer")
+        webView.load(request)
+        let balance = try await CardWebBridge.readBalance(in: webView)
+        guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
+        await syncCookies()
+        return balance
     }
 
     func syncGrades() async throws -> GradeReport {
