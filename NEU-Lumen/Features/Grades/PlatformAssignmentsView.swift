@@ -22,7 +22,8 @@ struct PlatformAssignmentsView: View {
                         Label(warning, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
                     }
                     ForEach(report.courses, id: \.key) { course in
-                        courseCard(course, items: report.assignments.filter { $0.courseKey == course.key })
+                        courseCard(course, items: report.assignments.filter { $0.courseKey == course.key },
+                            read: report.refreshedCourseKeys.contains(course.key))
                     }
                 } else if state != .loading {
                     Text("首次使用请打开平台完成登录，再点击“同步作业到学习”。")
@@ -47,21 +48,25 @@ struct PlatformAssignmentsView: View {
                     Text("同步于 \(updated.formatted(date: .omitted, time: .shortened))")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-            }.padding(16)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
         }
     }
 
-    private func courseCard(_ course: LearningCourse, items: [LearningAssignment]) -> some View {
+    private func courseCard(_ course: LearningCourse, items: [LearningAssignment], read: Bool) -> some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top) {
                     Text(course.title).font(.headline)
                     Spacer()
-                    Text("\(items.filter(\.completed).count)/\(items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text(!read && items.isEmpty ? "未读取" : "\(items.filter(\.completed).count)/\(items.count)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 if items.isEmpty {
-                    Text("本次未读取到作业，请结合上方同步提示核对课程。")
+                    Text(read ? "平台暂未发布作业。" : "该课程尚未读取，请结合上方同步提示核对。")
                         .font(.caption).foregroundStyle(.secondary)
+                } else if !read {
+                    Text("本次未读取，以下保留上次同步的数据。")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 ForEach(items.sorted { ($0.deadline ?? .distantFuture) < ($1.deadline ?? .distantFuture) }) { item in
                     NavigationLink {

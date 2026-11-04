@@ -122,7 +122,7 @@ struct ProfileView: View {
                         ForEach(Campus.allCases) { campus in Text(campus.title).tag(campus.rawValue) }
                     }
                     Text(environment.repository.suggestedCampus.map { "根据学院/专业识别为\($0.title)，可手动调整。" }
-                         ?? "学院/专业尚无法确定校区，当前展示南湖插画，可手动选择。")
+                         ?? "学院/专业尚无法确定校区，当前展示\(environment.repository.campus.title)插画，可手动选择。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
