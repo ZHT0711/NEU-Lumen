@@ -320,6 +320,31 @@ do {
 } catch { }
 print("CG report: deadlines, full correctness, unsubmitted/partial/unknown results and blank session handling passed")
 
+let detailedProblem = CGProblem(id: "opaque", title: "题目", url: nil,
+    statusText: "最后一次提交时间: 2026-11-02 12:13:14 得分：10.00 共有测试数据:2 测试数据1 完全正确 测试数据2 答案错误 详细")
+precondition(detailedProblem.scoreText == "10.00" && detailedProblem.submittedAt == "2026-11-02 12:13:14")
+precondition(detailedProblem.testResults.count == 2 && detailedProblem.status == .needsWork)
+let partialAssignment = CGAssignment(id: "partial", title: "作业", url: nil, deadlineText: "", late: false,
+    history: false, loaded: true, problems: [CGProblem(id: "1", title: "已读题", url: nil, statusText: "完全正确")], expectedProblemCount: 2)
+precondition(!partialAssignment.isComplete && partialAssignment.problemCount == 2)
+precondition(Campus.inferred(from: "未来技术学院/人工智能") == .hunnan)
+precondition(Campus.inferred(from: "信息科学与工程学院") == .nanhu)
+precondition(Campus.inferred(from: "浑南校区/未知专业") == .hunnan)
+precondition(Campus.inferred(from: "未知学院") == nil)
+let learningURL = URL(string: "https://www.icourse163.org/learn/NEU-1?tid=1")!
+let course = LearningCourse(id: "NEU-1", termID: "1", title: "课程", url: learningURL)
+let oldTask = LearningAssignment(id: "old", courseKey: course.key, courseTitle: course.title, title: "旧作业", kind: "作业",
+    url: learningURL, deadline: nil, deadlineText: "", statusText: "未提交", completed: false, scoreText: "")
+let previousLearning = LearningAssignmentReport(courses: [course], assignments: [oldTask], warnings: [], refreshedCourseKeys: [course.key], accountKey: "a")
+let interruptedLearning = LearningAssignmentReport(courses: [course], assignments: [], warnings: ["读取失败"], refreshedCourseKeys: [], accountKey: "a")
+precondition(interruptedLearning.merging(previousLearning).assignments.count == 1)
+let emptyLearning = LearningAssignmentReport(courses: [course], assignments: [], warnings: [], refreshedCourseKeys: [course.key], accountKey: "a")
+precondition(emptyLearning.merging(previousLearning).assignments.isEmpty)
+var otherLearning = interruptedLearning
+otherLearning.accountKey = "b"
+precondition(otherLearning.merging(previousLearning).assignments.isEmpty)
+print("CG opaque IDs and details, expected problem counts, campus inference and per-account partial learning report merge passed")
+
 
 // A gateway-only web login must also authenticate native academic APIs through that CAS realm.
 let gatewayConfig = URLSessionConfiguration.ephemeral

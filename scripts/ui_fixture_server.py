@@ -32,8 +32,14 @@ class Handler(SimpleHTTPRequestHandler):
                 <span class="text-muted">历史作业</span><a href="index.jsp?assignID=3">历史作业</a></div>'''
             statuses = ['最后一次提交时间：2026-11-02 10:00:00 得分：100 完全正确', '还未提交'] if number == '1' else [
                 '最后一次提交时间：2026-11-02 10:00:00 得分：70 完全正确 答案错误', '最后一次提交时间：2026-11-02 11:00:00 得分：100']
-            rows = ''.join(f'<tr><td><a href="programList.jsp?proNum={i}&amp;assignID={number}">题目{i}</a></td><td><small>{status}</small></td></tr>'
-                           for i, status in enumerate(statuses, 1))
+            if number == '1':
+                rows = ''.join(f'<tr><td><a href="programList.jsp?proNum={i}&amp;assignID={number}">题目{i}</a></td><td><small>{status}</small></td></tr>'
+                               for i, status in enumerate(statuses, 1))
+            else:
+                # Current CG markup uses an AI side-panel URL with opaque problem IDs.
+                rows = ''.join(f'''<tr><td>{i}.</td><td><a href="javascript:openAILeftFrame('题目内容', '/assignment/problemContent.jsp?problemID=opaque-{i}')">题目{i}</a></td>
+                    <td>100</td><td><p>{status}</p><table><tr><td>测试数据1</td><td>{'答案错误' if i == 1 else '结果待公布'}</td></tr></table></td></tr>'''
+                               for i, status in enumerate(statuses, 1))
             return self.html(f'<html><title>CG 作业</title>{sidebar}<h4>第{number}次作业</h4>'
                              f'<p>作业时间：2026-11-01 08:00:00 至 2026-11-10 23:59:59</p><table>{rows}</table></html>')
         if path == '/card-login.html' and self.authenticated():

@@ -23,7 +23,7 @@ struct ProfileView: View {
             Button {
                 path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
             } label: {
-                HStack {
+                VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("自强不息\n知行合一")
                             .font(.system(.title3, design: .serif).weight(.semibold))
@@ -31,7 +31,13 @@ struct ProfileView: View {
                         Label("东大精神，日常相伴", systemImage: "arrow.up.right")
                             .font(.caption)
                     }
-                    Spacer()
+                    CampusGatesArt()
+                        .stroke(campusInk.opacity(0.65), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                        .frame(height: 90).accessibilityHidden(true)
+                    HStack {
+                        Text("南湖校区").frame(maxWidth: .infinity)
+                        Text("浑南校区").frame(maxWidth: .infinity)
+                    }.font(.caption2).foregroundStyle(.secondary)
                 }
                 .foregroundStyle(campusInk)
                 .padding(20)
@@ -39,12 +45,6 @@ struct ProfileView: View {
                 .background {
                     ZStack {
                     AppTheme.accent.opacity(0.045)
-                    GeometryReader { geometry in
-                        CampusLineArt()
-                            .stroke(campusInk.opacity(0.12), lineWidth: 1)
-                            .frame(width: geometry.size.width * 0.62, height: 145)
-                            .offset(x: geometry.size.width * 0.44, y: 10)
-                    }
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -93,6 +93,14 @@ struct ProfileView: View {
                         }
                     }
                     .padding(.vertical, 4)
+                    .frame(minHeight: 110)
+                    .listRowBackground {
+                        Color(.secondarySystemGroupedBackground)
+                            .overlay(alignment: .trailing) {
+                                CampusLineArt().stroke(campusInk.opacity(0.12), lineWidth: 1)
+                                    .frame(width: 260, height: 160).offset(x: 35, y: 12)
+                            }.clipped().accessibilityHidden(true)
+                    }
                     if environment.session.user?.hasCoreProfile != true {
                         Text("个人资料尚未同步完整").font(.caption).foregroundStyle(.secondary)
                     }
@@ -103,6 +111,19 @@ struct ProfileView: View {
                         Task { await environment.session.refreshUserProfile() }
                     }
                     .disabled(environment.session.refreshingProfile)
+                }
+
+                Section("校园外观") {
+                    Picker("首页校区", selection: Binding(
+                        get: { environment.repository.campusOverride?.rawValue ?? "auto" },
+                        set: { environment.repository.setCampusOverride(Campus(rawValue: $0)) }
+                    )) {
+                        Text("自动识别").tag("auto")
+                        ForEach(Campus.allCases) { campus in Text(campus.title).tag(campus.rawValue) }
+                    }
+                    Text(environment.repository.suggestedCampus.map { "根据学院/专业识别为\($0.title)，可手动调整。" }
+                         ?? "学院/专业尚无法确定校区，当前展示南湖插画，可手动选择。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("会话") {
@@ -141,6 +162,13 @@ struct ProfileView: View {
                     LabeledContent("数据来源", value: "东北大学一号通门户")
                     Link(destination: URL(string: "https://github.com/ZHT0711/NEU-Lumen")!) {
                         LabeledContent("GitHub 仓库", value: "ZHT0711/NEU-Lumen")
+                    }
+                    NavigationLink("慕课解析器开源许可") {
+                        ScrollView {
+                            Text(Bundle.main.url(forResource: "MOOC-reminder-LICENSE", withExtension: "txt")
+                                .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "MIT License · Copyright (c) 2026 furina061006")
+                                .font(.footnote).textSelection(.enabled).padding()
+                        }.navigationTitle("开源许可")
                     }
                 }
 

@@ -8,6 +8,7 @@ struct PortalWebViewScreen: View {
     var academicMode = false
     var cardMode = false
     var cgMode = false
+    var learningPlatform: LearningPlatform?
     var cardQuery: String?
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
@@ -115,6 +116,34 @@ struct PortalWebViewScreen: View {
 
     private var floatingControls: some View {
         VStack(spacing: 10) {
+            if let platform = learningPlatform {
+                GlassCard(cornerRadius: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(syncError ?? (platform == .mooc
+                            ? "登录后进入“我的课程”，同步普通课程和学校 SPOC 列表。进入单门课程也可同步该课程。"
+                            : "在学习通网页登录后，同步已选课程的作业与完成状态。"))
+                            .font(.caption).foregroundStyle(.secondary)
+                        if platform == .mooc {
+                            HStack {
+                                Button("普通课程") { browser.webView.load(URLRequest(url: platform.entryURL)) }
+                                Button("学校 SPOC") { browser.webView.load(URLRequest(url: URL(string: "https://www.icourse163.org/home.htm#/home/spocCourse")!)) }
+                            }.font(.caption).disabled(browser.isSyncing)
+                        }
+                        Button(browser.isSyncing ? "正在读取课程作业…" : "同步作业到学习") {
+                            Task {
+                                syncError = nil
+                                do {
+                                    let report = try await browser.syncAssignments(platform, previous: environment.repository.assignmentReports[platform])
+                                    environment.repository.applyAssignments(report, platform: platform)
+                                    dismiss()
+                                } catch {
+                                    if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message }
+                                }
+                            }
+                        }.buttonStyle(.borderedProminent).disabled(browser.isLoading || browser.isSyncing)
+                    }.padding(12)
+                }
+            }
             if cgMode {
                 GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -501,6 +530,32 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
             arguments: ["rootURL": root.absoluteString, "originalRootURL": direct.absoluteString], in: nil, contentWorld: .page)
         guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
         let report = try CGAssignmentReport.decode(raw ?? [:])
+        await syncCookies()
+        return report
+    }
+
+    func syncAssignments(_ platform: LearningPlatform, previous: LearningAssignmentReport? = nil) async throws -> LearningAssignmentReport {
+        isSyncing = true
+        defer { isSyncing = false }
+        for _ in 0..<200 {
+            try Task.checkCancellation()
+            if webView.url != nil && !webView.isLoading { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard let client, client.sessionGeneration == clientEpoch else { throw CancellationError() }
+        guard let current = webView.url, platform.accepts(current) else {
+            throw NetworkError(message: "请先进入\(platform.title)网页并完成登录")
+        }
+        if platform == .mooc {
+            for _ in 0..<40 {
+                let raw = try await webView.callAsyncJavaScript(MOOCScripts.discover, arguments: [:], in: nil, contentWorld: .page)
+                if let courses = raw as? [Any], !courses.isEmpty { break }
+                try Task.checkCancellation()
+                try await Task.sleep(for: .milliseconds(200))
+            }
+        }
+        let report = try await LearningWebReader(webView: webView).read(platform, previous: previous)
+        guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
         await syncCookies()
         return report
     }

@@ -37,4 +37,8 @@ enum AppTheme {
         default: return "晚上好"
         }
     }
+
+    static func daylightSymbol(at date: Date = Date()) -> String {
+        (5..<18).contains(Calendar.current.component(.hour, from: date)) ? "sun.max.fill" : "moon.stars.fill"
+    }
 }

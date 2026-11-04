@@ -11,7 +11,7 @@ struct AppRootView: View {
             switch environment.session.phase {
             case .booting:
                 VStack(spacing: 16) {
-                    Image(systemName: "sun.max.fill")
+                    Image(systemName: AppTheme.daylightSymbol())
                         .font(.system(size: 56))
                         .foregroundStyle(AppTheme.accent)
                     Text("NEU-Lumen")

@@ -33,12 +33,12 @@ struct CGAssignmentsView: View {
     }
 
     private func overview(_ report: CGAssignmentReport) -> some View {
-        let total = report.assignments.reduce(0) { $0 + $1.problems.count }
+        let total = report.assignments.reduce(0) { $0 + $1.problemCount }
         let completed = report.assignments.reduce(0) { $0 + $1.completedCount }
         return GlassCard {
             VStack(alignment: .leading, spacing: 8) {
-                Text("已完成 \(completed) / \(total) 题").font(.title3.bold())
-                ProgressView(value: Double(completed), total: Double(max(total, 1)))
+                Text(total == 0 ? "题目数据待同步" : "已完成 \(completed) / \(total) 题").font(.title3.bold())
+                if total > 0 { ProgressView(value: Double(completed), total: Double(total)) }
                 Text("已提交但未完全正确的题目会单独标记；展开作业可查看逐题结果。")
                     .font(.caption).foregroundStyle(.secondary)
                 if report.assignments.contains(where: { !$0.loaded }) {
@@ -70,7 +70,7 @@ struct CGAssignmentsView: View {
                     HStack {
                         Text(assignment.title).font(.headline)
                         Spacer()
-                        Text(assignment.isComplete ? "全部完成" : "\(assignment.completedCount)/\(assignment.problems.count) 完成")
+                        Text(!assignment.loaded ? "未读取" : assignment.isComplete ? "全部完成" : "\(assignment.completedCount)/\(assignment.problemCount) 完成")
                             .font(.caption).foregroundStyle(assignment.isComplete ? .green : .secondary)
                     }
                     Text(assignment.deadlineText.isEmpty ? "截止日期未提供" : "截止 \(assignment.deadlineText)")
@@ -89,7 +89,14 @@ struct CGAssignmentsView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(problem.title).font(.subheadline.weight(.medium))
                 Text(problem.statusLabel).font(.caption).foregroundStyle(problem.status == .needsWork ? .orange : .secondary)
-                if !problem.statusText.isEmpty { Text(problem.statusText).font(.caption2).foregroundStyle(.secondary).lineLimit(3) }
+                if !problem.scoreText.isEmpty { Text("得分 \(problem.scoreText)").font(.caption.weight(.medium)) }
+                if !problem.submittedAt.isEmpty { Text("最后提交 \(problem.submittedAt)").font(.caption2).foregroundStyle(.secondary) }
+                ForEach(Array(problem.testResults.enumerated()), id: \.offset) { _, result in
+                    Text(result).font(.caption2).foregroundStyle(result.contains("完全正确") ? .green : .orange)
+                }
+                if problem.testResults.isEmpty && !problem.statusText.isEmpty {
+                    Text(problem.statusText).font(.caption2).foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
             if problem.url != nil { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }

@@ -6,10 +6,30 @@ struct CGProblem: Identifiable, Hashable {
     let title: String
     let url: URL?
     let statusText: String
+    var scoreText: String { capture(#"得分\s*[:：]\s*([\d.]+)"#) }
+    var submittedAt: String { capture(#"最后一次提交时间\s*[:：]\s*([\d-]+\s+[\d:]+)"#) }
+    var testResults: [String] {
+        let regex = try! NSRegularExpression(pattern: #"测试数据\s*\d+\s*[^测]+?(?=测试数据\s*\d+|详细|$)"#)
+        return regex.matches(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)).compactMap {
+            guard let range = Range($0.range, in: statusText) else { return nil }
+            return String(statusText[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func capture(_ pattern: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)),
+              let range = Range(match.range(at: 1), in: statusText) else { return "" }
+        return String(statusText[range])
+    }
 
     var status: Status {
         if ["还未提交", "尚未提交", "未提交"].contains(where: statusText.contains) { return .notSubmitted }
         if ["未通过", "答案错误", "部分正确", "运行错误", "超时", "编译错误", "内存超限"].contains(where: statusText.contains) { return .needsWork }
+        if !testResults.isEmpty {
+            if let count = Int(capture(#"共有测试数据\s*[:：]\s*(\d+)"#)), count > testResults.count { return .submitted }
+            return testResults.allSatisfy { $0.contains("完全正确") } ? .complete : .needsWork
+        }
         if statusText.contains("完全正确") { return .complete }
         return .submitted
     }
@@ -32,9 +52,11 @@ struct CGAssignment: Identifiable, Hashable {
     let history: Bool
     let loaded: Bool
     let problems: [CGProblem]
+    var expectedProblemCount: Int? = nil
 
     var completedCount: Int { problems.filter { $0.status == .complete }.count }
-    var isComplete: Bool { loaded && !problems.isEmpty && completedCount == problems.count }
+    var problemCount: Int { max(problems.count, expectedProblemCount ?? 0) }
+    var isComplete: Bool { loaded && !problems.isEmpty && completedCount == problemCount }
     var deadline: Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -64,7 +86,7 @@ struct CGAssignmentReport {
             return CGAssignment(id: id, title: row["title"] as? String ?? "作业 \(id)",
                 url: webURL(row["url"]), deadlineText: row["deadline"] as? String ?? "",
                 late: row["late"] as? Bool ?? false, history: row["history"] as? Bool ?? false,
-                loaded: row["loaded"] as? Bool ?? false, problems: problems)
+                loaded: row["loaded"] as? Bool ?? false, problems: problems, expectedProblemCount: row["expectedCount"] as? Int)
         }
         guard !assignments.isEmpty else { throw NetworkError(message: "CG 作业列表缺少有效记录") }
         return CGAssignmentReport(assignments: assignments, warnings: payload["warnings"] as? [String] ?? [])
@@ -100,7 +122,11 @@ struct CGAssignmentReport {
       try {
         const response = await fetch(url, {credentials: 'include', signal: controller.signal});
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const html = await response.text();
+        const bytes = await response.arrayBuffer();
+        const header = response.headers.get('content-type') || '';
+        const preview = new TextDecoder().decode(bytes);
+        const charset = header.match(/charset=([\w-]+)/i)?.[1] || preview.match(/charset=["']?([\w-]+)/i)?.[1] || 'utf-8';
+        const html = new TextDecoder(charset).decode(bytes);
         const doc = new DOMParser().parseFromString(html, 'text/html');
         if (!html.trim() || doc.querySelector('input[type="password"]') || !route(response.url, rootURL)) {
           throw new Error('请打开 CG 网页完成登录后同步作业');
@@ -108,7 +134,7 @@ struct CGAssignmentReport {
         return {doc, url: response.url};
       } finally { clearTimeout(timeout); }
     }
-    function parse(doc, pageURL) {
+    function parse(doc, pageURL, requestedID) {
       let history = false;
       for (const el of doc.querySelectorAll('.col-2 span.text-muted, a[href*="index.jsp"][href*="assignID="]')) {
         if (el.matches('span.text-muted')) { history = el.textContent.includes('历史'); continue; }
@@ -122,42 +148,56 @@ struct CGAssignmentReport {
       }
       const text = clean(doc.body.textContent);
       const time = text.match(/作业时间[:：]\s*[\d-]+\s+[\d:]+\s*至\s*([\d-]+\s+[\d:]+)/);
+      const pageID = new URL(pageURL).searchParams.get('assignID') || requestedID;
+      if (pageID && assignments.has(pageID) && time) assignments.get(pageID).deadline = time[1];
+      const count = text.match(/共\s*(\d+)\s*道?\s*题/);
+      if (pageID && assignments.has(pageID) && count) assignments.get(pageID).expectedCount = Number(count[1]);
       const seen = new Set();
-      for (const link of doc.querySelectorAll('a[href*="programList.jsp"]')) {
-        const url = route(link.getAttribute('href'), pageURL);
-        const id = url && url.searchParams.get('assignID');
-        const number = url && url.searchParams.get('proNum');
+      for (const link of doc.querySelectorAll('a[href]')) {
+        const raw = link.getAttribute('href') || '';
+        // Current CG pages open a problem in an AI side panel. Extract its URL as data.
+        const panel = raw.match(/openAILeftFrame\s*\(\s*'[^']*'\s*,\s*'([^']*problemContent\.jsp[^']*)'\s*\)/)
+          || raw.match(/openAILeftFrame\s*\(\s*"[^"]*"\s*,\s*"([^"]*problemContent\.jsp[^"]*)"\s*\)/);
+        if (!/programList(?:_ce)?\.jsp|problemContent\.jsp/.test(raw)) continue;
+        const url = route(panel ? panel[1] : raw, pageURL);
+        const id = url && (url.searchParams.get('assignID') || pageID);
+        const number = url && (url.searchParams.get('proNum') || url.searchParams.get('problemID'));
         if (!id || !number || seen.has(id + '.' + number)) continue;
         seen.add(id + '.' + number);
         if (!assignments.has(id)) assignments.set(id, {id, title: clean(doc.querySelector('h4')?.textContent) || ('作业 ' + id),
           url: pageURL, history: false, late: false, loaded: false, deadline: '', problems: []});
         const assignment = assignments.get(id);
-        assignment.loaded = true;
         if (time) assignment.deadline = time[1];
         const row = link.closest('tr');
         const cells = row ? [...row.children].filter(el => el.tagName === 'TD') : [];
         const status = cells.at(-1);
         const problem = {id: number, title: clean(link.textContent).replace(/^\d+[.、]\s*/, '') || ('第 ' + number + ' 题'), url: url.href,
-          statusText: clean(status?.querySelector('small')?.textContent || status?.textContent)};
+          statusText: clean(status?.textContent)};
         const index = assignment.problems.findIndex(item => item.id === number);
         if (index < 0) assignment.problems.push(problem); else assignment.problems[index] = problem;
+        assignment.loaded = true;
+      }
+      if (pageID && assignments.has(pageID) && !assignments.get(pageID).loaded) {
+        warnings.push(assignments.get(pageID).title + '的题目未读取，请在网页核对');
+      }
+      if (pageID && count && assignments.has(pageID) && assignments.get(pageID).problems.length < Number(count[1])) {
+        warnings.push(assignments.get(pageID).title + '的题目数据不完整，请在网页核对');
       }
     }
     try {
       const first = await get(rootURL);
-      parse(first.doc, first.url);
+      const current = first.doc.querySelector('a.active[href*="assignID="], .active a[href*="assignID="]');
+      const currentID = current && route(current.getAttribute('href'), first.url)?.searchParams.get('assignID');
+      parse(first.doc, first.url, currentID);
       const pending = [...assignments.values()].filter(item => !item.loaded);
       if (pending.length > 100) warnings.push('作业数量超过单次同步上限，部分作业尚未读取');
-      let next = 0;
-      await Promise.all(Array.from({length: 3}, async () => {
-        while (next < Math.min(pending.length, 100)) {
-          const item = pending[next++];
-          try { const page = await get(item.url); parse(page.doc, page.url); }
+      // The JSP platform keeps the selected assignment in the session. Read serially.
+      for (const item of pending.slice(0, 100)) {
+          try { const page = await get(item.url); parse(page.doc, page.url, item.id); }
           catch (error) { warnings.push(item.title + '：' + error.message); }
-        }
-      }));
+      }
       if (!assignments.size) return {error: '未读取到 CG 作业，请打开平台登录后同步'};
-      return {assignments: [...assignments.values()], warnings};
+      return {assignments: [...assignments.values()], warnings: [...new Set(warnings)]};
     } catch (error) { return {error: 'CG 作业同步失败：' + error.message}; }
     """#
 }

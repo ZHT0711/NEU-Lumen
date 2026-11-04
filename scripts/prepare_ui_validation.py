@@ -73,6 +73,18 @@ extension PortalRepository {
                        CGProblem(id: "fixture.2", title: "数组练习", url: nil, statusText: "还未提交")])], warnings: [])
         cgState = .loaded
         cgUpdatedAt = Date()
+        campusOverride = .hunnan
+        for platform in [LearningPlatform.mooc, .chaoxing] {
+            let url = platform.entryURL
+            let course = LearningCourse(id: platform.rawValue, termID: "fixture", title: "程序设计基础", url: url)
+            assignmentReports[platform] = LearningAssignmentReport(courses: [course], assignments: [
+                LearningAssignment(id: "task.1", courseKey: course.key, courseTitle: course.title, title: "第 5 周作业", kind: "作业",
+                    url: url, deadline: Date().addingTimeInterval(86400), deadlineText: "", statusText: "未提交", completed: false, scoreText: ""),
+                LearningAssignment(id: "task.2", courseKey: course.key, courseTitle: course.title, title: "第 4 周测验", kind: "测验",
+                    url: url, deadline: nil, deadlineText: "", statusText: "已完成", completed: true, scoreText: "10 / 10")
+            ], warnings: [], refreshedCourseKeys: [course.key])
+            assignmentStates[platform] = .loaded
+        }
         let start = Semester.weekStart(forDay: Date())
         var items: [CourseOccurrence] = []
         for day in [1, 2, 4] {
@@ -118,7 +130,7 @@ struct UIValidationRoot: View {
                 case "favorites": FavoritesEditor()
                 case "holidays": ScheduleSettingsSheet()
                 case "calendar": SystemCalendarSheet(sunday: Semester.weekStart(forDay: Date()))
-                case "grades": GradesView()
+                case "grades", "mooc", "chaoxing": GradesView()
                 case "card": NavigationStack { CardView() }
                 case "browser":
                     TabView {
@@ -144,6 +156,7 @@ struct UIValidationRoot: View {
                 return
             }
             environment.repository.seedUIValidation()
+            if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }
             ready = true
             if ProcessInfo.processInfo.arguments.contains("--browser-checks") {
                 await runBrowserChecks(testBrowser, client: environment.session.client)
@@ -189,6 +202,11 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         throw NetworkError(message: "Browser check timed out, title=\(browser.title), error=\(browser.error ?? "none")")
     }
     do {
+        let evening = Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: Date())!
+        let morning = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date())!
+        guard AppTheme.daylightSymbol(at: evening) == "moon.stars.fill", AppTheme.daylightSymbol(at: morning) == "sun.max.fill" else {
+            throw NetworkError(message: "Day/night launch symbol incorrect")
+        }
         let requestRepository = PortalRepository(session: SessionStore(client: client))
         try await requestRepository.verifyRequestRecovery()
         let scrollActivity = TabBarScrollActivity()
@@ -288,13 +306,37 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
               proxiedCG.assignments.first(where: { $0.id == "2" })?.problems.count == 2 else {
             throw NetworkError(message: "CG gateway root-relative or relative links failed")
         }
+        let moocCourse = ["id": "NEU-1", "termID": "1", "title": "测试课程", "url": "https://www.icourse163.org/mooc/learn/NEU-1/assessments?tid=1"]
+        let moocData: [String: Any] = ["chapters": [["id": 1, "lessons": [], "homeworks": [
+            ["id": 1, "name": "第一周作业", "contentType": 3, "deadline": 1893456000000, "usedTryCount": 1],
+            ["id": 2, "name": "第一周测验", "contentType": 2, "deadline": 1893456000000]
+        ]]]]
+        let moocJSON = String(data: try JSONSerialization.data(withJSONObject: moocData), encoding: .utf8)!
+        let moocRaw = try await browser.webView.callAsyncJavaScript(MOOCScripts.readCourse,
+            arguments: ["html": "<html></html>", "responses": [["raw": moocJSON, "termID": "1"]], "course": moocCourse], in: nil, contentWorld: .page)
+        guard let moocPayload = moocRaw as? [String: Any], moocPayload["recognized"] as? Bool == true else {
+            throw NetworkError(message: "MOOC outline was not recognized")
+        }
+        let moocRows = try LearningAssignmentReport.decodeRows(moocPayload["assignments"] ?? [], platform: .mooc)
+        guard moocRows.count == 2, moocRows[0].completed, !moocRows[1].completed, moocRows[0].deadline != nil,
+              moocRows[0].url.path.hasSuffix("/assessments") else { throw NetworkError(message: "MOOC fields or destination incorrect") }
+        let cxHTML = """
+        <html><ul class="work-list"><li data="https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?workId=1"><p class="overHidden2">未交作业</p><p class="status">未交</p><div class="time notOver">剩余90小时37分钟</div></li>
+        <li data="https://mooc1.chaoxing.com/mooc-ans/mooc2/work/task?workId=2"><p class="overHidden2">待批阅作业</p><p class="status">待批阅</p></li></ul><div id="page"><li>1</li><li>3</li></div></html>
+        """
+        let cxRaw = try await browser.webView.callAsyncJavaScript(ChaoxingAssignments.pageScript,
+            arguments: ["html": cxHTML, "pageURL": "https://mooc1.chaoxing.com/mooc-ans/mooc2/work/list", "courseKey": "1.1", "courseTitle": "测试课程"], in: nil, contentWorld: .page)
+        guard let cxPayload = cxRaw as? [String: Any], cxPayload["pages"] as? Int == 3 else { throw NetworkError(message: "Chaoxing pagination incorrect") }
+        let cxRows = try LearningAssignmentReport.decodeRows(cxPayload["assignments"] ?? [], platform: .chaoxing)
+        guard cxRows.count == 2, !cxRows[0].completed, cxRows[1].completed, cxRows[0].deadline != nil,
+              cxRows[1].deadline == nil else { throw NetworkError(message: "Chaoxing status or deadline incorrect") }
         browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/card-menu.html")!))
         try await waitFor { browser.title == "Card menu" && !browser.isLoading }
         try await browser.openCardQuery("交易汇总信息")
         try await waitFor { browser.title == "Card summary" && !browser.isLoading }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
-        try "PASS: interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: CG legacy/AI-panel problems and gateway URLs, MOOC assignment fields, Chaoxing pagination/status/deadlines, day/night launch symbols, interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }
@@ -313,6 +355,12 @@ fixtures.mkdir(exist_ok=True)
 shutil.copyfile(root / "NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png", fixtures / "article-first.png")
 (fixtures / "article.html").write_text('<html><header><img src="/missing-logo.png"></header><div class="wp_articlecontent"><p>正文</p><img src="article-first.png"></div></html>', encoding="utf-8")
 (fixtures / "card-login.html").write_text('<html><form action="/selfsearch/SSOLogin.aspx" method="post"><input name="username" value="fixture"><input name="timestamp" value="123"><input name="auid" value="signed"></form><script>document.forms[0].submit()</script></html>', encoding="utf-8")
+
+grades_source = destination / "NEU-Lumen/Features/Grades/GradesView.swift"
+grades_source.write_text(grades_source.read_text(encoding="utf-8").replace(
+    '@State private var platform = LearningPlatform.cg',
+    '@State private var platform = ProcessInfo.processInfo.arguments.contains("--screen=mooc") ? LearningPlatform.mooc : ProcessInfo.processInfo.arguments.contains("--screen=chaoxing") ? .chaoxing : .cg'
+), encoding="utf-8")
 
 browser_source = destination / "NEU-Lumen/Features/Web/PortalWebView.swift"
 browser_source.write_text(browser_source.read_text(encoding="utf-8").replace(

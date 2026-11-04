@@ -54,7 +54,7 @@ struct HomeView: View {
                         )
                         .frame(height: 340)
                         .overlay(alignment: .topTrailing) {
-                            CampusLineArt()
+                            CampusLandmarkArt(campus: repo.campus)
                                 .stroke(campusInk.opacity(0.045), lineWidth: 1)
                                 .frame(width: 360, height: 240)
                                 .offset(x: 70, y: 120)
@@ -145,6 +145,17 @@ struct HomeView: View {
                             motto
                         }
                     }
+                    VStack(spacing: 6) {
+                        CampusLandmarkArt(campus: repo.campus)
+                            .stroke(campusInk.opacity(colorScheme == .dark ? 0.65 : 0.55),
+                                    style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
+                            .frame(height: 92).accessibilityHidden(true)
+                        HStack(spacing: 0) {
+                            ForEach(repo.campus.landmarks, id: \.self) { landmark in
+                                Text(landmark).font(.system(size: 9)).frame(maxWidth: .infinity)
+                            }
+                        }.foregroundStyle(campusInk.opacity(0.8))
+                    }
                 }
                 .padding(22)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -153,13 +164,6 @@ struct HomeView: View {
                     Color(.secondarySystemGroupedBackground)
                     LinearGradient(colors: [AppTheme.accent.opacity(0.035), AppTheme.accent.opacity(0.08)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                    GeometryReader { geometry in
-                        CampusLineArt()
-                            .stroke(campusInk.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
-                            .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
-                            .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
-                    }
-                    .accessibilityHidden(true)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
@@ -172,7 +176,7 @@ struct HomeView: View {
         .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("东北大学建筑，e码通快捷入口")
+        .accessibilityLabel("\(repo.campus.title)，\(repo.campus.landmarks.joined(separator: "、"))，e码通快捷入口")
         .accessibilityHint("打开校园码")
         .accessibilityIdentifier("home.ecode")
     }

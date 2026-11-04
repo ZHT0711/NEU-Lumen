@@ -45,6 +45,21 @@ final class PortalRepository {
     private(set) var cgUpdatedAt: Date?
     private var cgRequestID = UUID()
     private var cgBrowser: PortalBrowser?
+    private(set) var assignmentReports: [LearningPlatform: LearningAssignmentReport] = [:]
+    private(set) var assignmentStates: [LearningPlatform: LoadState] = [:]
+    private(set) var assignmentUpdatedAt: [LearningPlatform: Date] = [:]
+    private var assignmentRequests: [LearningPlatform: UUID] = [:]
+    private var assignmentBrowsers: [LearningPlatform: PortalBrowser] = [:]
+    private(set) var campusOverride: Campus?
+    var suggestedCampus: Campus? { Campus.inferred(from: session.user?.department ?? "") }
+    var campus: Campus { campusOverride ?? suggestedCampus ?? .nanhu }
+
+    func setCampusOverride(_ value: Campus?) {
+        campusOverride = value
+        if let account = loadedForSID, !account.isEmpty {
+            UserDefaults.standard.set(value?.rawValue, forKey: "lumen.campus." + account)
+        }
+    }
 
     // MARK: 一卡通 / 网费 / 电费
 
@@ -97,6 +112,7 @@ final class PortalRepository {
         let sid = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         guard loadedForSID != sid else { return }
         accountGeneration = UUID()
+        campusOverride = UserDefaults.standard.string(forKey: "lumen.campus." + sid).flatMap(Campus.init(rawValue:))
         cardWebBridge.reset()
         cardUsesWebKit = false
         newsThumbnails = [:]
@@ -118,6 +134,12 @@ final class PortalRepository {
         cgReport = nil
         cgState = .idle
         cgUpdatedAt = nil
+        assignmentRequests = [:]
+        for browser in assignmentBrowsers.values { browser.webView.stopLoading() }
+        assignmentBrowsers = [:]
+        assignmentReports = [:]
+        assignmentStates = [:]
+        assignmentUpdatedAt = [:]
         cardBalance = nil
         cardWarning = nil
         cardUpdatedAt = nil
@@ -476,6 +498,38 @@ final class PortalRepository {
         cgReport = report
         cgState = .loaded
         cgUpdatedAt = Date()
+        session.persistWebSession()
+    }
+
+    func loadAssignments(_ platform: LearningPlatform, force: Bool = false) async {
+        if platform == .cg { await loadCGAssignments(force: force); return }
+        await ensureLoadedForCurrentUser()
+        if assignmentStates[platform] == .loading || (!force && assignmentReports[platform] != nil) { return }
+        let generation = accountGeneration
+        let request = UUID()
+        assignmentRequests[platform] = request
+        assignmentStates[platform] = .loading
+        let browser = PortalBrowser()
+        assignmentBrowsers[platform] = browser
+        do {
+            await browser.start(platform.entryURL, client: session.client)
+            let report = try await browser.syncAssignments(platform, previous: assignmentReports[platform])
+            guard accountGeneration == generation, assignmentRequests[platform] == request else { return }
+            applyAssignments(report, platform: platform)
+        } catch {
+            guard accountGeneration == generation, assignmentRequests[platform] == request else { return }
+            assignmentStates[platform] = NetworkError.isCancellation(error) ? .idle : .failed(NetworkError.from(error).message)
+            assignmentBrowsers[platform] = nil
+        }
+    }
+
+    func applyAssignments(_ report: LearningAssignmentReport, platform: LearningPlatform) {
+        assignmentRequests[platform] = UUID()
+        assignmentBrowsers[platform]?.webView.stopLoading()
+        assignmentBrowsers[platform] = nil
+        assignmentReports[platform] = report.merging(assignmentReports[platform])
+        assignmentStates[platform] = .loaded
+        assignmentUpdatedAt[platform] = Date()
         session.persistWebSession()
     }
 

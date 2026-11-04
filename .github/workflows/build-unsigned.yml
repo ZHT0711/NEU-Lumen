@@ -102,6 +102,7 @@ jobs:
             -o "${RUNNER_TEMP}/service-catalog-tests"
           "${RUNNER_TEMP}/service-catalog-tests"
           node Tests/AcademicBridge/check.mjs
+          node Tests/Learning/check.mjs
           node Tests/OffCampusLogin/document.mjs
           python3 -m unittest discover -s scripts -p 'test_*.py'
 
