@@ -25,10 +25,10 @@ struct CGProblem: Identifiable, Hashable {
 
     var status: Status {
         if ["还未提交", "尚未提交", "未提交"].contains(where: statusText.contains) { return .notSubmitted }
-        if ["未通过", "答案错误", "部分正确", "运行错误", "超时", "编译错误", "内存超限"].contains(where: statusText.contains) { return .needsWork }
+        if ["未通过", "错误", "部分正确", "超时", "超限", "异常", "失败"].contains(where: statusText.contains) { return .needsWork }
         if !testResults.isEmpty {
             if let count = Int(capture(#"共有测试数据\s*[:：]\s*(\d+)"#)), count > testResults.count { return .submitted }
-            return testResults.allSatisfy { $0.contains("完全正确") } ? .complete : .needsWork
+            return testResults.allSatisfy { $0.contains("完全正确") } ? .complete : .submitted
         }
         if statusText.contains("完全正确") { return .complete }
         return .submitted

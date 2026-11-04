@@ -297,7 +297,8 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
               let second = cg.assignments.first(where: { $0.id == "2" }), second.late,
               second.problems.map(\.status) == [.needsWork, .submitted],
               cg.assignments.first(where: { $0.id == "3" })?.loaded == false else {
-            throw NetworkError(message: "CG assignment enumeration, deadlines, status or partial failure incorrect")
+            let summary = cg.assignments.map { "\($0.id)=\($0.problems.map(\.status)) deadline=\($0.deadlineText)" }.joined(separator: "; ")
+            throw NetworkError(message: "CG assignment enumeration, deadlines, status or partial failure incorrect: \(summary), warnings=\(cg.warnings)")
         }
         let proxied = try await browser.webView.callAsyncJavaScript(CGAssignmentReport.browserScript,
             arguments: ["rootURL": "http://127.0.0.1:8787/http/fixture/assignment/", "originalRootURL": "http://neucsecg.neu.edu.cn/assignment/"], in: nil, contentWorld: .page)

@@ -325,6 +325,7 @@ let detailedProblem = CGProblem(id: "opaque", title: "题目", url: nil,
 precondition(detailedProblem.scoreText == "10.00", "CG score field was \(detailedProblem.scoreText)")
 precondition(detailedProblem.submittedAt == "2026-11-02 12:13:14", "CG submission date was \(detailedProblem.submittedAt)")
 precondition(detailedProblem.testResults.count == 2 && detailedProblem.status == .needsWork)
+precondition(CGProblem(id: "pending", title: "待评判", url: nil, statusText: "得分：100 测试数据1 结果待公布").status == .submitted)
 let partialAssignment = CGAssignment(id: "partial", title: "作业", url: nil, deadlineText: "", late: false,
     history: false, loaded: true, problems: [CGProblem(id: "1", title: "已读题", url: nil, statusText: "完全正确")], expectedProblemCount: 2)
 precondition(!partialAssignment.isComplete && partialAssignment.problemCount == 2)
