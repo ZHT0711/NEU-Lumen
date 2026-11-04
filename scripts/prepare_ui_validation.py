@@ -330,6 +330,9 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         let cxRows = try LearningAssignmentReport.decodeRows(cxPayload["assignments"] ?? [], platform: .chaoxing)
         guard cxRows.count == 2, !cxRows[0].completed, cxRows[1].completed, cxRows[0].deadline != nil,
               cxRows[1].deadline == nil else { throw NetworkError(message: "Chaoxing status or deadline incorrect") }
+        browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/home.htm")!))
+        try await waitFor { browser.title == "MOOC courses" && !browser.isLoading }
+        try await verifyMOOCCourseCards(source: browser.webView)
         browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/card-menu.html")!))
         try await waitFor { browser.title == "Card menu" && !browser.isLoading }
         try await browser.openCardQuery("交易汇总信息")
@@ -351,6 +354,9 @@ fixtures.mkdir(exist_ok=True)
 (fixtures / "card-links.html").write_text('<meta charset="utf-8"><a target="_top" href="card-summary.html">交易汇总信息</a>', encoding="utf-8")
 (fixtures / "card-summary.html").write_text('<meta charset="utf-8"><title>Card summary</title><p>汇总查询已打开</p>', encoding="utf-8")
 (fixtures / "download.txt").write_text("NEU-Lumen download fixture", encoding="utf-8")
+(fixtures / "home.htm").write_text('''<meta charset="utf-8"><title>MOOC courses</title><div id="j-coursewrap">
+<a onclick="window.open('/mooc/learn/NEU-1/assessments?tid=42')"><img alt="课程一"></a>
+<a onclick="location.href='/spoc/learn/NEU-2?tid=43'"><img alt="课程二"></a></div>''', encoding="utf-8")
 
 shutil.copyfile(root / "NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png", fixtures / "article-first.png")
 (fixtures / "article.html").write_text('<html><header><img src="/missing-logo.png"></header><div class="wp_articlecontent"><p>正文</p><img src="article-first.png"></div></html>', encoding="utf-8")
@@ -361,6 +367,25 @@ grades_source.write_text(grades_source.read_text(encoding="utf-8").replace(
     '@State private var platform = LearningPlatform.cg',
     '@State private var platform = ProcessInfo.processInfo.arguments.contains("--screen=mooc") ? LearningPlatform.mooc : ProcessInfo.processInfo.arguments.contains("--screen=chaoxing") ? .chaoxing : .cg'
 ), encoding="utf-8")
+
+platform_source = destination / "NEU-Lumen/Core/Models/LearningAssignments.swift"
+platform_source.write_text(platform_source.read_text(encoding="utf-8").replace(
+    'return host == "www.icourse163.org" || host == "icourse163.org"',
+    'return host == "127.0.0.1" || host == "www.icourse163.org" || host == "icourse163.org"'
+), encoding="utf-8")
+reader_source = destination / "NEU-Lumen/Core/Networking/LearningWebReader.swift"
+with reader_source.open("a", encoding="utf-8") as stream:
+    stream.write(r'''
+
+@MainActor
+func verifyMOOCCourseCards(source: WKWebView) async throws {
+    let courses = try await MOOCCourseNavigator(source: source).discover()
+    guard courses.count == 2, courses[0].id == "NEU-1", courses[0].termID == "42",
+          courses[1].id == "NEU-2", courses[1].termID == "43" else {
+        throw NetworkError(message: "MOOC no-href card discovery or target-blank navigation incorrect")
+    }
+}
+''')
 
 browser_source = destination / "NEU-Lumen/Features/Web/PortalWebView.swift"
 browser_source.write_text(browser_source.read_text(encoding="utf-8").replace(

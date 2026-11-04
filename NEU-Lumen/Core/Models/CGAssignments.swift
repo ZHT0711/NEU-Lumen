@@ -7,7 +7,7 @@ struct CGProblem: Identifiable, Hashable {
     let url: URL?
     let statusText: String
     var scoreText: String { capture(#"得分\s*[:：]\s*([\d.]+)"#) }
-    var submittedAt: String { capture(#"最后一次提交时间\s*[:：]\s*([\d-]+\s+[\d:]+)"#) }
+    var submittedAt: String { capture(#"最后一次提交时间\s*[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)"#) }
     var testResults: [String] {
         let regex = try! NSRegularExpression(pattern: #"测试数据\s*\d+\s*[^测]+?(?=测试数据\s*\d+|详细|$)"#)
         return regex.matches(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)).compactMap {
