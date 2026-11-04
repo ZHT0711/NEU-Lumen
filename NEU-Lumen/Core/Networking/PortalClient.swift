@@ -778,6 +778,7 @@ final class PortalClient {
     // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
 
     static let serviceCard = "http://ecard.neu.edu.cn/selflogin/login.aspx"
+    static let cardHomePath = "/selfsearch/User/Home.aspx"
     static let servicePay = "https://pay.neu.edu.cn/drCasLogin"
     static let servicePortalTP = "https://portal.neu.edu.cn/tp_up/"
 
@@ -818,8 +819,14 @@ final class PortalClient {
                 }
             }
         }
-        let page = try await ecardGet("/selfsearch/User/baseinfo.aspx")
-        return try Self.parseCardBalance(fromHTML: page)
+        do {
+            let page = try await ecardGet(Self.cardHomePath)
+            return try Self.parseCardBalance(fromHTML: page)
+        } catch {
+            if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
+            let page = try await ecardGet("/selfsearch/User/baseinfo.aspx")
+            return try Self.parseCardBalance(fromHTML: page)
+        }
     }
 
     static func parseCardBalance(fromHTML page: String) throws -> CardBalance {

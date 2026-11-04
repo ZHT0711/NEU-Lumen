@@ -262,7 +262,7 @@ MockPortalProtocol.handle = { request in
         precondition(request.value(forHTTPHeaderField: "Origin") == "http://ecard.neu.edu.cn")
         return (200, ["Set-Cookie":"ASP.NET_SessionId=card; Path=/selfsearch"], "<html>ok</html>")
     }
-    precondition(url.path == "/selfsearch/User/baseinfo.aspx")
+    precondition(url.path == PortalClient.cardHomePath)
     precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("ASP.NET_SessionId=card") == true)
     return (200, [:], #"<input id="ContentPlaceHolder1_txtOddFare" value="52.30"><input id="ContentPlaceHolder1_txtSpecialOddFare" value="7.50">"#)
 }

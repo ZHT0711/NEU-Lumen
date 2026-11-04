@@ -450,7 +450,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
             return visible
         }
         try Task.checkCancellation()
-        let base = URL(string: "/selfsearch/User/baseinfo.aspx", relativeTo: original)!.absoluteURL
+        let base = URL(string: PortalClient.cardHomePath, relativeTo: original)!.absoluteURL
         let target = WebVPN.isWrapped(current.absoluteString) ? URL(string: WebVPN.wrap(base.absoluteString))! : base
         let raw = try await webView.callAsyncJavaScript(#"""
         const response = await fetch(url, {credentials:'include'});

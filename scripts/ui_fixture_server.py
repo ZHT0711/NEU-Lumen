@@ -44,13 +44,15 @@ class Handler(SimpleHTTPRequestHandler):
             referer = urlsplit(self.headers.get('Referer', ''))
             if referer.netloc != self.headers.get('Host') or referer.path not in [
                 '/card-login.html', '/selfsearch/SSOLogin.aspx',
-                '/selfsearch/User/baseinfo.aspx', '/selfsearch/User/ConsumeInfo.aspx',
+                '/selfsearch/User/Home.aspx', '/selfsearch/User/baseinfo.aspx', '/selfsearch/User/ConsumeInfo.aspx',
             ]:
                 return self.html('Card navigation requires its authenticated page Referer', 403)
-            if path.endswith('baseinfo.aspx'):
+            if path.endswith('Home.aspx'):
                 if 'hide-wallet=1' in self.headers.get('Cookie', ''):
                     return self.html('<html><p>Authenticated card page without wallet fields</p></html>')
                 return self.html('<html><iframe src="wallet.aspx"></iframe></html>')
+            if path.endswith('baseinfo.aspx'):
+                return self.html('<html><p>个人信息设置</p></html>')
             if path.endswith('wallet.aspx'):
                 return self.html("""<html><input id='NewContent_txtOddFare' value=''>
                     <input id='NewContent_txtSpecialOddFare' value=''>
@@ -70,7 +72,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.html('Bad SSO', 400)
             self.send_response(302)
             self.send_header('Set-Cookie', 'card-fixture=ready; Path=/; HttpOnly')
-            self.send_header('Location', '/selfsearch/User/baseinfo.aspx')
+            self.send_header('Location', '/selfsearch/User/Home.aspx')
             self.end_headers()
             return
         if path.endswith('ConsumeInfo.aspx') and self.authenticated():

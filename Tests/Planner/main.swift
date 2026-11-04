@@ -91,4 +91,4 @@ print("Holiday policy: 33 rest days, 6 work days, validation, overrides, exams, 
     precondition(!HolidayStore(defaults: defaults).enabled)
     print("Persistence: favorites ordering/reset/empty state/account isolation and school-day overrides passed")
 }
-testStores()
+await MainActor.run { testStores() }
