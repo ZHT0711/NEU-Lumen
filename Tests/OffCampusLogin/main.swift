@@ -304,6 +304,22 @@ precondition(NetworkError.isCancellation(CancellationError()) && NetworkError.is
 precondition(!NetworkError.from(CancellationError()).message.contains("Swift"))
 print("Card visible labels, ASP.NET spans, thousands, zero subsidy, masked/malformed values and cancellation messages passed")
 
+let cgReport = try CGAssignmentReport.decode(["assignments": [[
+    "id": "7", "title": "课后作业", "deadline": "2026-11-10 23:59:59", "loaded": true,
+    "problems": [["id": "1", "title": "题目一", "statusText": "得分：100 完全正确"],
+                 ["id": "2", "title": "题目二", "statusText": "还未提交"],
+                 ["id": "3", "title": "题目三", "statusText": "完全正确 答案错误"],
+                 ["id": "4", "title": "题目四", "statusText": "得分：100"]]
+]], "warnings": []])
+let assignment = cgReport.assignments[0]
+precondition(assignment.completedCount == 1 && !assignment.isComplete && assignment.deadline != nil)
+precondition(assignment.problems.map(\.status) == [.complete, .notSubmitted, .needsWork, .submitted])
+do {
+    _ = try CGAssignmentReport.decode(["assignments": [], "warnings": []])
+    preconditionFailure("Blank CG sessions cannot become completed assignments")
+} catch { }
+print("CG report: deadlines, full correctness, unsubmitted/partial/unknown results and blank session handling passed")
+
 
 // A gateway-only web login must also authenticate native academic APIs through that CAS realm.
 let gatewayConfig = URLSessionConfiguration.ephemeral

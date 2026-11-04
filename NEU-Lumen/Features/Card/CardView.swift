@@ -5,6 +5,7 @@ import SwiftUI
 struct CardView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var showCardWeb = false
+    @State private var cardQuery: String?
     @State private var roomDraft = ""
     @State private var editingRoom = false
 
@@ -24,6 +25,7 @@ struct CardView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 billsSection
+                querySection
                 netSection
                 electricSection
             }
@@ -35,11 +37,11 @@ struct CardView: View {
         .navigationTitle("校园卡")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showCardWeb) {
-            NavigationStack { PortalWebViewScreen(url: URL(string: PortalClient.serviceCard)!, cardMode: true) }
+            NavigationStack { PortalWebViewScreen(url: URL(string: PortalClient.serviceCard)!, cardMode: true, cardQuery: cardQuery) }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("一卡通网页", systemImage: "safari") { showCardWeb = true }
+                Button("一卡通网页", systemImage: "safari") { cardQuery = nil; showCardWeb = true }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -196,6 +198,29 @@ struct CardView: View {
 
     // MARK: - 网费
 
+    private var querySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("一卡通查询", icon: "list.bullet.rectangle")
+            GlassCard {
+                VStack(spacing: 0) {
+                    ForEach(["存款信息查询", "补助信息查询", "圈存信息查询", "取款信息查询", "消费信息查询", "交易汇总信息", "捡到卡信息"], id: \.self) { title in
+                        Button {
+                            cardQuery = title
+                            showCardWeb = true
+                        } label: {
+                            HStack {
+                                Text(title)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                            }.padding(14).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        if title != "捡到卡信息" { Divider().padding(.leading, 14) }
+                    }
+                }
+            }
+        }
+    }
+
     private var netSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("网费", icon: "wifi")
@@ -268,7 +293,7 @@ struct CardView: View {
                     }
 
                     switch repo.electricState {
-                    case .idle, .loading where repo.electricInfo == nil:
+                    case .idle where repo.electricInfo == nil, .loading where repo.electricInfo == nil:
                         HStack {
                             Spacer()
                             ProgressView()

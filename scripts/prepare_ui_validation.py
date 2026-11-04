@@ -67,6 +67,12 @@ extension PortalRepository {
             courses: [GradeCourse(name: "高等数学", credit: 5, category: "必修", score: 92, scoreRaw: ""),
                       GradeCourse(name: "大学英语", credit: 3, category: "必修", score: 88, scoreRaw: "")])]
         gradesState = .loaded
+        cgReport = CGAssignmentReport(assignments: [CGAssignment(id: "fixture", title: "第 3 次课后作业",
+            url: nil, deadlineText: "2026-11-10 23:59:59", late: false, history: false, loaded: true,
+            problems: [CGProblem(id: "fixture.1", title: "分支与循环", url: nil, statusText: "完全正确"),
+                       CGProblem(id: "fixture.2", title: "数组练习", url: nil, statusText: "还未提交")])], warnings: [])
+        cgState = .loaded
+        cgUpdatedAt = Date()
         let start = Semester.weekStart(forDay: Date())
         var items: [CourseOccurrence] = []
         for day in [1, 2, 4] {
@@ -85,6 +91,7 @@ extension PortalRepository {
 (destination / "NEU-Lumen/App/NEULumenApp.swift").write_text(r'''
 import SwiftUI
 import WebKit
+import AppIntents
 
 @main
 struct UIValidationApp: App {
@@ -112,6 +119,7 @@ struct UIValidationRoot: View {
                 case "holidays": ScheduleSettingsSheet()
                 case "calendar": SystemCalendarSheet(sunday: Semester.weekStart(forDay: Date()))
                 case "grades": GradesView()
+                case "card": NavigationStack { CardView() }
                 case "browser":
                     TabView {
                         NavigationStack { PortalWebViewScreen(url: URL(string: "http://127.0.0.1:8787/index.html")!) }
@@ -262,6 +270,28 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         adopted.use(store: cardStore, currentURL: URL(string: "http://127.0.0.1:8787/selfsearch/User/ConsumeInfo.aspx")!)
         let adoptedBalance = try await adopted.balance(client: client)
         guard adoptedBalance.balance == 66.5 else { throw NetworkError(message: "Adopted website session was replaced by SSO") }
+        browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/assignment/")!))
+        try await waitFor { browser.title == "CG 作业" && !browser.isLoading }
+        let cg = try await browser.syncCGAssignments()
+        guard cg.assignments.count == 3, cg.warnings.count == 1,
+              let first = cg.assignments.first(where: { $0.id == "1" }), first.completedCount == 1,
+              first.problems[1].status == .notSubmitted, first.deadlineText == "2026-11-10 23:59:59",
+              let second = cg.assignments.first(where: { $0.id == "2" }), second.late,
+              second.problems.map(\.status) == [.needsWork, .submitted],
+              cg.assignments.first(where: { $0.id == "3" })?.loaded == false else {
+            throw NetworkError(message: "CG assignment enumeration, deadlines, status or partial failure incorrect")
+        }
+        let proxied = try await browser.webView.callAsyncJavaScript(CGAssignmentReport.browserScript,
+            arguments: ["rootURL": "http://127.0.0.1:8787/http/fixture/assignment/", "originalRootURL": "http://neucsecg.neu.edu.cn/assignment/"], in: nil, contentWorld: .page)
+        let proxiedCG = try CGAssignmentReport.decode(proxied ?? [:])
+        guard proxiedCG.assignments.count == 3,
+              proxiedCG.assignments.first(where: { $0.id == "2" })?.problems.count == 2 else {
+            throw NetworkError(message: "CG gateway root-relative or relative links failed")
+        }
+        browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/card-menu.html")!))
+        try await waitFor { browser.title == "Card menu" && !browser.isLoading }
+        try await browser.openCardQuery("交易汇总信息")
+        try await waitFor { browser.title == "Card summary" && !browser.isLoading }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
         try "PASS: interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
@@ -275,6 +305,9 @@ fixtures.mkdir(exist_ok=True)
 (fixtures / "index.html").write_text('''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园网页功能验证</title><style>body{font:17px -apple-system;padding:24px;color:#213060;background:#f3f5fb}h1{font-size:28px}a{display:block;background:white;border-radius:16px;padding:18px;margin:14px 0;color:#3553a2;text-decoration:none}small{color:#6d7487}</style><small>NEU · 校园浏览器</small><h1>更顺手的校园网页</h1><p>查找、缩放、分享和下载，都在手边。</p><a id="popup" target="_blank" href="second.html">打开新窗口链接 ↗</a><a id="download" download="campus-guide.txt" href="download.txt">下载校园指南 ↓</a><p>下方工具栏提供前进、后退、刷新与分享。</p></html>''', encoding="utf-8")
 (fixtures / "second.html").write_text('<meta charset="utf-8"><title>第二页</title><h1>导航成功</h1>', encoding="utf-8")
 (fixtures / "balance-labels.html").write_text('<meta charset="utf-8"><title>Visible wallet</title><div>卡状态：正常卡</div><div>主钱包余额：32.10元</div><div>补助余额：0元</div>', encoding="utf-8")
+(fixtures / "card-menu.html").write_text('<title>Card menu</title><iframe src="card-links.html"></iframe>', encoding="utf-8")
+(fixtures / "card-links.html").write_text('<meta charset="utf-8"><a target="_top" href="card-summary.html">交易汇总信息</a>', encoding="utf-8")
+(fixtures / "card-summary.html").write_text('<meta charset="utf-8"><title>Card summary</title><p>汇总查询已打开</p>', encoding="utf-8")
 (fixtures / "download.txt").write_text("NEU-Lumen download fixture", encoding="utf-8")
 
 shutil.copyfile(root / "NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png", fixtures / "article-first.png")
@@ -285,4 +318,7 @@ browser_source = destination / "NEU-Lumen/Features/Web/PortalWebView.swift"
 browser_source.write_text(browser_source.read_text(encoding="utf-8").replace(
     'guard original.host == "ecard.neu.edu.cn" else {',
     'guard ["ecard.neu.edu.cn", "127.0.0.1"].contains(original.host ?? "") else {'
+).replace(
+    'guard original.host == "neucsecg.neu.edu.cn" else {',
+    'guard ["neucsecg.neu.edu.cn", "127.0.0.1"].contains(original.host ?? "") else {'
 ), encoding="utf-8")

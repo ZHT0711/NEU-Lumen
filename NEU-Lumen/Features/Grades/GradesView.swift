@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// 成绩：教务系统真实数据，全部学期 + GPA / 加权平均分 / 学分统计。
+/// 学习：CG 作业进度与截止日期，以及教务成绩和学分统计。
 struct GradesView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var selectedSemesterID: String?
     @State private var showAcademicWeb = false
+    @State private var showCGWeb = false
+    @State private var section = "CG 作业"
 
     private var repo: PortalRepository {
         environment.repository
@@ -20,59 +22,81 @@ struct GradesView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                switch repo.gradesState {
-                case .idle, .loading:
-                    LoadingView(text: "正在从教务系统同步成绩…")
-                case .failed(let message):
-                    VStack(spacing: 8) {
-                        ErrorStateView(message: message) {
-                            Task { await repo.loadGrades(force: true) }
-                        }
-                        Button("打开教务网页并同步成绩", systemImage: "globe") { showAcademicWeb = true }
-                            .buttonStyle(.borderedProminent)
-                        Text("网页内完成认证后，点击“同步成绩到应用”。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    .padding()
-                case .loaded:
-                    if let semester = currentSemester {
-                        content(semester)
-                    } else {
-                        ErrorStateView(message: "暂无成绩数据") {
-                            Task { await repo.loadGrades(force: true) }
-                        }
-                    }
+            VStack(spacing: 0) {
+                Picker("学习内容", selection: $section) {
+                    Text("CG 作业").tag("CG 作业")
+                    Text("成绩").tag("成绩")
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                if section == "CG 作业" {
+                    CGAssignmentsView { showCGWeb = true }
+                } else {
+                    gradesContent
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("成绩")
+            .navigationTitle("学习")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("教务网页", systemImage: "globe") { showAcademicWeb = true }
+                    Button(section == "CG 作业" ? "CG 平台" : "教务网页", systemImage: "globe") {
+                        if section == "CG 作业" { showCGWeb = true } else { showAcademicWeb = true }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await repo.loadGrades(force: true) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(repo.gradesState == .loading)
-                    .accessibilityLabel("刷新成绩")
+                        Task {
+                            if section == "CG 作业" { await repo.loadCGAssignments(force: true) }
+                            else { await repo.loadGrades(force: true) }
+                        }
+                    } label: { Image(systemName: "arrow.clockwise") }
+                    .disabled(section == "CG 作业" ? repo.cgState == .loading : repo.gradesState == .loading)
+                    .accessibilityLabel("刷新学习数据")
                 }
             }
             .task {
                 await repo.ensureLoadedForCurrentUser()
                 await repo.loadGrades()
             }
-            .refreshable {
-                await repo.loadGrades(force: true)
-            }
         }
         .sheet(isPresented: $showAcademicWeb) {
             NavigationStack {
                 PortalWebViewScreen(url: URL(string: PortalClient.jwxtBase + "/jwapp/sys/homeapp/index.do")!, academicMode: true)
             }
+        }
+        .sheet(isPresented: $showCGWeb) {
+            NavigationStack { PortalWebViewScreen(url: repo.cgEntryURL, cgMode: true) }
+        }
+    }
+
+    private var gradesContent: some View {
+        Group {
+            switch repo.gradesState {
+            case .idle, .loading:
+                LoadingView(text: "正在从教务系统同步成绩…")
+            case .failed(let message):
+                VStack(spacing: 8) {
+                    ErrorStateView(message: message) {
+                        Task { await repo.loadGrades(force: true) }
+                    }
+                    Button("打开教务网页并同步成绩", systemImage: "globe") { showAcademicWeb = true }
+                        .buttonStyle(.borderedProminent)
+                    Text("网页内完成认证后，点击“同步成绩到应用”。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .padding()
+            case .loaded:
+                if let semester = currentSemester {
+                    content(semester)
+                } else {
+                    ErrorStateView(message: "暂无成绩数据") {
+                        Task { await repo.loadGrades(force: true) }
+                    }
+                }
+            }
+        }
+        .refreshable {
+            await repo.loadGrades(force: true)
         }
     }
 

@@ -7,6 +7,8 @@ struct PortalWebViewScreen: View {
     let url: URL
     var academicMode = false
     var cardMode = false
+    var cgMode = false
+    var cardQuery: String?
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -101,12 +103,38 @@ struct PortalWebViewScreen: View {
         } message: {
             Text("网页使用定位、相机、麦克风或运动传感器时会请求授权。若已拒绝应用权限，可在系统设置中重新允许。校园乐跑请开启定位服务并允许精确位置，返回后刷新网页，再允许该网站使用位置。")
         }
-        .task { await browser.start(url, client: environment.session.client) }
+        .task {
+            await browser.start(url, client: environment.session.client)
+            if let cardQuery {
+                do { try await browser.openCardQuery(cardQuery) }
+                catch { if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message } }
+            }
+        }
         .onDisappear { browser.webView.stopLoading() }
     }
 
     private var floatingControls: some View {
         VStack(spacing: 10) {
+            if cgMode {
+                GlassCard(cornerRadius: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(syncError ?? "在 CG 平台完成登录后，同步全部作业、截止日期与每题完成情况。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("同步作业到学习") {
+                            Task {
+                                syncError = nil
+                                do {
+                                    let report = try await browser.syncCGAssignments()
+                                    environment.repository.applyCGReport(report)
+                                    dismiss()
+                                } catch {
+                                    if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message }
+                                }
+                            }
+                        }.buttonStyle(.borderedProminent).disabled(browser.isLoading || browser.isSyncing)
+                    }.padding(12)
+                }
+            }
             if cardMode {
                 GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -452,6 +480,55 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         let raw = try await webView.callAsyncJavaScript(AcademicResponse.browserScript, arguments: [:], in: nil, contentWorld: .page)
         await syncCookies()
         return try AcademicResponse.browserReport(raw ?? [:])
+    }
+
+    func syncCGAssignments() async throws -> CGAssignmentReport {
+        isSyncing = true
+        defer { isSyncing = false }
+        for _ in 0..<200 {
+            try Task.checkCancellation()
+            if webView.url != nil && !webView.isLoading { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard let client, client.sessionGeneration == clientEpoch, let current = webView.url else { throw CancellationError() }
+        let original = WebVPN.unwrap(current) ?? current
+        guard original.host == "neucsecg.neu.edu.cn" else {
+            throw NetworkError(message: "请先打开 CG 实验平台并完成登录")
+        }
+        let direct = URL(string: "/assignment/", relativeTo: original)!.absoluteURL
+        let root = WebVPN.isWrapped(current.absoluteString) ? URL(string: WebVPN.wrap(direct.absoluteString))! : direct
+        let raw = try await webView.callAsyncJavaScript(CGAssignmentReport.browserScript,
+            arguments: ["rootURL": root.absoluteString, "originalRootURL": direct.absoluteString], in: nil, contentWorld: .page)
+        guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }
+        let report = try CGAssignmentReport.decode(raw ?? [:])
+        await syncCookies()
+        return report
+    }
+
+    func openCardQuery(_ title: String) async throws {
+        for _ in 0..<200 {
+            try Task.checkCancellation()
+            if !webView.isLoading, webView.url != nil {
+                let found = try? await webView.callAsyncJavaScript(#"""
+                const wanted = title.replace(/\s/g, '');
+                function visit(doc, depth) {
+                  if (!doc || depth > 4) return false;
+                  for (const link of doc.querySelectorAll('a')) {
+                    const name = link.textContent.replace(/\s/g, '').replace('检到卡', '捡到卡');
+                    if (name === wanted) { link.click(); return true; }
+                  }
+                  for (const frame of doc.querySelectorAll('iframe,frame')) {
+                    try { if (visit(frame.contentDocument, depth + 1)) return true; } catch (_) {}
+                  }
+                  return false;
+                }
+                return visit(document, 0);
+                """#, arguments: ["title": title], in: nil, contentWorld: .page)
+                if found as? Bool == true { return }
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw NetworkError(message: "请完成一卡通认证后，在网页菜单中选择“\(title)”")
     }
 
     func exportPDF() async {

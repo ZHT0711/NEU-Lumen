@@ -19,7 +19,7 @@ cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
 </dict></plist>
 PLIST
 xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
-  -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID" \
+  -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID,arch=$(uname -m)" \
   -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
   > "$OUTPUT/simulator-build.log" 2>&1
@@ -29,7 +29,7 @@ SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in home schedule services grades profile favorites holidays calendar; do
+for SCREEN in home schedule services grades card profile favorites holidays calendar; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"

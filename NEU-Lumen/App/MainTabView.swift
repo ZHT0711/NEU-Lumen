@@ -8,7 +8,7 @@ enum AppTab: Hashable {
     case profile
 }
 
-/// 主界面：首页 / 课表 / 服务大厅 / 成绩 / 我的。
+/// 主界面：首页 / 课表 / 服务大厅 / 学习 / 我的。
 struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .home
@@ -39,7 +39,7 @@ struct MainTabView: View {
                 .tag(AppTab.services)
 
             GradesView()
-                .tabItem { Label("成绩", systemImage: "chart.bar.fill") }
+                .tabItem { Label("学习", systemImage: "book.closed.fill") }
                 .tag(AppTab.grades)
 
             ProfileView()

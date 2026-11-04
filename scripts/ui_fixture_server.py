@@ -21,6 +21,21 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        cg_path = path.removeprefix('/http/fixture')
+        if cg_path.startswith('/assignment/'):
+            number = parse_qs(urlsplit(self.path).query).get('assignID', ['1'])[0]
+            if number == '3':
+                return self.html('Temporarily unavailable', 503)
+            sidebar = '''<div class="col-2"><span class="text-muted">当前作业</span>
+                <a href="/assignment/index.jsp?assignID=1">第一次作业</a>
+                <a href="index.jsp?assignID=2">第二次作业 <span class="badge">补交中</span></a>
+                <span class="text-muted">历史作业</span><a href="index.jsp?assignID=3">历史作业</a></div>'''
+            statuses = ['最后一次提交时间：2026-11-02 10:00:00 得分：100 完全正确', '还未提交'] if number == '1' else [
+                '最后一次提交时间：2026-11-02 10:00:00 得分：70 完全正确 答案错误', '最后一次提交时间：2026-11-02 11:00:00 得分：100']
+            rows = ''.join(f'<tr><td><a href="programList.jsp?proNum={i}&amp;assignID={number}">题目{i}</a></td><td><small>{status}</small></td></tr>'
+                           for i, status in enumerate(statuses, 1))
+            return self.html(f'<html><title>CG 作业</title>{sidebar}<h4>第{number}次作业</h4>'
+                             f'<p>作业时间：2026-11-01 08:00:00 至 2026-11-10 23:59:59</p><table>{rows}</table></html>')
         if path == '/card-login.html' and self.authenticated():
             return self.html('Repeated SSO is forbidden while the card session is valid', 403)
         if path.startswith('/selfsearch/'):

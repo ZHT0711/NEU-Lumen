@@ -40,6 +40,11 @@ final class PortalRepository {
     private var gradeRequestID = 0
     private(set) var gradesState: LoadState = .idle
     private(set) var gradesWarning: String?
+    private(set) var cgReport: CGAssignmentReport?
+    private(set) var cgState: LoadState = .idle
+    private(set) var cgUpdatedAt: Date?
+    private var cgRequestID = UUID()
+    private var cgBrowser: PortalBrowser?
 
     // MARK: 一卡通 / 网费 / 电费
 
@@ -107,6 +112,12 @@ final class PortalRepository {
         gradesCache = nil
         gradeRequestID += 1
         gradesWarning = nil
+        cgRequestID = UUID()
+        cgBrowser?.webView.stopLoading()
+        cgBrowser = nil
+        cgReport = nil
+        cgState = .idle
+        cgUpdatedAt = nil
         cardBalance = nil
         cardWarning = nil
         cardUpdatedAt = nil
@@ -428,6 +439,45 @@ final class PortalRepository {
     }
 
     // MARK: - 成绩
+
+    var cgEntryURL: URL {
+        let entry = apps.first { $0.name.contains("CG实验") }?.entryUrl() ?? "http://neucsecg.neu.edu.cn"
+        if let url = URL(string: entry), (WebVPN.unwrap(url) ?? url).host == "neucsecg.neu.edu.cn" { return url }
+        return URL(string: "http://neucsecg.neu.edu.cn")!
+    }
+
+    func loadCGAssignments(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        if cgState == .loading || (!force && cgReport != nil) { return }
+        cgState = .loading
+        let generation = accountGeneration
+        let request = UUID()
+        cgRequestID = request
+        do {
+            let report = try await withRecovery {
+                let browser = PortalBrowser()
+                self.cgBrowser = browser
+                await browser.start(self.cgEntryURL, client: self.session.client)
+                return try await browser.syncCGAssignments()
+            }
+            guard generation == accountGeneration, request == cgRequestID else { return }
+            applyCGReport(report)
+        } catch {
+            guard generation == accountGeneration, request == cgRequestID else { return }
+            cgState = NetworkError.isCancellation(error) ? .idle : .failed(NetworkError.from(error).message)
+        }
+        cgBrowser = nil
+    }
+
+    func applyCGReport(_ report: CGAssignmentReport) {
+        cgRequestID = UUID()
+        cgBrowser?.webView.stopLoading()
+        cgBrowser = nil
+        cgReport = report
+        cgState = .loaded
+        cgUpdatedAt = Date()
+        session.persistWebSession()
+    }
 
     var grades: [GradeSemester] {
         gradesCache ?? []
