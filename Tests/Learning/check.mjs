@@ -20,11 +20,42 @@ assert.equal(Date.parse(rows[0].deadline), deadline);
 const peer = parse({ chapters: [{ id: 1, lessons: [], homeworks: [{ id: 3, name: "互评作业", contentType: 3,
   deadline, enableEvaluation: true, evaluateStart: 1, evaluateEnd: Date.now() + 86400000, usedTryCount: 1 }] }] }, meta);
 assert.equal(peer[0].hwPhase, "peerreview");
-assert.equal(peer[0].checkedOff, false);
+assert.equal(peer[0].checkedOff, true, "Submission survives a peer-review phase");
 const zero = parse({ chapters: [{ id: 1, lessons: [], homeworks: [{ id: 4, name: "零分作业", contentType: 3,
   deadline, score: 0, totalScore: 10, usedTryCount: 1 }] }] }, meta);
 assert.equal(zero[0].score, 0);
 assert.equal(zero[0].checkedOff, true);
+
+const statuses = [
+  { userSubmitStatus: 1 }, { userSubmitStatus: "1" }, { userScore: 0 }, { usedTryCount: 1 },
+  { userSubmitStatus: 0, usedTryCount: 0, userScore: -1 }, { score: 0, totalScore: 10 },
+];
+for (const [index, status] of statuses.entries()) {
+  const [row] = parse({ chapters: [{ id: 1, lessons: [], homeworks: [
+    { id: 5, name: "简答作业", contentType: 3, test: { deadline, ...status } },
+  ] }] }, meta);
+  assert.equal(row.checkedOff, index < 4, `Personal submission state ${JSON.stringify(status)}`);
+}
+
+const readCourse = new Function("DOMParser", "html", "responses", "course", helpers + raw("readCourse"));
+const metadata = { chapters: [{ id: 1, lessons: [], homeworks: [
+  { id: 5, name: "简答作业", contentType: 3, test: { deadline } },
+] }] };
+const personal = structuredClone(metadata);
+personal.chapters[0].homeworks[0].test.userSubmitStatus = 1;
+const staleFlight = `self.__next_f.push([1,${JSON.stringify('1:["$","div",null,{"outline":' + JSON.stringify(metadata) + '}]\n')}])`;
+class FixtureDOMParser {
+  parseFromString() { return { querySelectorAll: () => [{ textContent: staleFlight }] }; }
+}
+const merged = readCourse(FixtureDOMParser, "", [{ raw: JSON.stringify(personal), termID: "42" }],
+  { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl });
+assert.equal(merged.assignments.length, 1);
+assert.equal(merged.assignments[0].completed, true, "Outline metadata must not erase an authenticated submission");
+const [withoutDeadline] = parse({ chapters: [{ id: 1, lessons: [], homeworks: [
+  { id: 8, name: "未定期限作业", contentType: 3, test: { userSubmitStatus: 0, actionLabel: "查看成绩" } },
+] }] }, meta);
+assert.equal(withoutDeadline.checkedOff, false);
+assert.equal(withoutDeadline.deadline, null);
 
 const outline = { chapters: [], exams: [{ id: 99, name: "期末考试", taskType: "exam", parts: [{ endTime: deadline, usedTryCount: 1 }] }] };
 const flight = `self.__next_f.push([1,${JSON.stringify('14:["$","div",null,{"outline":' + JSON.stringify(outline) + '}]\n')}])`;
@@ -44,4 +75,4 @@ const cg = readFileSync(new URL("../../NEU-Lumen/Core/Models/CGAssignments.swift
 new (Object.getPrototypeOf(async function () {}).constructor)("rootURL", "originalRootURL", cg);
 const cx = readFileSync(new URL("../../NEU-Lumen/Core/Models/ChaoxingAssignments.swift", import.meta.url), "utf8").split('static let pageScript = #"""')[1].split('"""#')[0];
 new Function("html", "pageURL", "courseKey", "courseTitle", cx);
-console.log("Learning parsers passed for repeated weekly titles, submissions, peer review, Next.js exams, part deadlines and script syntax");
+console.log("Learning parsers passed for personal submission flags, zero grades, drafts, metadata merging, peer-review phases, repeated titles and Next.js exams");

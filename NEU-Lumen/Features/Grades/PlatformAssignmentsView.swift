@@ -10,9 +10,14 @@ struct PlatformAssignmentsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
-                Button("打开\(platform.title)登录与同步", systemImage: "globe", action: openPlatform)
-                    .buttonStyle(.borderedProminent)
-                if state == .loading { LoadingView(text: "正在读取\(platform.title)课程作业…") }
+                HStack {
+                    Button("一键同步全部课程", systemImage: "arrow.triangle.2.circlepath") {
+                        Task { await repo.loadAssignments(platform, force: true) }
+                    }.buttonStyle(.borderedProminent).disabled(state == .loading)
+                    Spacer(minLength: 8)
+                    Button("网页登录", systemImage: "globe", action: openPlatform).buttonStyle(.bordered)
+                }
+                if state == .loading { LoadingView(text: "正在读取\(platform.title)全部课程与作业…") }
                 if case .failed(let message) = state {
                     ErrorStateView(message: message) { Task { await repo.loadAssignments(platform, force: true) } }
                 }
@@ -26,7 +31,7 @@ struct PlatformAssignmentsView: View {
                             read: report.refreshedCourseKeys.contains(course.key))
                     }
                 } else if state != .loading {
-                    Text("首次使用请打开平台完成登录，再点击“同步作业到学习”。")
+                    Text("首次使用请在网页登录\(platform.title)，随后即可一键同步全部课程。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }.padding(.horizontal, 16).padding(.bottom, 32)
@@ -58,8 +63,32 @@ struct PlatformAssignmentsView: View {
                 HStack(alignment: .top) {
                     Text(course.title).font(.headline)
                     Spacer()
-                    Text(!read && items.isEmpty ? "未读取" : "\(items.filter(\.completed).count)/\(items.count)")
+                    Text(!read && items.isEmpty ? "作业未读取" : "作业 \(items.filter(\.completed).count)/\(items.count)")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                if platform == .chaoxing {
+                    if let progress = course.progress {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("课程进度").font(.subheadline)
+                                Spacer()
+                                Text(progress.total > 0 ? progress.fraction.formatted(.percent.precision(.fractionLength(0))) : "暂无任务点")
+                                    .font(.subheadline.monospacedDigit())
+                            }
+                            if progress.total > 0 { ProgressView(value: progress.fraction) }
+                            Text("已完成 \(progress.completed) / \(progress.total) 个任务点")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text(course.progressWarning ?? "课程进度尚未读取").font(.caption).foregroundStyle(.orange)
+                    }
+                    if let deadline = course.deadline {
+                        Label("课程截止 \(deadline.formatted(date: .abbreviated, time: .shortened))", systemImage: "calendar")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("平台未提供课程截止日期").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Divider()
                 }
                 if items.isEmpty {
                     Text(read ? "平台暂未发布作业。" : "该课程尚未读取，请结合上方同步提示核对。")

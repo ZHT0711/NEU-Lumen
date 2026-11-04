@@ -347,6 +347,44 @@ otherLearning.accountKey = "b"
 precondition(otherLearning.merging(previousLearning).assignments.isEmpty)
 print("CG opaque IDs and details, expected problem counts, campus inference and per-account partial learning report merge passed")
 
+let legacyCourseJSON = Data(#"{"id":"1","termID":"2","title":"课程","url":"https://i.chaoxing.com/"}"#.utf8)
+let legacyCourse = try JSONDecoder().decode(LearningCourse.self, from: legacyCourseJSON)
+precondition(legacyCourse.progress == nil && legacyCourse.deadline == nil)
+let progressFixture = try JSONSerialization.jsonObject(with: Data(#"""
+{"data":[{"id":"2","course":{"data":[{"id":"1","knowledge":{"data":[
+    {"id":"10","parentnodeid":"0","finishcount":7,"unfinishcount":3},
+    {"id":"11","parentnodeid":"10","finishcount":"3","unfinishcount":"1"},
+    {"id":"12","parentnodeid":"10","finishcount":4,"unfinishcount":2},
+    {"id":"12","parentnodeid":"10","finishcount":4,"unfinishcount":2}
+]}}]}}]}
+"""#.utf8))
+let progress = try LearningCourseProgress.chaoxing(progressFixture, courseID: "1")
+precondition(progress.completed == 7 && progress.total == 10 && progress.fraction == 0.7)
+precondition((try? LearningCourseProgress.chaoxing(progressFixture, courseID: "other")) == nil)
+let missingCounts = try JSONSerialization.jsonObject(with: Data(#"{"data":[{"course":{"data":[{"id":"1","knowledge":{"data":[{"id":"10"}]}}]}}]}"#.utf8))
+precondition((try? LearningCourseProgress.chaoxing(missingCounts, courseID: "1")) == nil)
+let exactCourseDeadline = LearningCourseProgress.chaoxingDeadline("2026-12-01 23:59:59")!
+precondition(LearningCourseProgress.chaoxingDeadline("2026-12-01") == exactCourseDeadline)
+precondition(LearningCourseProgress.chaoxingDeadline("2026-12-01T15:59:59Z") == exactCourseDeadline)
+precondition(LearningCourseProgress.chaoxingDeadline(exactCourseDeadline.timeIntervalSince1970 * 1000) == exactCourseDeadline)
+precondition(LearningCourseProgress.chaoxingDeadline("") == nil)
+
+func courseListData(_ count: Int, mode: Int = 0, total: Int = 51) throws -> Data {
+    let rows: [[String: Any]] = (1...count).map { id in
+        ["id": id, "name": "测试课程", "mode": mode, "termPanel": ["id": id + 100], "schoolPanel": ["shortName": "NEU"]]
+    }
+    return try JSONSerialization.data(withJSONObject: ["code": 0, "result": ["result": rows, "pagination": ["totleCount": total]]])
+}
+let firstMOOCPage = try MOOCCoursePage.decode(courseListData(50), page: 1, pageSize: 50)
+precondition(firstMOOCPage.hasMore && firstMOOCPage.courses.count == 50)
+precondition(firstMOOCPage.courses[0].id == "NEU-1" && firstMOOCPage.courses[0].termID == "101")
+let lastMOOCPage = try MOOCCoursePage.decode(courseListData(1, mode: 20), page: 2, pageSize: 50)
+precondition(!lastMOOCPage.hasMore && lastMOOCPage.courses[0].url.path == "/spoc/learn/NEU-1")
+let terminalMOOCPage = try MOOCCoursePage.decode(Data(#"{"result":{"result":null,"pagination":{"totleCount":51}}}"#.utf8), page: 3, pageSize: 50)
+precondition(terminalMOOCPage.courses.isEmpty && !terminalMOOCPage.hasMore)
+precondition((try? MOOCCoursePage.decode(Data(#"{"result":null}"#.utf8), page: 1, pageSize: 50)) == nil)
+print("Learning course progress: leaf-only task counts, missing data, Beijing deadlines, old models and paginated MOOC/SPOC courses passed")
+
 
 // A gateway-only web login must also authenticate native academic APIs through that CAS realm.
 let gatewayConfig = URLSessionConfiguration.ephemeral

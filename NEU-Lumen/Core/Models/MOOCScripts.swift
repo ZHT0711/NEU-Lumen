@@ -39,6 +39,14 @@ enum MOOCScripts {
       || html.match(/"(?:moocTerm|term)Dto"\s*:\s*\{[^}]*?"id"\s*:\s*(\d+)/)
       || html.match(/(?:moocTerm|term)Dto\s*=\s*new\s+\w+\s*[({]\s*(\d+)/);
     const items = new Map();
+    function merge(item) {
+      const previous = items.get(item.uid);
+      if (previous?.checkedOff && !item.checkedOff) {
+        item = {...item, checkedOff: true, score: previous.score ?? item.score,
+          totalScore: previous.totalScore ?? item.totalScore};
+      }
+      items.set(item.uid, item);
+    }
     let recognized = outlines.length > 0;
     function hasOutline(value, depth = 0) {
       if (!value || typeof value !== 'object' || depth > 12) return false;
@@ -50,11 +58,11 @@ enum MOOCScripts {
       if (!hasOutline(data)) continue;
       recognized = true;
       const meta = {courseId: course.id, termId: response.termID, courseName: course.title, pageUrl: course.url};
-      for (const item of extractHomeworkFromTermDto(data, meta)) items.set(item.uid, item);
+      for (const item of extractHomeworkFromTermDto(data, meta)) merge(item);
     }
     for (const outline of outlines) {
       const meta = {courseId: course.id, termId: course.termID, courseName: course.title, pageUrl: course.url};
-      for (const item of extractHomeworkFromTermDto(outline, meta)) items.set(item.uid, item);
+      for (const item of extractHomeworkFromTermDto(outline, meta)) merge(item);
     }
     function destination(type) {
       const url = new URL(course.url);
@@ -69,8 +77,9 @@ enum MOOCScripts {
         courseTitle: course.title, title: item.title,
         kind: ({exam:'考试', quiz:'测验', homework:'作业', discussion:'讨论'})[item.type] || '作业',
         url: destination(item.type), deadline: item.deadline ? Date.parse(item.deadline) : null,
-        deadlineText: '', completed: item.hwPhase !== 'peerreview' && item.checkedOff === true,
-        statusText: item.hwPhase === 'peerreview' ? '待互评' : item.checkedOff ? '已提交 / 已完成' : '未发现完成记录',
+        deadlineText: '', completed: item.checkedOff === true,
+        statusText: (item.checkedOff ? '已提交 / 已完成' : '未发现提交记录')
+          + (item.hwPhase === 'peerreview' ? ' · 当前互评期' : ''),
         scoreText: item.score == null ? '' : String(item.score) + (item.totalScore == null ? '' : ' / ' + item.totalScore)}))};
     """#
 
@@ -178,10 +187,10 @@ function detectPhase(node) {
 function hasCompletedText(node, depth) {
   if (!node || typeof node !== 'object' || (depth || 0) > 6) return false;
   const d = depth || 0;
-  const pat = /已完成|已成功提交|已提交|已批阅|已通过|已互评|查看成绩|查看分数/i;
+  const pat = /已完成|已成功提交|已提交|已批阅|已通过|已互评/i;
   for (const key of Object.keys(node)) {
     const v = node[key];
-    if (typeof v === 'string' && pat.test(v)) return true;
+    if (typeof v === 'string' && /status|state|submit|result|complete|finish/i.test(key) && pat.test(v)) return true;
     if (Array.isArray(v)) {
       for (const e of v) {
         if (e && typeof e === 'object' && hasCompletedText(e, d + 1)) return true;
@@ -240,11 +249,14 @@ function extractHomeworkFromTermDto(input, course) {
     const totalScore = firstNumber(node, TOTAL_FIELDS)
       ?? (node.test ? firstNumber(node.test, TOTAL_FIELDS) : null)
       ?? firstPartNumber(node, TOTAL_FIELDS);
-    const hasSignal = deadlineMs != null || (score != null && totalScore != null);
-    var ct = String(node.contentType || '');
+    const nt = node.test || {};
+    const submitted = [node, nt, ...(Array.isArray(node.parts) ? node.parts : [])].some(part =>
+      part && typeof part === 'object' && (Number(part.userSubmitStatus) > 0 || Number(part.usedTryCount) > 0));
+    const hasSignal = deadlineMs != null || score != null || submitted;
+    var ct = String(node.contentType || nt.type || '');
     var ctIsAssessed = ct === '2' || ct === '3' || ct === '6';
     var explicitExam = isExplicitExam(node);
-    var isAssessed = typeof name === 'string' && name.trim() && hasSignal &&
+    var isAssessed = typeof name === 'string' && name.trim() && (hasSignal || ctIsAssessed || explicitExam) &&
         (ctIsAssessed || explicitExam || (!ct && /测验|作业|考试|测试|quiz|exam|homework|test/i.test(name)));
     if (isAssessed) {
 
@@ -263,14 +275,10 @@ function extractHomeworkFromTermDto(input, course) {
           if (pe > 0) phaseDeadline = pe;
         }
         const deadline = phaseDeadline != null ? msToLocalIso(phaseDeadline) : null;
-        const nType = explicitExam ? 6 : (parseInt(node.type || nt2.type || node.contentType, 10) || NaN);
-        const usedTryCount = parseInt(node.usedTryCount || nt2.usedTryCount, 10)
-          || (explicitExam ? parseInt(firstPartNumber(node, ['usedTryCount']), 10) : 0) || 0;
-        const submitted = usedTryCount > 0 && (nType === 3 || nType === 6);
-        const inPeerReview = phase === 'peerreview';
-        const done = (score != null && totalScore != null && score > 0)
-          || (submitted && !inPeerReview)
-          || hasCompletedText(node, 0);
+        const personalScoreFields = ['userScore', 'studentScore', 'finalMark'];
+        const graded = firstNumber(node, personalScoreFields) != null
+          || firstNumber(nt2, personalScoreFields) != null || firstPartNumber(node, personalScoreFields) != null;
+        const done = graded || (score != null && score > 0) || submitted || hasCompletedText(node, 0);
 
         out.push({
           uid,

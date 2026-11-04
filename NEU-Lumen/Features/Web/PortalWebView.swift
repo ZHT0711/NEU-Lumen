@@ -120,8 +120,8 @@ struct PortalWebViewScreen: View {
                 GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(syncError ?? (platform == .mooc
-                            ? "登录后进入“我的课程”，同步普通课程和学校 SPOC 列表。进入单门课程也可同步该课程。"
-                            : "在学习通网页登录后，同步已选课程的作业与完成状态。"))
+                            ? "登录后可一键同步全部普通课程与学校 SPOC 的作业，无需逐门打开。"
+                            : "登录后可一键同步全部课程的作业、任务点进度和课程截止日期。"))
                             .font(.caption).foregroundStyle(.secondary)
                         if platform == .mooc {
                             HStack {
@@ -129,7 +129,7 @@ struct PortalWebViewScreen: View {
                                 Button("学校 SPOC") { browser.webView.load(URLRequest(url: URL(string: "https://www.icourse163.org/home.htm#/home/spocCourse")!)) }
                             }.font(.caption).disabled(browser.isSyncing)
                         }
-                        Button(browser.isSyncing ? "正在读取课程作业…" : "同步作业到学习") {
+                        Button(browser.isSyncing ? "正在读取全部课程…" : "同步全部课程到学习") {
                             Task {
                                 syncError = nil
                                 do {
@@ -545,14 +545,6 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         guard let client, client.sessionGeneration == clientEpoch else { throw CancellationError() }
         guard let current = webView.url, platform.accepts(current) else {
             throw NetworkError(message: "请先进入\(platform.title)网页并完成登录")
-        }
-        if platform == .mooc {
-            for _ in 0..<40 {
-                let raw = try await webView.callAsyncJavaScript(MOOCScripts.discover, arguments: [:], in: nil, contentWorld: .page)
-                if let courses = raw as? [Any], !courses.isEmpty { break }
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(200))
-            }
         }
         let report = try await LearningWebReader(webView: webView).read(platform, previous: previous)
         guard client.sessionGeneration == clientEpoch, !Task.isCancelled else { throw CancellationError() }

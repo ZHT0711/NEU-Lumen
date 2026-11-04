@@ -76,7 +76,9 @@ extension PortalRepository {
         campusOverride = .hunnan
         for platform in [LearningPlatform.mooc, .chaoxing] {
             let url = platform.entryURL
-            let course = LearningCourse(id: platform.rawValue, termID: "fixture", title: "程序设计基础", url: url)
+            let course = LearningCourse(id: platform.rawValue, termID: "fixture", title: "程序设计基础", url: url,
+                progress: platform == .chaoxing ? LearningCourseProgress(completed: 28, total: 40) : nil,
+                deadline: platform == .chaoxing ? Date().addingTimeInterval(30 * 86400) : nil)
             assignmentReports[platform] = LearningAssignmentReport(courses: [course], assignments: [
                 LearningAssignment(id: "task.1", courseKey: course.key, courseTitle: course.title, title: "第 5 周作业", kind: "作业",
                     url: url, deadline: Date().addingTimeInterval(86400), deadlineText: "", statusText: "未提交", completed: false, scoreText: ""),
@@ -334,13 +336,14 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/home.htm")!))
         try await waitFor { browser.title == "MOOC courses" && !browser.isLoading }
         try await verifyMOOCCourseCards(source: browser.webView)
+        try await verifyMOOCAllCourses(source: browser.webView)
         browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/card-menu.html")!))
         try await waitFor { browser.title == "Card menu" && !browser.isLoading }
         try await browser.openCardQuery("交易汇总信息")
         try await waitFor { browser.title == "Card summary" && !browser.isLoading }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
-        try "PASS: CG legacy/AI-panel problems and gateway URLs, MOOC assignment fields, Chaoxing pagination/status/deadlines, day/night launch symbols, interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: CG legacy/AI-panel problems and gateway URLs, MOOC assignment fields and one-click multi-page MOOC/SPOC sync, Chaoxing pagination/status/deadlines, day/night launch symbols, interrupted request retry, real cancellation and account isolation, visible wallet synchronization, live input properties and iframe wallet, bills without wallet fields, tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, required Referer, authenticated refresh and adopted session, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }
@@ -384,6 +387,68 @@ func verifyMOOCCourseCards(source: WKWebView) async throws {
     guard courses.count == 2, courses[0].id == "NEU-1", courses[0].termID == "42",
           courses[1].id == "NEU-2", courses[1].termID == "43", courses[1].activeTermID == "99" else {
         throw NetworkError(message: "MOOC no-href card discovery or target-blank navigation incorrect")
+    }
+}
+
+
+final class LearningFixtureProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "www.icourse163.org" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        do {
+            let url = request.url!
+            let payload: String
+            if url.path.contains("getMyLearnedCoursePanelList") {
+                var body = request.httpBody ?? Data()
+                if body.isEmpty, let stream = request.httpBodyStream {
+                    stream.open()
+                    defer { stream.close() }
+                    var buffer = [UInt8](repeating: 0, count: 4096)
+                    while stream.hasBytesAvailable {
+                        let count = stream.read(&buffer, maxLength: buffer.count)
+                        if count <= 0 { break }
+                        body.append(contentsOf: buffer.prefix(count))
+                    }
+                }
+                guard let fields = try JSONSerialization.jsonObject(with: body) as? [String: Int],
+                      fields["type"] == 30, fields["psize"] == 50,
+                      let page = fields["p"], let type = fields["courseType"] else {
+                    throw NetworkError(message: "Incorrect course-list request")
+                }
+                let ids = type == 1 ? (page == 1 ? Array(1...50) : [51]) : [52]
+                let courses: [[String: Any]] = ids.map { id in
+                    ["id": id, "name": "课程 \(id)", "mode": type == 1 ? 0 : 20,
+                     "schoolPanel": ["shortName": "NEU"], "termPanel": ["id": id + 100]]
+                }
+                payload = String(data: try JSONSerialization.data(withJSONObject: ["code": 0,
+                    "result": ["result": courses, "pagination": ["totleCount": type == 1 ? 51 : 1]]]), encoding: .utf8)!
+            } else if url.path.contains("courseBean.") {
+                payload = #"{"result":{"chapters":[{"id":1,"lessons":[],"homeworks":[{"id":1,"name":"极限简答作业","contentType":3,"test":{"userSubmitStatus":1}}]}]}}"#
+            } else if url.path.contains("/learn/") {
+                payload = "<html><title>课程</title></html>"
+            } else {
+                throw NetworkError(message: "Unexpected learning fixture URL")
+            }
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json; charset=utf-8"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(payload.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+}
+
+@MainActor
+func verifyMOOCAllCourses(source: WKWebView) async throws {
+    let cookie = HTTPCookie(properties: [.name: "NTESSTUDYSI", .value: "fixture-learning", .domain: ".icourse163.org", .path: "/", .secure: "TRUE"])!
+    await source.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [LearningFixtureProtocol.self]
+    let report = try await LearningWebReader(webView: source, configuration: configuration).read(.mooc)
+    guard report.courses.count == 52, report.refreshedCourseKeys.count == 52,
+          report.assignments.count == 52, report.assignments.allSatisfy(\.completed), report.warnings.isEmpty,
+          report.courses.last?.url.path == "/spoc/learn/NEU-52" else {
+        throw NetworkError(message: "One-click sync did not read all paginated MOOC and SPOC courses")
     }
 }
 ''')
