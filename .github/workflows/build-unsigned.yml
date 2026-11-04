@@ -171,6 +171,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Checkout
@@ -179,10 +180,11 @@ jobs:
           fetch-depth: 0
 
       - name: Download unsigned IPA
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: NEU-Lumen-iOS-unsigned-${{ github.run_number }}
-          path: release-assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
 
       - name: Generate release body
         shell: bash
@@ -255,15 +257,17 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     concurrency:
       group: publish-nightly
       cancel-in-progress: false
     steps:
       - name: Download verified unsigned IPA
-        uses: actions/download-artifact@v8.0.2
-        with:
-          name: NEU-Lumen-iOS-unsigned-${{ github.run_number }}
-          path: release-assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
 
       - name: Publish nightly prerelease
         shell: bash
