@@ -322,7 +322,8 @@ print("CG report: deadlines, full correctness, unsubmitted/partial/unknown resul
 
 let detailedProblem = CGProblem(id: "opaque", title: "题目", url: nil,
     statusText: "最后一次提交时间: 2026-11-02 12:13:14 得分：10.00 共有测试数据:2 测试数据1 完全正确 测试数据2 答案错误 详细")
-precondition(detailedProblem.scoreText == "10.00" && detailedProblem.submittedAt == "2026-11-02 12:13:14")
+precondition(detailedProblem.scoreText == "10.00", "CG score field was \(detailedProblem.scoreText)")
+precondition(detailedProblem.submittedAt == "2026-11-02 12:13:14", "CG submission date was \(detailedProblem.submittedAt)")
 precondition(detailedProblem.testResults.count == 2 && detailedProblem.status == .needsWork)
 let partialAssignment = CGAssignment(id: "partial", title: "作业", url: nil, deadlineText: "", late: false,
     history: false, loaded: true, problems: [CGProblem(id: "1", title: "已读题", url: nil, statusText: "完全正确")], expectedProblemCount: 2)

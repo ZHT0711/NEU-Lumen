@@ -214,6 +214,7 @@ private final class MOOCCourseNavigator: NSObject, WKUIDelegate {
     init(source: WKWebView) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = source.configuration.websiteDataStore
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         browser = WKWebView(frame: .zero, configuration: configuration)
         browser.customUserAgent = source.customUserAgent
         listURL = source.url!
