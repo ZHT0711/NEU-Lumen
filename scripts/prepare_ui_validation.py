@@ -144,9 +144,37 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         throw NetworkError(message: "Browser check timed out, title=\(browser.title), error=\(browser.error ?? "none")")
     }
     do {
+        let scrollActivity = TabBarScrollActivity()
+        scrollActivity.moved(by: 20)
+        guard scrollActivity.direction == .down else { throw NetworkError(message: "Downward tab minimization failed") }
+        scrollActivity.moved(by: -20)
+        guard scrollActivity.direction == .up else { throw NetworkError(message: "Upward tab minimization failed") }
+        // A held finger can pause without producing a new scroll phase.
+        try await Task.sleep(for: .milliseconds(800))
+        guard scrollActivity.direction == nil else { throw NetworkError(message: "Paused scroll did not restore tabs") }
+        scrollActivity.moved(by: 20)
+        scrollActivity.ended()
+        try await Task.sleep(for: .milliseconds(500))
+        guard scrollActivity.direction == nil else { throw NetworkError(message: "Idle scroll did not restore tabs") }
+        scrollActivity.moved(by: 20)
+        scrollActivity.ended()
+        try await Task.sleep(for: .milliseconds(250))
+        scrollActivity.moved(by: -20)
+        try await Task.sleep(for: .milliseconds(200))
+        guard scrollActivity.direction == .up else { throw NetworkError(message: "Cancelled restore interrupted a new scroll") }
+        scrollActivity.restore()
+        scrollActivity.moved(by: 0.1)
+        guard scrollActivity.direction == nil else { throw NetworkError(message: "Tab scroll jitter or reset failed") }
+        for key in ["NSLocationWhenInUseUsageDescription", "NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSMotionUsageDescription"] {
+            guard let purpose = Bundle.main.object(forInfoDictionaryKey: key) as? String, !purpose.isEmpty else {
+                throw NetworkError(message: "Missing web permission purpose: \(key)")
+            }
+        }
         await browser.start(URL(string: "http://127.0.0.1:8787/index.html")!, client: client)
         try await waitFor { browser.title == "校园网页功能验证" && !browser.isLoading }
         guard browser.webView.findInteraction != nil else { throw NetworkError(message: "Find unavailable") }
+        let geolocation = try await browser.webView.evaluateJavaScript("window.isSecureContext && typeof navigator.geolocation.getCurrentPosition === 'function' && typeof navigator.geolocation.watchPosition === 'function'") as? Bool
+        guard geolocation == true else { throw NetworkError(message: "Web geolocation API unavailable") }
         let userAgent = try await browser.webView.evaluateJavaScript("navigator.userAgent") as? String
         guard userAgent == (client.browserUserAgent ?? HTTPClient.userAgent) else { throw NetworkError(message: "Browser and HTTP session UA mismatch") }
         _ = try await browser.webView.evaluateJavaScript("document.getElementById('popup').click()")
@@ -179,7 +207,7 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         guard statement.bills.count == 2 && !statement.truncated else { throw NetworkError(message: "WebKit card statement/paging incorrect") }
         let thumbnail = await client.fetchNewsThumbnail(NewsItem(id: "thumbnail", title: "测试", date: "", category: "", url: "http://127.0.0.1:8787/article.html", picUrl: ""))
         guard let thumbnail, UIImage(data: thumbnail) != nil else { throw NetworkError(message: "Article first image not decoded") }
-        try "PASS: WebKit card SSO, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: tab scroll directions, pause/idle restore, cancelled restore, reset/jitter, web permission purposes, geolocation API, WebKit card SSO, real balance, ASP.NET hidden state, bill query/pagination, article first image, page load, session UA, find, target-blank, back, forward, desktop, zoom, PDF, entry, download".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }

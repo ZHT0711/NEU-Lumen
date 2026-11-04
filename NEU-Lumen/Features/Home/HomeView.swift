@@ -44,6 +44,7 @@ struct HomeView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            .tracksTabBarScrolling()
             .background {
                 Color(.systemGroupedBackground)
                     .overlay(alignment: .top) {

@@ -102,6 +102,7 @@ struct GradesView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 32)
         }
+        .tracksTabBarScrolling()
     }
 
     private var semesterPicker: some View {

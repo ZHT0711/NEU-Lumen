@@ -12,6 +12,7 @@ struct PortalWebViewScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var browser = PortalBrowser()
     @State private var syncError: String?
+    @State private var showPermissionsHelp = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,6 +69,7 @@ struct PortalWebViewScreen: View {
                            systemImage: browser.desktopMode ? "iphone" : "desktopcomputer") { browser.toggleDesktop() }
                     Button("复制当前链接", systemImage: "link") { UIPasteboard.general.url = browser.currentURL ?? url }
                     Button("在 Safari 中打开", systemImage: "safari") { openURL(browser.currentURL ?? url) }
+                    Button("定位与网页权限", systemImage: "hand.raised") { showPermissionsHelp = true }
                     Button("导出当前页为 PDF", systemImage: "doc.richtext") {
                         Task { await browser.exportPDF() }
                     }
@@ -90,6 +92,14 @@ struct PortalWebViewScreen: View {
         .sheet(item: $browser.sharedFile) { file in
             BrowserShareSheet(url: file.url)
                 .presentationDetents([.medium, .large])
+        }
+        .alert("定位与网页权限", isPresented: $showPermissionsHelp) {
+            Button("打开系统设置") {
+                if let settings = URL(string: UIApplication.openSettingsURLString) { openURL(settings) }
+            }
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("网页使用定位、相机、麦克风或运动传感器时会请求授权。若已拒绝应用权限，可在系统设置中重新允许。校园乐跑请开启定位服务并允许精确位置，返回后刷新网页，再允许该网站使用位置。")
         }
         .task { await browser.start(url, client: environment.session.client) }
         .onDisappear { browser.webView.stopLoading() }
@@ -471,6 +481,19 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         while let presented = controller.presentedViewController { controller = presented }
         guard !(controller is UIAlertController) else { fallback(); return }
         controller.present(alert, animated: true)
+    }
+
+    // 定位由 WebKit 按需发起系统与网站两层授权，Info.plist 提供使用期间定位说明。
+    // 媒体和运动权限也交由 WebKit 显示来源明确的授权提示。
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(.prompt)
+    }
+
+    func webView(_ webView: WKWebView, requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        decisionHandler(.prompt)
     }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {

@@ -10,9 +10,21 @@ enum AppTab: Hashable {
 
 /// 主界面：首页 / 课表 / 服务大厅 / 成绩 / 我的。
 struct MainTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .home
+    @State private var scrollActivity = TabBarScrollActivity()
 
     var body: some View {
+        tabs
+            .environment(\.tabBarScrollActivity, scrollActivity)
+            .modifier(ScrollingTabBarStyle(activity: scrollActivity))
+            .onChange(of: selection) { _, _ in scrollActivity.restore() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { scrollActivity.restore() }
+            }
+    }
+
+    private var tabs: some View {
         TabView(selection: $selection) {
             HomeView(selection: $selection)
                 .tabItem { Label("首页", systemImage: "house.fill") }

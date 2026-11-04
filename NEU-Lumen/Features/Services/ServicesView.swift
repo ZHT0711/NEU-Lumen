@@ -47,6 +47,7 @@ struct ServicesView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            .tracksTabBarScrolling()
             .background(Color(.systemGroupedBackground))
             .sheet(isPresented: $showFavorites) { FavoritesEditor() }
             .navigationTitle("服务大厅")

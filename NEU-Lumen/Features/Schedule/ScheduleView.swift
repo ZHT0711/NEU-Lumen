@@ -56,6 +56,7 @@ struct ScheduleView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 32)
             }
+            .tracksTabBarScrolling()
             .background(Color(.systemGroupedBackground))
             .navigationTitle("课表")
             .navigationBarTitleDisplayMode(.inline)

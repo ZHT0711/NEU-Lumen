@@ -152,6 +152,7 @@ struct ProfileView: View {
                     Text("隐私与免责声明")
                 }
             }
+            .tracksTabBarScrolling()
             .sheet(isPresented: $showWebLogin) {
                 WebLoginSheet { await environment.session.completeWebLogin($0) }
             }
