@@ -32,6 +32,7 @@ final class TabBarScrollActivity {
         restoreTask = Task { @MainActor [weak self] in
             do { try await Task.sleep(until: deadline, clock: .continuous) }
             catch { return }
+            guard !Task.isCancelled else { return }
             self?.restore()
         }
     }
