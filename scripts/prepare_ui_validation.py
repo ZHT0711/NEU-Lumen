@@ -283,7 +283,25 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         let refreshed = try await cardBridge.balance(client: client)
         guard refreshed.balance == balance.balance else { throw NetworkError(message: "Card refresh lost its authenticated session") }
         let statement = try await cardBridge.bills(client: client, year: 2026, month: 10)
-        guard statement.bills.count == 2 && !statement.truncated else { throw NetworkError(message: "WebKit card statement/paging incorrect") }
+        guard statement.bills.count == 2 && !statement.truncated,
+              statement.bills.allSatisfy({ $0.amount == -5 && $0.station == "一食堂" && $0.time != nil }) else {
+            throw NetworkError(message: "WebKit card GB2312 decoding, header columns or stateful paging incorrect")
+        }
+        for mode in ["repeat-bills", "unknown-bills", "empty-bills"] {
+            let cookie = HTTPCookie(properties: [.name: mode, .value: "1", .domain: "127.0.0.1", .path: "/"])!
+            await cardStore.httpCookieStore.setCookie(cookie)
+            do {
+                let result = try await cardBridge.bills(client: client, year: 2026, month: 10)
+                guard mode == "empty-bills", result.bills.isEmpty else {
+                    throw NetworkError(message: "Invalid card response was accepted as a statement")
+                }
+            } catch {
+                let message = NetworkError.from(error).message
+                guard (mode == "repeat-bills" && message.contains("翻页未推进"))
+                    || (mode == "unknown-bills" && message.contains("结构未识别")) else { throw error }
+            }
+            await cardStore.httpCookieStore.deleteCookie(cookie)
+        }
         let hiddenWallet = HTTPCookie(properties: [.name: "hide-wallet", .value: "1", .domain: "127.0.0.1", .path: "/"])!
         await cardStore.httpCookieStore.setCookie(hiddenWallet)
         let withoutWallet = try await cardBridge.bills(client: client, year: 2026, month: 10)

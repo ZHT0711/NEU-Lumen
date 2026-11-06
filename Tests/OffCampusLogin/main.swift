@@ -274,6 +274,76 @@ let grades = try await schoolClient.fetchJwxtGrades()
 precondition(grades.semesters.count == 1 && grades.semesters[0].courses.first?.score == 92)
 let card = try await schoolClient.fetchCardBalance()
 precondition(card.balance == 52.30 && card.subsidy == 7.50 && !schoolClient.webvpnOn)
+
+let reorderedBills = #"""
+<table><tr><td>外层布局<table>
+<tr><th>序号</th><th>终端商户</th><th>交易日期</th><th>交易金额</th><th>交易类型</th><th>余额</th><th>手续费</th></tr>
+<tr><td>1</td><td>一食堂</td><td>2026年10月1日 12:30</td><td>￥ 5.00 元</td><td>消费</td><td>66.50</td><td>0.00</td></tr>
+<tr><td>2</td><td>充值站</td><td>2026/10/2 9:05</td><td>-1,234.56</td><td>补助充值</td><td>1,301.06</td><td>0.00</td></tr>
+<tr><td>3</td><td>物联网采集</td><td>2026-10-02</td><td>0.00</td><td>消费</td><td>66.50</td><td>0.00</td></tr>
+</table></td></tr></table>
+"""#
+let parsedBills = try PortalClient.parseBillTable(reorderedBills)
+precondition(parsedBills.count == 2 && parsedBills[0].amount == -5 && parsedBills[0].station == "一食堂")
+precondition(parsedBills[1].amount == 1234.56 && parsedBills[1].balanceAfter == 1301.06)
+precondition(parsedBills.allSatisfy { $0.time != nil })
+let legacyBills = try PortalClient.parseBillTable("<table><tr><td>2026-10-01 12:00</td><td>消费</td><td>3.50</td><td>0</td><td>0</td></tr></table>")
+precondition(legacyBills.count == 1 && legacyBills[0].amount == -3.5)
+let emptyBills = try PortalClient.parseBillTable("<p>共 0 条记录</p>")
+precondition(emptyBills.isEmpty)
+for invalid in ["<html>Service unavailable</html>", reorderedBills.replacingOccurrences(of: "￥ 5.00 元", with: "***")] {
+    do {
+        _ = try PortalClient.parseBillTable(invalid)
+        preconditionFailure("未识别页面和掩码金额不能作为空流水或零元消费")
+    } catch {}
+}
+precondition(PortalClient.hasNextPage("<div>共 12 页</div>", 11))
+precondition(!PortalClient.hasNextPage("<div>共 2 页</div>", 3))
+precondition(PortalClient.hasNextPage(#"<a href="javascript:__doPostBack('ctl00$ContentPlaceHolder1$AspNetPager1','2')">下一页</a>"#, 2))
+precondition(!PortalClient.hasNextPage("<input value='2'><td>2</td>", 2))
+let formHTML = #"<input type='hidden' name='__VIEWSTATE' value='state&amp;2'><input name='ctl00$ContentPlaceHolder1$btnSearch' value='查询'>"#
+let searchFields = PortalClient.cardBillSearchFields(html: formHTML, year: 2024, month: 2)
+precondition(searchFields["ctl00$ContentPlaceHolder1$txtEndDate"] == "2024-02-29")
+precondition(searchFields["ctl00$ContentPlaceHolder1$btnSearch"] == "查询")
+let pageFields = PortalClient.cardBillSearchFields(html: formHTML, year: 2026, month: 10, includeSearchButton: false)
+precondition(pageFields["__VIEWSTATE"] == "state&2" && pageFields["ctl00$ContentPlaceHolder1$btnSearch"] == nil)
+precondition(pageFields["ctl00$ContentPlaceHolder1$txtStartDate"] == "2026-10-01")
+
+let cardSessionHandler = MockPortalProtocol.handle!
+var statementPageCount = 2
+var repeatStatement = false
+var statementPosts = 0
+MockPortalProtocol.handle = { request in
+    guard request.url!.path.hasSuffix("ConsumeInfo.aspx") else { return cardSessionHandler(request) }
+    if request.httpMethod != "POST" { return (200, [:], "<input type='hidden' name='__VIEWSTATE' value='first'>") }
+    let fields = URLComponents(string: "https://fixture/?" + requestBody(request))!.queryItems!
+    func field(_ name: String) -> String? { fields.first { $0.name == name }?.value }
+    let prefix = "ctl00$ContentPlaceHolder1$"
+    let page = Int(field("__EVENTARGUMENT") ?? "1")!
+    statementPosts += 1
+    precondition(field("__VIEWSTATE") == (page == 1 ? "first" : "state-\(page - 1)"))
+    precondition(field(prefix + "txtStartDate") == "2026-10-01" && field(prefix + "txtEndDate") == "2026-10-31")
+    precondition(field(prefix + "rbtnType") == "0")
+    precondition((page == 1) == (field(prefix + "btnSearch") != nil))
+    if page > 1 { precondition(field("__EVENTTARGET") == prefix + "AspNetPager1") }
+    let day = repeatStatement ? 1 : page
+    return (200, [:], "<input type='hidden' name='__VIEWSTATE' value='state-\(page)'>" +
+        "<table><tr><th>商户</th><th>日期</th><th>金额</th><th>摘要</th></tr>" +
+        "<tr><td>食堂</td><td>2026-10-\(day)</td><td>5.00</td><td>消费</td></tr></table><div>共 \(statementPageCount) 页</div>")
+}
+let nativeStatement = try await schoolClient.fetchCardBills(year: 2026, month: 10)
+precondition(nativeStatement.bills.count == 2 && !nativeStatement.truncated && statementPosts == 2)
+statementPageCount = 12
+statementPosts = 0
+let limitedStatement = try await schoolClient.fetchCardBills(year: 2026, month: 10)
+precondition(limitedStatement.bills.count == 10 && limitedStatement.truncated && statementPosts == 10)
+repeatStatement = true
+do {
+    _ = try await schoolClient.fetchCardBills(year: 2026, month: 10)
+    preconditionFailure("重复页面不能被当作完整流水")
+} catch { precondition(NetworkError.from(error).message.contains("翻页未推进")) }
+MockPortalProtocol.handle = cardSessionHandler
+print("Card statements: header columns, legacy rows, Chinese dates, signed money, empty/error pages, latest viewstate, date filters, repeat detection and ten-page limit passed")
 do {
     _ = try PortalClient.parseCardBalance(fromHTML: #"<input id="ContentPlaceHolder1_txtOddFare" value="***">"#)
     preconditionFailure("掩码余额不能变成假零元")

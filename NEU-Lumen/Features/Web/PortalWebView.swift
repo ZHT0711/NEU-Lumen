@@ -15,6 +15,7 @@ struct PortalWebViewScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var browser = PortalBrowser()
     @State private var syncError: String?
+    @State private var isSyncingCard = false
     @State private var showPermissionsHelp = false
 
     var body: some View {
@@ -167,10 +168,12 @@ struct PortalWebViewScreen: View {
             if cardMode {
                 GlassCard(cornerRadius: 22) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(syncError ?? "完成一卡通认证后，同步网页中的真实余额到应用。")
+                        Text(syncError ?? "完成一卡通认证后，同步真实余额与所选月份流水到应用。")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("同步校园卡到应用") {
+                            isSyncingCard = true
                             Task {
+                                defer { isSyncingCard = false }
                                 syncError = nil
                                 let epoch = environment.session.client.sessionGeneration
                                 do {
@@ -179,10 +182,13 @@ struct PortalWebViewScreen: View {
                                     environment.repository.cardWebBridge.use(store: browser.webView.configuration.websiteDataStore,
                                         currentURL: browser.webView.url)
                                     environment.repository.applyCardBalance(balance)
+                                    await environment.repository.loadBills(year: environment.repository.billsYear,
+                                        month: environment.repository.billsMonth, force: true)
+                                    guard epoch == environment.session.client.sessionGeneration else { return }
                                     dismiss()
                                 } catch { syncError = NetworkError.from(error).message }
                             }
-                        }.buttonStyle(.borderedProminent).disabled(browser.isLoading || browser.isSyncing)
+                        }.buttonStyle(.borderedProminent).disabled(browser.isLoading || browser.isSyncing || isSyncingCard)
                     }.padding(12)
                 }
             }

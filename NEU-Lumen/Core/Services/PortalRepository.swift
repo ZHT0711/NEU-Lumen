@@ -74,6 +74,7 @@ final class PortalRepository {
     private(set) var billsState: LoadState = .idle
     private var billsCache: [String: [CardBill]] = [:]
     private var truncatedCache: [String: Bool] = [:]
+    private var billsRequestID = UUID()
     private(set) var netInfo: NetUsageInfo?
     private(set) var netState: LoadState = .idle
     private(set) var electricInfo: ElectricInfo?
@@ -627,6 +628,9 @@ final class PortalRepository {
     /// 拉取某自然月流水（历史月落缓存，不再自动刷新）。
     func loadBills(year: Int, month: Int, force: Bool = false) async {
         await ensureLoadedForCurrentUser()
+        if !force, billsState == .loading, billsYear == year, billsMonth == month { return }
+        let requestID = UUID()
+        billsRequestID = requestID
         billsYear = year
         billsMonth = month
         let key = "\(year)-\(month)"
@@ -636,7 +640,6 @@ final class PortalRepository {
             billsState = .loaded
             return
         }
-        if billsState == .loading { return }
         billsState = .loading
         let generation = accountGeneration
         do {
@@ -650,7 +653,7 @@ final class PortalRepository {
                     return statement
                 }
             }
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration, requestID == billsRequestID else { return }
             session.persistWebSession()
             billsCache[key] = result.bills
             truncatedCache[key] = result.truncated
@@ -658,7 +661,7 @@ final class PortalRepository {
             billTruncated = result.truncated
             billsState = .loaded
         } catch {
-            guard generation == accountGeneration else { return }
+            guard generation == accountGeneration, requestID == billsRequestID else { return }
             if NetworkError.isCancellation(error) {
                 billsState = billsCache[key] == nil ? .idle : .loaded
             } else if billsCache[key] == nil {

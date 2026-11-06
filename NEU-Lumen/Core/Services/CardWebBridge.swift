@@ -76,16 +76,19 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
             var html = try await navigate(url)
             var fields = PortalClient.cardBillSearchFields(html: html, year: year, month: month)
             html = try await post(url, fields: fields)
-            var bills = PortalClient.parseBillTable(html)
+            var bills = try PortalClient.parseBillTable(html)
+            var pages: Set<[CardBill]> = [bills]
             var truncated = false
             for page in 2...10 {
-                guard html.contains("AspNetPager"), PortalClient.hasNextPage(html, page) else { break }
-                fields = PortalClient.hiddenFields(html)
+                guard PortalClient.hasNextPage(html, page) else { break }
+                fields = PortalClient.cardBillSearchFields(html: html, year: year, month: month, includeSearchButton: false)
                 fields["__EVENTTARGET"] = "ctl00$ContentPlaceHolder1$AspNetPager1"
                 fields["__EVENTARGUMENT"] = "\(page)"
                 html = try await post(url, fields: fields)
-                let more = PortalClient.parseBillTable(html)
-                if more.isEmpty { break }
+                let more = try PortalClient.parseBillTable(html)
+                guard !more.isEmpty, pages.insert(more).inserted else {
+                    throw NetworkError(message: "一卡通流水翻页未推进，请在网页核对后重试")
+                }
                 bills += more
                 if page == 10 { truncated = PortalClient.hasNextPage(html, 11) }
             }
@@ -206,7 +209,11 @@ final class CardWebBridge: NSObject, WKNavigationDelegate {
         const response = await fetch(url, {method: 'POST', credentials: 'include',
           headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
           body: new URLSearchParams(fields).toString()});
-        return JSON.stringify({status: response.status, url: response.url, html: await response.text()});
+        const bytes = await response.arrayBuffer();
+        const preview = new TextDecoder().decode(bytes);
+        const charset = response.headers.get('content-type')?.match(/charset=["']?([\w-]+)/i)?.[1]
+          || preview.match(/charset=["']?([\w-]+)/i)?.[1] || 'utf-8';
+        return JSON.stringify({status: response.status, url: response.url, html: new TextDecoder(charset).decode(bytes)});
         """#, arguments: ["url": url.absoluteString, "fields": fields], in: nil, contentWorld: .page)
         guard let text = raw as? String, let data = text.data(using: .utf8),
               let result = try JSONSerialization.jsonObject(with: data) as? [String: Any],

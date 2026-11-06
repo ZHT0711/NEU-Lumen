@@ -56,6 +56,7 @@ struct CardView: View {
         }
         .refreshable {
             await repo.loadCardOverview()
+            await repo.loadBills(year: repo.billsYear, month: repo.billsMonth, force: true)
         }
         .task {
             roomDraft = repo.electricRoomCode
@@ -118,7 +119,7 @@ struct CardView: View {
 
     private var billsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("本月流水", icon: "chart.bar.xaxis")
+            sectionHeader("月流水", icon: "chart.bar.xaxis")
             GlassCard {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -188,6 +189,9 @@ struct CardView: View {
                                     Divider().padding(.leading, 14)
                                 }
                             }
+                        } else {
+                            Text("该月没有流水记录")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }

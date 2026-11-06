@@ -8,10 +8,10 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=sys.argv[1], **kwargs)
 
-    def html(self, body, status=200):
-        data = body.encode('utf-8')
+    def html(self, body, status=200, encoding='utf-8', charset_header=True):
+        data = body.encode(encoding)
         self.send_response(status)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Type', 'text/html' + (f'; charset={encoding}' if charset_header else ''))
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -90,11 +90,26 @@ class Handler(SimpleHTTPRequestHandler):
             expected_state = 'first&state' if page == '1' else 'second&state'
             if fields.get('__VIEWSTATE', [''])[0] != expected_state:
                 return self.html('Missing ASP.NET state', 400)
-            if page == '1' and fields.get('ctl00$ContentPlaceHolder1$txtStartDate', [''])[0] != '2026-10-01':
+            prefix = 'ctl00$ContentPlaceHolder1$'
+            if (fields.get(prefix + 'txtStartDate') != ['2026-10-01']
+                    or fields.get(prefix + 'txtEndDate') != ['2026-10-31']
+                    or fields.get(prefix + 'rbtnType') != ['0']):
                 return self.html('Incorrect search range', 400)
-            pager = "<div>AspNetPager <a href=\"javascript:go('2')\">2</a></div>" if page == '1' else ''
-            return self.html("<html><input type='hidden' name='__VIEWSTATE' value='second&amp;state'>"
-                             f"<table><tr><td>2026-10-0{page} 12:30:00</td><td>食堂消费</td><td>5.00</td><td>0.00</td><td>66.50</td></tr></table>{pager}</html>")
+            if (page == '1') != (prefix + 'btnSearch' in fields):
+                return self.html('Search button must only be submitted for the first page', 400)
+            cookies = self.headers.get('Cookie', '')
+            if 'unknown-bills=1' in cookies:
+                return self.html('<html>Temporarily unavailable</html>')
+            if 'empty-bills=1' in cookies:
+                return self.html('<html>共 0 条记录</html>')
+            row_page = '1' if 'repeat-bills=1' in cookies else page
+            # The count can be the only pagination hint, with no numbered link.
+            pager = '<div>共 2 页</div>'
+            return self.html("<html><meta charset='gb2312'><input type='hidden' name='__VIEWSTATE' value='second&amp;state'>"
+                             "<table><tr><th>序号</th><th>商户</th><th>交易时间</th><th>交易类型</th><th>余额</th><th>交易金额</th><th>手续费</th></tr>"
+                             f"<tr><td>{row_page}</td><td>一食堂</td><td>2026年10月0{row_page}日 12:30:00</td><td>食堂消费</td>"
+                             f"<td>66.50</td><td>5.00元</td><td>0.00</td></tr></table>{pager}</html>",
+                             encoding='gb2312', charset_header=page == '1')
         self.html('Forbidden', 403)
 
 

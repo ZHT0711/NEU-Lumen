@@ -843,18 +843,21 @@ final class PortalClient {
 
         var response = try await postToEcard("/selfsearch/User/ConsumeInfo.aspx", fields)
         html = response.text
-        var bills = Self.parseBillTable(html)
+        var bills = try Self.parseBillTable(html)
+        var pages: Set<[CardBill]> = [bills]
         var truncated = false
 
         for page in 2...10 {
-            guard html.contains("AspNetPager"), Self.hasNextPage(html, page) else { break }
-            var pageFields = Self.hiddenFields(html)
+            guard Self.hasNextPage(html, page) else { break }
+            var pageFields = Self.cardBillSearchFields(html: html, year: year, month: month, includeSearchButton: false)
             pageFields["__EVENTTARGET"] = "ctl00$ContentPlaceHolder1$AspNetPager1"
             pageFields["__EVENTARGUMENT"] = "\(page)"
             response = try await postToEcard("/selfsearch/User/ConsumeInfo.aspx", pageFields)
             html = response.text
-            let more = Self.parseBillTable(html)
-            if more.isEmpty { break }
+            let more = try Self.parseBillTable(html)
+            guard !more.isEmpty, pages.insert(more).inserted else {
+                throw NetworkError(message: "一卡通流水翻页未推进，请在网页核对后重试")
+            }
             bills.append(contentsOf: more)
             if page == 10 && Self.hasNextPage(html, 11) { truncated = true }
         }
@@ -969,6 +972,9 @@ final class PortalClient {
         guard (200..<300).contains(resp.status) else {
             throw NetworkError(message: "一卡通接口 HTTP \(resp.status)")
         }
+        guard String(data: resp.body, encoding: .utf8) != nil else {
+            throw NetworkError(message: "一卡通页面需要使用网页会话解码")
+        }
         if Self.isSessionLostHTML(resp.text) {
             throw NetworkError(message: "一卡通需要重新建立网页会话")
         }
@@ -980,7 +986,8 @@ final class PortalClient {
             throw NetworkError(message: "一卡通地址无效")
         }
         let response = try await http.postForm(url, fields: fields)
-        guard (200..<300).contains(response.status), !Self.isSessionLostHTML(response.text) else {
+        guard (200..<300).contains(response.status), String(data: response.body, encoding: .utf8) != nil,
+              !Self.isSessionLostHTML(response.text) else {
             throw NetworkError(message: "一卡通查询 HTTP \(response.status)，请使用网页会话同步")
         }
         return response
@@ -1021,23 +1028,19 @@ final class PortalClient {
             || html.contains("请求被拒绝") || html.contains("您的访问被拦截") || html.contains("非法访问")
     }
 
-    static func cardBillSearchFields(html: String, year: Int, month: Int) -> [String: String] {
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.year, .month, .day], from: Date())
+    static func cardBillSearchFields(html: String, year: Int, month: Int, includeSearchButton: Bool = true) -> [String: String] {
         let lastDay = daysInMonth(year: year, month: month)
         let start = String(format: "%04d-%02d-01", year, month)
-        let end: String
-        if comps.year == year && comps.month == month {
-            end = String(format: "%04d-%02d-%02d", year, month, comps.day ?? lastDay)
-        } else {
-            end = String(format: "%04d-%02d-%02d", year, month, lastDay)
-        }
+        let end = String(format: "%04d-%02d-%02d", year, month, lastDay)
 
         var fields = hiddenFields(html)
         fields["ctl00$ContentPlaceHolder1$rbtnType"] = "0"
         fields["ctl00$ContentPlaceHolder1$txtStartDate"] = start
         fields["ctl00$ContentPlaceHolder1$txtEndDate"] = end
-        fields["ctl00$ContentPlaceHolder1$btnSearch"] = "查  询"
+        if includeSearchButton {
+            let button = inputTags(html).first { $0["name"] == "ctl00$ContentPlaceHolder1$btnSearch" }
+            fields["ctl00$ContentPlaceHolder1$btnSearch"] = button?["value"] ?? "查  询"
+        }
 
         return fields
     }
@@ -1055,9 +1058,10 @@ final class PortalClient {
     // MARK: - 一卡通 HTML 解析（ASP.NET 页面，容错优先）
 
     private static let trRegex = try! NSRegularExpression(pattern: #"<tr\b[^>]*>[\s\S]*?</tr>"#, options: [.caseInsensitive])
-    private static let tdRegex = try! NSRegularExpression(pattern: #"<td\b[^>]*>[\s\S]*?</td>"#, options: [.caseInsensitive])
+    private static let tableRegex = try! NSRegularExpression(pattern: #"<table\b[^>]*>(?:(?!<table\b)[\s\S])*?</table>"#, options: [.caseInsensitive])
+    private static let tdRegex = try! NSRegularExpression(pattern: #"<t[dh]\b[^>]*>[\s\S]*?</t[dh]>"#, options: [.caseInsensitive])
     private static let tagStripRegex = try! NSRegularExpression(pattern: #"<[^>]*>"#)
-    private static let billDateRegex = try! NSRegularExpression(pattern: #"\d{4}[-/]\d{1,2}[-/]\d{1,2}"#)
+    private static let billDateRegex = try! NSRegularExpression(pattern: #"\d{4}[-/年]\d{1,2}[-/月]\d{1,2}"#)
     private static let junkDateSubjectRegex = try! NSRegularExpression(pattern: #"^\d{4}\s*[-/年.]\s*\d{1,2}\s*[-/月.]\s*\d{1,2}"#)
     private static let numberRegex = try! NSRegularExpression(pattern: #"[0-9]+(?:\.[0-9]+)?"#)
 
@@ -1086,13 +1090,14 @@ final class PortalClient {
         return out
     }
 
-    private static func parseMoney(_ raw: String) -> Double {
+    private static func parseMoney(_ raw: String) -> Double? {
         let cleaned = raw
             .replacingOccurrences(of: "元", with: "")
             .replacingOccurrences(of: "￥", with: "")
+            .replacingOccurrences(of: "¥", with: "")
             .replacingOccurrences(of: ",", with: "")
             .trimmingCharacters(in: .whitespaces)
-        return Double(cleaned) ?? 0
+        return Double(cleaned)
     }
 
     private static func parseMoneyLoose(_ raw: String) -> Double? {
@@ -1102,18 +1107,14 @@ final class PortalClient {
     }
 
     static func hasNextPage(_ html: String, _ page: Int) -> Bool {
-        html.contains("'\(page)'") || html.contains(">\(page)<")
-    }
-
-    private static func decodeEntities(_ text: String) -> String {
-        var s = text
-        s = s.replacingOccurrences(of: "&nbsp;", with: " ")
-        s = s.replacingOccurrences(of: "&amp;", with: "&")
-        s = s.replacingOccurrences(of: "&lt;", with: "<")
-        s = s.replacingOccurrences(of: "&gt;", with: ">")
-        s = s.replacingOccurrences(of: "&quot;", with: "\"")
-        s = s.replacingOccurrences(of: "&#39;", with: "'")
-        return s
+        let text = HTMLInputFields.decode(html.replacingOccurrences(of: #"<[^>]*>"#, with: " ", options: .regularExpression))
+        let count = try! NSRegularExpression(pattern: #"共\s*(\d+)\s*页"#)
+        if let match = count.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let range = Range(match.range(at: 1), in: text), let total = Int(text[range]) {
+            return page <= total
+        }
+        let pattern = #"(?is)(?:AspNetPager[^'"<>]*['"]\s*,\s*['"]\#(page)['"]|<a\b[^>]*>\s*\#(page)\s*</a>)"#
+        return HTMLInputFields.decode(html).range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func cellText(_ html: String, _ range: Range<String.Index>) -> String {
@@ -1122,7 +1123,8 @@ final class PortalClient {
             range: NSRange(range, in: html),
             withTemplate: ""
         )
-        return decodeEntities(stripped).trimmingCharacters(in: .whitespacesAndNewlines)
+        return HTMLInputFields.decode(stripped).replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func isJunkSubject(_ subject: String) -> Bool {
@@ -1132,38 +1134,62 @@ final class PortalClient {
         return junkDateSubjectRegex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
     }
 
-    static func parseBillTable(_ html: String) -> [CardBill] {
+    static func parseBillTable(_ html: String) throws -> [CardBill] {
         var out: [CardBill] = []
-        for m in trRegex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
-            guard let rowRange = Range(m.range, in: html) else { continue }
-            let cells = tdRegex
-                .matches(in: html, range: NSRange(rowRange, in: html))
-                .compactMap { tm in Range(tm.range, in: html).map { cellText(html, $0) } }
-            guard cells.count >= 5 else { continue }
-            let timeText = cells[0]
-            guard billDateRegex.firstMatch(in: timeText, range: NSRange(timeText.startIndex..., in: timeText)) != nil else {
-                continue
+        var recognized = false
+        for table in tableRegex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            var columns: [String]?
+            for m in trRegex.matches(in: html, range: table.range) {
+                guard let rowRange = Range(m.range, in: html) else { continue }
+                let cells = tdRegex
+                    .matches(in: html, range: NSRange(rowRange, in: html))
+                    .compactMap { tm in Range(tm.range, in: html).map { cellText(html, $0) } }
+                func index(_ pattern: String) -> Int? {
+                    columns?.firstIndex { $0.range(of: pattern, options: .regularExpression) != nil }
+                }
+                if cells.contains(where: { $0.range(of: "时间|日期", options: .regularExpression) != nil }),
+                   cells.contains(where: { $0.range(of: "金额|发生额", options: .regularExpression) != nil }) {
+                    columns = cells
+                    recognized = true
+                    continue
+                }
+                func value(_ column: Int?) -> String {
+                    guard let column, cells.indices.contains(column) else { return "" }
+                    return cells[column]
+                }
+                // Older pages omit headers and use the original fixed column order.
+                guard columns != nil || cells.count >= 5 else { continue }
+                let timeText = value(columns == nil ? 0 : index("时间|日期"))
+                guard billDateRegex.firstMatch(in: timeText, range: NSRange(timeText.startIndex..., in: timeText)) != nil else {
+                    continue
+                }
+                recognized = true
+                let subject = value(columns == nil ? 1 : index("交易类型|交易名称|摘要|类型|项目"))
+                guard !isJunkSubject(subject) else { continue }
+                guard var amount = parseMoney(value(columns == nil ? 2 : index("交易金额|发生额|金额"))), amount.isFinite else {
+                    throw NetworkError(message: "一卡通流水金额未能识别，请在网页核对")
+                }
+                let station = value(columns == nil ? (cells.count > 7 ? 7 : 6) : index("站点|终端|商户|地点"))
+                if abs(amount) < 0.005 && station.contains("物联网采集") { continue }
+                let isRecharge = subject.contains("充值") || subject.contains("转账") || subject.contains("补助")
+                if amount > 0 && !isRecharge { amount = -amount }
+                if amount < 0 && isRecharge { amount = abs(amount) }
+                let fee = parseMoney(value(columns == nil ? 3 : index("手续费"))) ?? 0
+                let balanceAfter = parseMoney(value(columns == nil ? 4 : index("余额"))) ?? 0
+                let time = PortalDate.dateTime(normalizeBillTime(timeText))
+                out.append(CardBill(
+                    time: time,
+                    timeText: timeText,
+                    subject: subject,
+                    amount: amount,
+                    fee: fee,
+                    balanceAfter: balanceAfter,
+                    station: station
+                ))
             }
-            let subject = cells[1]
-            guard !isJunkSubject(subject) else { continue }
-            var amount = parseMoney(cells[2])
-            let station = cells.count > 7 ? cells[7] : (cells.count > 6 ? cells[6] : "")
-            if abs(amount) < 0.005 && station.contains("物联网采集") { continue }
-            let isRecharge = subject.contains("充值") || subject.contains("转账") || subject.contains("补助")
-            if amount > 0 && !isRecharge { amount = -amount }
-            if amount < 0 && isRecharge { amount = abs(amount) }
-            let fee = parseMoney(cells[3])
-            let balanceAfter = parseMoney(cells[4])
-            let time = PortalDate.dateTime(normalizeBillTime(timeText))
-            out.append(CardBill(
-                time: time,
-                timeText: timeText,
-                subject: subject,
-                amount: amount,
-                fee: fee,
-                balanceAfter: balanceAfter,
-                station: station
-            ))
+        }
+        guard recognized || html.range(of: "暂无|没有.*记录|无记录|共\\s*0\\s*条", options: .regularExpression) != nil else {
+            throw NetworkError(message: "一卡通流水页面结构未识别，请打开网页认证后同步")
         }
         return out
     }
