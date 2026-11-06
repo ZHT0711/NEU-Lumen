@@ -57,6 +57,25 @@ const [withoutDeadline] = parse({ chapters: [{ id: 1, lessons: [], homeworks: [
 assert.equal(withoutDeadline.checkedOff, false);
 assert.equal(withoutDeadline.deadline, null);
 
+const taskOnlyData = { id: 99, name: "软件测试课程", endTime: deadline, chapters: [
+  { id: 1, name: "测试与作业", endTime: deadline, lessons: [
+    { id: 2, name: "单元测验课程", contentType: 2, endTime: deadline, units: [
+      { id: 3, name: "视频课程测试", contentType: 1, endTime: deadline },
+      { id: 4, name: "本周测验", contentType: 2, test: { deadline, usedTryCount: 1 } },
+      { id: 5, name: "简答任务", contentType: 3, test: { userSubmitStatus: 1 } },
+      { id: 6, name: "期末考试", contentType: 6, test: { deadline } },
+      { id: 7, name: "测试讨论", contentType: 4, endTime: deadline },
+    ] },
+  ], homeworks: [{ id: 8, name: "补充练习", deadline }] },
+] };
+const strict = parse(taskOnlyData, meta);
+assert.deepEqual(strict.map(row => row.title), ["本周测验", "简答任务", "期末考试", "补充练习"],
+  "Course, chapter, lesson, video and discussion metadata must not become tasks");
+const filtered = readCourse(FixtureDOMParser, "", [{ raw: JSON.stringify(taskOnlyData), termID: "42" }],
+  { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl });
+assert.deepEqual(filtered.assignments.map(row => row.title).sort(), ["本周测验", "简答任务", "补充练习", "简答作业"].sort());
+assert.ok(filtered.assignments.every(row => ["作业", "测验"].includes(row.kind)));
+
 const outline = { chapters: [], exams: [{ id: 99, name: "期末考试", taskType: "exam", parts: [{ endTime: deadline, usedTryCount: 1 }] }] };
 const flight = `self.__next_f.push([1,${JSON.stringify('14:["$","div",null,{"outline":' + JSON.stringify(outline) + '}]\n')}])`;
 const decode = new Function("text", helpers + "\nreturn extractLearnOutlines(text);");

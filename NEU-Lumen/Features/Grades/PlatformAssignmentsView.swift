@@ -11,7 +11,7 @@ struct PlatformAssignmentsView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Button("一键同步全部课程", systemImage: "arrow.triangle.2.circlepath") {
+                    Button("同步全部作业", systemImage: "arrow.triangle.2.circlepath") {
                         Task { await repo.loadAssignments(platform, force: true) }
                     }.buttonStyle(.borderedProminent).disabled(state == .loading)
                     Spacer(minLength: 8)
@@ -22,12 +22,18 @@ struct PlatformAssignmentsView: View {
                     ErrorStateView(message: message) { Task { await repo.loadAssignments(platform, force: true) } }
                 }
                 if let report = repo.assignmentReports[platform] {
-                    overview(report)
+                    let assignments = report.assignments.filter { platform != .mooc || ["作业", "测验"].contains($0.kind) }
+                    let courses = report.courses.filter { course in platform != .mooc || assignments.contains { $0.courseKey == course.key } }
+                    overview(courseCount: courses.count, assignments: assignments)
                     ForEach(report.warnings, id: \.self) { warning in
                         Label(warning, systemImage: "info.circle").font(.caption).foregroundStyle(.secondary)
                     }
-                    ForEach(report.courses, id: \.key) { course in
-                        courseCard(course, items: report.assignments.filter { $0.courseKey == course.key },
+                    if courses.isEmpty {
+                        Text("本次没有读到作业或测验，请留意上方同步提示。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(courses, id: \.key) { course in
+                        courseCard(course, items: assignments.filter { $0.courseKey == course.key },
                             read: report.refreshedCourseKeys.contains(course.key))
                     }
                 } else if state != .loading {
@@ -42,12 +48,12 @@ struct PlatformAssignmentsView: View {
         .refreshable { await repo.loadAssignments(platform, force: true) }
     }
 
-    private func overview(_ report: LearningAssignmentReport) -> some View {
+    private func overview(courseCount: Int, assignments: [LearningAssignment]) -> some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(report.courses.count) 门课程 · \(report.assignments.count) 项作业与测验").font(.headline)
-                let completed = report.assignments.filter(\.completed).count
-                Text("已提交或完成 \(completed) 项 · 待完成 \(report.assignments.count - completed) 项")
+                Text("\(courseCount) 门课程 · \(assignments.count) 项作业与测验").font(.headline)
+                let completed = assignments.filter(\.completed).count
+                Text("已提交或完成 \(completed) 项 · 待完成 \(assignments.count - completed) 项")
                     .font(.subheadline).foregroundStyle(.secondary)
                 if let updated = repo.assignmentUpdatedAt[platform] {
                     Text("同步于 \(updated.formatted(date: .omitted, time: .shortened))")

@@ -85,6 +85,9 @@ extension PortalRepository {
                 LearningAssignment(id: "task.2", courseKey: course.key, courseTitle: course.title, title: "第 4 周测验", kind: "测验",
                     url: url, deadline: nil, deadlineText: "", statusText: "已完成", completed: true, scoreText: "10 / 10")
             ], warnings: [], refreshedCourseKeys: [course.key])
+            if platform == .mooc {
+                assignmentReports[platform]?.courses.append(LearningCourse(id: "empty", termID: "fixture", title: "只有课程信息", url: url))
+            }
             assignmentStates[platform] = .loaded
         }
         let start = Semester.weekStart(forDay: Date())
@@ -424,7 +427,7 @@ final class LearningFixtureProtocol: URLProtocol {
                 payload = String(data: try JSONSerialization.data(withJSONObject: ["code": 0,
                     "result": ["result": courses, "pagination": ["totleCount": type == 1 ? 51 : 1]]]), encoding: .utf8)!
             } else if url.path.contains("courseBean.") {
-                payload = #"{"result":{"chapters":[{"id":1,"lessons":[],"homeworks":[{"id":1,"name":"极限简答作业","contentType":3,"test":{"userSubmitStatus":1}}]}]}}"#
+                payload = #"{"result":{"id":99,"name":"软件测试课程","endTime":1794326399000,"chapters":[{"id":1,"name":"作业与测验章节","endTime":1794326399000,"lessons":[],"homeworks":[{"id":1,"name":"极限简答作业","contentType":3,"test":{"userSubmitStatus":1}},{"id":2,"name":"单元测验","contentType":2,"test":{"usedTryCount":1}},{"id":3,"name":"考试","contentType":6,"test":{"userSubmitStatus":1}}]}]}}"#
             } else if url.path.contains("/learn/") {
                 payload = "<html><title>课程</title></html>"
             } else {
@@ -446,7 +449,8 @@ func verifyMOOCAllCourses(source: WKWebView) async throws {
     configuration.protocolClasses = [LearningFixtureProtocol.self]
     let report = try await LearningWebReader(webView: source, configuration: configuration).read(.mooc)
     guard report.courses.count == 52, report.refreshedCourseKeys.count == 52,
-          report.assignments.count == 52, report.assignments.allSatisfy(\.completed), report.warnings.isEmpty,
+          report.assignments.count == 104, report.assignments.allSatisfy(\.completed),
+          report.assignments.allSatisfy({ ["作业", "测验"].contains($0.kind) }), report.warnings.isEmpty,
           report.courses.last?.url.path == "/spoc/learn/NEU-52" else {
         throw NetworkError(message: "One-click sync did not read all paginated MOOC and SPOC courses")
     }

@@ -98,15 +98,16 @@ final class LearningWebReader {
                 guard LearningPlatform.mooc.accepts(page.finalURL) else { throw NetworkError(message: "课程已跳转，请重新登录慕课") }
                 let resolvedCourse = LearningCourse(id: course.id, termID: course.termID, title: course.title, url: page.finalURL, activeTermID: course.activeTermID)
                 var html = page.text
-                // Exams in the new learn shell live in a separate server-rendered outline.
-                if !resolvedCourse.url.path.contains("/spoc/"), resolvedCourse.url.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil {
-                    var exams = URLComponents(url: resolvedCourse.url, resolvingAgainstBaseURL: false)!
-                    exams.path = exams.path.replacingOccurrences(of: #"(/learn/[^/]+)/.*"#, with: "$1/exams", options: .regularExpression)
-                    exams.fragment = nil
-                    do { html += try await get(exams.url!).text }
+                // The new shell may land on lessons. Read its assessment outline as well.
+                if !resolvedCourse.url.path.contains("/spoc/"), resolvedCourse.url.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil,
+                   !resolvedCourse.url.path.hasSuffix("/assessments") {
+                    var assessments = URLComponents(url: resolvedCourse.url, resolvingAgainstBaseURL: false)!
+                    assessments.path = assessments.path.replacingOccurrences(of: #"(/learn/[^/]+)/.*"#, with: "$1/assessments", options: .regularExpression)
+                    assessments.fragment = nil
+                    do { html += try await get(assessments.url!).text }
                     catch {
                         if NetworkError.isCancellation(error) { throw error }
-                        report.warnings.append("\(course.title)的考试列表未读取")
+                        report.warnings.append("\(course.title)的作业与测验列表未读取")
                     }
                 }
                 var responses = try await termResponses(course.termID, csrf: csrf, referer: course.url)

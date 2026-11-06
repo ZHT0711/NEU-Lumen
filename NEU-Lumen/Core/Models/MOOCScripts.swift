@@ -64,19 +64,19 @@ enum MOOCScripts {
       const meta = {courseId: course.id, termId: course.termID, courseName: course.title, pageUrl: course.url};
       for (const item of extractHomeworkFromTermDto(outline, meta)) merge(item);
     }
-    function destination(type) {
+    function destination() {
       const url = new URL(course.url);
       if (/\/learn\/[^/]+\//.test(url.pathname)) {
-        url.pathname = url.pathname.replace(/(\/learn\/[^/]+)\/.*/, '$1/' + (type === 'exam' ? 'exams' : 'assessments'));
+        url.pathname = url.pathname.replace(/(\/learn\/[^/]+)\/.*/, '$1/assessments');
         url.hash = '';
-      } else url.hash = type === 'exam' ? '/learn/examlist' : '/learn/testlist';
+      } else url.hash = '/learn/testlist';
       return url.href;
     }
     return {recognized, activeTermID: route.pathname.includes('/spoc/') && term ? term[1] : '',
-      assignments: [...items.values()].map(item => ({id: item.uid, courseKey: course.id + '.' + course.termID,
+      assignments: [...items.values()].filter(item => item.type === 'quiz' || item.type === 'homework').map(item => ({id: item.uid, courseKey: course.id + '.' + course.termID,
         courseTitle: course.title, title: item.title,
-        kind: ({exam:'考试', quiz:'测验', homework:'作业', discussion:'讨论'})[item.type] || '作业',
-        url: destination(item.type), deadline: item.deadline ? Date.parse(item.deadline) : null,
+        kind: item.type === 'quiz' ? '测验' : '作业',
+        url: destination(), deadline: item.deadline ? Date.parse(item.deadline) : null,
         deadlineText: '', completed: item.checkedOff === true,
         statusText: (item.checkedOff ? '已提交 / 已完成' : '未发现提交记录')
           + (item.hwPhase === 'peerreview' ? ' · 当前互评期' : ''),
@@ -230,12 +230,12 @@ function extractHomeworkFromTermDto(input, course) {
     return Array.isArray(node.units) || /lesson/i.test(node.type || '');
   }
 
-  function visit(node, chapterId, lessonId) {
+  function visit(node, chapterId, lessonId, collectionType = '') {
     if (!node || typeof node !== 'object' || visited > 5000) return;
     visited++;
 
     if (Array.isArray(node)) {
-      for (const child of node) visit(child, chapterId, lessonId);
+      for (const child of node) visit(child, chapterId, lessonId, collectionType);
       return;
     }
 
@@ -252,12 +252,13 @@ function extractHomeworkFromTermDto(input, course) {
     const nt = node.test || {};
     const submitted = [node, nt, ...(Array.isArray(node.parts) ? node.parts : [])].some(part =>
       part && typeof part === 'object' && (Number(part.userSubmitStatus) > 0 || Number(part.usedTryCount) > 0));
-    const hasSignal = deadlineMs != null || score != null || submitted;
-    var ct = String(node.contentType || nt.type || '');
+    var ct = String(node.contentType || nt.type || collectionType);
     var ctIsAssessed = ct === '2' || ct === '3' || ct === '6';
     var explicitExam = isExplicitExam(node);
-    var isAssessed = typeof name === 'string' && name.trim() && (hasSignal || ctIsAssessed || explicitExam) &&
-        (ctIsAssessed || explicitExam || (!ct && /测验|作业|考试|测试|quiz|exam|homework|test/i.test(name)));
+    const container = Array.isArray(node.chapters) || looksLikeChapter(node) || looksLikeLesson(node);
+    const taskType = String(node.taskType || '').toLowerCase();
+    var isAssessed = !container && typeof name === 'string' && name.trim() &&
+        (ctIsAssessed || explicitExam || taskType === 'quiz' || taskType === 'homework');
     if (isAssessed) {
 
       const homeworkId = String(
@@ -288,7 +289,7 @@ function extractHomeworkFromTermDto(input, course) {
           lessonId: lessonId || '',
           homeworkId,
           title: name.trim(),
-          type: classifyType(name, explicitExam ? '6' : (node.contentType || (nt2 && nt2.type) || null)),
+          type: classifyType(name, explicitExam ? '6' : taskType === 'quiz' ? '2' : taskType === 'homework' ? '3' : (ct || null)),
           courseName: course.courseName || '',
           schoolName: course.schoolName || '',
           courseType: course.courseType || '',
@@ -316,7 +317,8 @@ function extractHomeworkFromTermDto(input, course) {
       if (explicitExam && key === 'parts') continue;
       const v = node[key];
       if (v && typeof v === 'object') {
-        visit(v, nextChapter, nextLesson);
+        const nextType = ({homeworks:'3', quizzes:'2', tests:'2', exams:'6'})[key] || (key === 'data' ? collectionType : '');
+        visit(v, nextChapter, nextLesson, nextType);
       } else if (typeof v === 'string' && v.length > 50 && (v.charAt(0) === '{' || v.charAt(0) === '[')) {
         const embedded = coerceJson(v);
         if (embedded && typeof embedded === 'object') visit(embedded, nextChapter, nextLesson);

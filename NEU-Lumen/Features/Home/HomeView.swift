@@ -156,8 +156,8 @@ struct HomeView: View {
                     GeometryReader { geometry in
                         CampusLandmarkArt(campus: repo.campus)
                             .stroke(campusInk.opacity(0.14), style: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round))
-                            .frame(width: geometry.size.width * 0.78, height: geometry.size.height * 0.85)
-                            .offset(x: geometry.size.width * 0.31, y: geometry.size.height * 0.25)
+                            .frame(width: geometry.size.width * (repo.campus == .hunnan ? 0.84 : 0.78), height: geometry.size.height * 0.85)
+                            .offset(x: geometry.size.width * (repo.campus == .hunnan ? 0.15 : 0.31), y: geometry.size.height * 0.25)
                     }.accessibilityHidden(true)
                     }
                 }
