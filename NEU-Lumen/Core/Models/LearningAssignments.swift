@@ -25,6 +25,17 @@ enum LearningPlatform: String, CaseIterable, Identifiable {
         case .chaoxing: return host == "chaoxing.com" || host.hasSuffix(".chaoxing.com")
         }
     }
+
+    func ownsCookie(_ cookie: HTTPCookie) -> Bool {
+        let host = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+        guard let url = URL(string: "https://" + host) else { return false }
+        if accepts(url) { return true }
+        switch self {
+        case .mooc: return host == "163.com" || host.hasSuffix(".163.com")
+        case .cg: return host == "webvpn.neu.edu.cn"
+        case .chaoxing: return false
+        }
+    }
 }
 
 struct LearningCourse: Identifiable, Codable, Hashable {
@@ -158,13 +169,27 @@ struct LearningAssignment: Identifiable, Codable, Hashable {
     var overdue: Bool { !completed && deadline.map { $0 < Date() } == true }
 }
 
-struct LearningAssignmentReport {
+struct LearningAssignmentReport: Codable {
     var courses: [LearningCourse]
     var assignments: [LearningAssignment]
     var warnings: [String]
     /// Failed courses retain their previous rows when the user retries a partial sync.
     var refreshedCourseKeys: Set<String>
     var accountKey = ""
+
+    func sections(for platform: LearningPlatform) -> [LearningAssignmentSection] {
+        let rows = assignments.filter { platform != .mooc || ["作业", "测验"].contains($0.kind) }
+        let grouped = Dictionary(grouping: rows, by: \.courseKey)
+        return courses.compactMap { course in
+            let items = (grouped[course.key] ?? []).sorted {
+                if $0.deadline == $1.deadline { return $0.id < $1.id }
+                return ($0.deadline ?? .distantFuture) < ($1.deadline ?? .distantFuture)
+            }
+            guard platform != .mooc || !items.isEmpty else { return nil }
+            return LearningAssignmentSection(course: course, items: items,
+                completedCount: items.filter(\.completed).count, read: refreshedCourseKeys.contains(course.key))
+        }
+    }
 
     func merging(_ previous: LearningAssignmentReport?) -> LearningAssignmentReport {
         guard let previous, previous.accountKey == accountKey else { return self }
@@ -195,4 +220,12 @@ struct LearningAssignmentReport {
                 completed: row["completed"] as? Bool ?? false, scoreText: row["scoreText"] as? String ?? "")
         }
     }
+}
+
+struct LearningAssignmentSection: Identifiable {
+    let course: LearningCourse
+    let items: [LearningAssignment]
+    let completedCount: Int
+    let read: Bool
+    var id: String { course.key }
 }

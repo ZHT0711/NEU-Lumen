@@ -21,7 +21,7 @@ final class LearningWebReader {
         func signature(_ cookies: [HTTPCookie]) -> String {
             cookies.filter {
                 identityNames.contains($0.name) && platform.accepts(URL(string: "https://" + $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))!)
-            }.sorted { $0.name < $1.name }.map { $0.name + "=" + $0.value }.joined(separator: "|")
+            }.map { $0.domain + "|" + $0.path + "|" + $0.name + "=" + $0.value }.sorted().joined(separator: "|")
         }
         let identity = signature(http.cookies.allCookies())
         let accountKey = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -63,6 +63,9 @@ final class LearningWebReader {
         }
         let discovery = try await discoverMOOCCourses(csrf: csrf)
         var courses = discovery.courses
+        for index in courses.indices {
+            courses[index].activeTermID = known.first { $0.key == courses[index].key }?.activeTermID
+        }
         let raw = try await webView.callAsyncJavaScript(MOOCScripts.discover, arguments: [:], in: nil, contentWorld: .page)
         if let rows = raw as? [[String: String]] {
             for row in rows {
@@ -91,43 +94,72 @@ final class LearningWebReader {
             throw NetworkError(message: warnings.isEmpty ? "慕课未返回已选课程，请确认登录账号" : warnings.joined(separator: "\n"))
         }
         var report = LearningAssignmentReport(courses: courses, assignments: [], warnings: warnings, refreshedCourseKeys: [])
-        for course in courses {
-            try Task.checkCancellation()
-            do {
-                let page = try await get(course.url)
-                guard LearningPlatform.mooc.accepts(page.finalURL) else { throw NetworkError(message: "课程已跳转，请重新登录慕课") }
-                let resolvedCourse = LearningCourse(id: course.id, termID: course.termID, title: course.title, url: page.finalURL, activeTermID: course.activeTermID)
-                var html = page.text
-                // The new shell may land on lessons. Read its assessment outline as well.
-                if !resolvedCourse.url.path.contains("/spoc/"), resolvedCourse.url.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil,
-                   !resolvedCourse.url.path.hasSuffix("/assessments") {
-                    var assessments = URLComponents(url: resolvedCourse.url, resolvingAgainstBaseURL: false)!
-                    assessments.path = assessments.path.replacingOccurrences(of: #"(/learn/[^/]+)/.*"#, with: "$1/assessments", options: .regularExpression)
-                    assessments.fragment = nil
-                    do { html += try await get(assessments.url!).text }
-                    catch {
-                        if NetworkError.isCancellation(error) { throw error }
-                        report.warnings.append("\(course.title)的作业与测验列表未读取")
-                    }
+        // Bound in-flight courses while preserving course order and partial-sync recovery.
+        try await withThrowingTaskGroup(of: (Int, LearningAssignmentReport).self) { group in
+            var next = 0
+            func enqueue() {
+                let index = next
+                let course = courses[index]
+                next += 1
+                group.addTask { @MainActor in
+                    (index, try await self.readMOOCCourse(course, csrf: csrf))
                 }
-                var responses = try await termResponses(course.termID, csrf: csrf, referer: course.url)
-                var parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
-                if let active = course.activeTermID ?? parsed["activeTermID"] as? String, !active.isEmpty, active != course.termID {
-                    responses += try await termResponses(active, csrf: csrf, referer: course.url)
-                    parsed = try await parseMOOC(resolvedCourse, html: html, responses: responses)
-                }
-                guard parsed["recognized"] as? Bool == true else {
-                    throw NetworkError(message: "未读取到课程大纲，请打开课程完成登录后重试")
-                }
-                report.assignments += try LearningAssignmentReport.decodeRows(parsed["assignments"] ?? [], platform: .mooc)
-                report.refreshedCourseKeys.insert(course.key)
-            } catch {
-                if NetworkError.isCancellation(error) { throw error }
-                report.warnings.append("\(course.title) · \(NetworkError.from(error).message)")
+            }
+            for _ in 0..<min(3, courses.count) { enqueue() }
+            var results: [Int: LearningAssignmentReport] = [:]
+            while let (index, result) = try await group.next() {
+                results[index] = result
+                if next < courses.count { enqueue() }
+            }
+            for index in courses.indices {
+                guard let result = results[index] else { continue }
+                report.courses[index] = result.courses[0]
+                report.assignments += result.assignments
+                report.refreshedCourseKeys.formUnion(result.refreshedCourseKeys)
+                report.warnings += result.warnings
             }
         }
         if report.refreshedCourseKeys.isEmpty { throw NetworkError(message: report.warnings.joined(separator: "\n")) }
         return report
+    }
+
+    private func readMOOCCourse(_ course: LearningCourse, csrf: String) async throws -> LearningAssignmentReport {
+        var course = course
+        var result = LearningAssignmentReport(courses: [course], assignments: [], warnings: [], refreshedCourseKeys: [])
+        do {
+            try Task.checkCancellation()
+            var html = ""
+            if course.url.path.contains("/spoc/"), course.activeTermID == nil {
+                let page = try await get(course.url)
+                guard LearningPlatform.mooc.accepts(page.finalURL) else { throw NetworkError(message: "课程已跳转，请重新登录慕课") }
+                html = page.text
+                let metadata = try await parseMOOC(course, html: html, responses: [])
+                if let active = metadata["activeTermID"] as? String, !active.isEmpty { course.activeTermID = active }
+            }
+            let responses = try await termResponses(course.activeTermID ?? course.termID, csrf: csrf, referer: course.url)
+            var parsed = try await parseMOOC(course, html: "", responses: responses)
+            if parsed["recognized"] as? Bool != true {
+                var target = URLComponents(url: course.url, resolvingAgainstBaseURL: false)!
+                if !course.url.path.contains("/spoc/"), target.path.range(of: #"/learn/[^/]+/"#, options: .regularExpression) != nil {
+                    target.path = target.path.replacingOccurrences(of: #"(/learn/[^/]+)/.*"#, with: "$1/assessments", options: .regularExpression)
+                }
+                target.fragment = "/learn/testlist"
+                let page = try await get(target.url!)
+                guard LearningPlatform.mooc.accepts(page.finalURL) else { throw NetworkError(message: "课程已跳转，请重新登录慕课") }
+                let resolved = LearningCourse(id: course.id, termID: course.termID, title: course.title, url: page.finalURL)
+                parsed = try await parseMOOC(resolved, html: page.text, responses: responses)
+            }
+            guard parsed["recognized"] as? Bool == true else {
+                throw NetworkError(message: "未读取到测验与作业，请打开课程完成登录后重试")
+            }
+            result.courses = [course]
+            result.assignments = try LearningAssignmentReport.decodeRows(parsed["assignments"] ?? [], platform: .mooc)
+            result.refreshedCourseKeys.insert(course.key)
+        } catch {
+            if NetworkError.isCancellation(error) { throw error }
+            result.warnings.append("\(course.title) · \(NetworkError.from(error).message)")
+        }
+        return result
     }
 
     private func discoverMOOCCourses(csrf: String) async throws -> (courses: [LearningCourse], warnings: [String]) {
@@ -148,7 +180,6 @@ final class LearningWebReader {
                     for course in result.courses where !courses.contains(where: { $0.key == course.key }) { courses.append(course) }
                     if !result.hasMore { break }
                     if page == 20 { throw NetworkError(message: "课程列表超过 20 页，尚未取全") }
-                    try await Task.sleep(for: .milliseconds(250))
                 }
             } catch {
                 if NetworkError.isCancellation(error) { throw error }
@@ -207,6 +238,7 @@ final class LearningWebReader {
                     ["courseid": id, "clazzid": clazz, "cpi": cpi, "ismooc2": "1", "v": "2"])
                 var course = LearningCourse(id: id, termID: clazz, title: item["name"] as? String ?? "课程 \(id)", url: entry,
                     deadline: LearningCourseProgress.chaoxingDeadline(content["endDate"]))
+                async let landingResponse = get(entry)
                 do {
                     let fields = "id,course.fields(id,knowledge.fields(id,parentnodeid,layer,finishcount,unfinishcount,jobcount).type(video))"
                     let progressURL = queryURL("https://mooc1-api.chaoxing.com/gas/clazz",
@@ -219,7 +251,7 @@ final class LearningWebReader {
                 }
                 report.courses.append(course)
                 do {
-                    let landing = try await get(entry)
+                    let landing = try await landingResponse
                     let inputs = HTMLInputFields.parse(landing.text)
                     guard let enc = inputs.first(where: { $0["id"] == "workEnc" || $0["name"] == "workEnc" })?["value"], !enc.isEmpty else {
                         throw NetworkError(message: "课程作业入口未就绪，请在网页打开该课程后重试")
@@ -242,7 +274,6 @@ final class LearningWebReader {
                         lastPage = max(lastPage, parsed["pages"] as? Int ?? 1)
                         if lastPage > 100 { throw NetworkError(message: "作业页数超过同步上限，请在网页查看") }
                         page += 1
-                        try await Task.sleep(for: .milliseconds(500))
                     } while page <= lastPage
                     report.assignments += courseRows
                     report.refreshedCourseKeys.insert(course.key)

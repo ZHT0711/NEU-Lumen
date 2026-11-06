@@ -106,13 +106,16 @@ struct PortalWebViewScreen: View {
             Text("网页使用定位、相机、麦克风或运动传感器时会请求授权。若已拒绝应用权限，可在系统设置中重新允许。校园乐跑请开启定位服务并允许精确位置，返回后刷新网页，再允许该网站使用位置。")
         }
         .task {
-            await browser.start(url, client: environment.session.client)
+            await browser.start(url, client: environment.session.client, session: environment.session)
             if let cardQuery {
                 do { try await browser.openCardQuery(cardQuery) }
                 catch { if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message } }
             }
         }
-        .onDisappear { browser.webView.stopLoading() }
+        .onDisappear {
+            browser.webView.stopLoading()
+            Task { await browser.saveSession() }
+        }
     }
 
     private var floatingControls: some View {
@@ -318,7 +321,7 @@ private struct BrowserShareSheet: UIViewControllerRepresentable {
 
 @MainActor
 @Observable
-final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKHTTPCookieStoreObserver {
     let webView: WKWebView
     var currentURL: URL?
     var title = ""
@@ -334,6 +337,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     var downloadCount = 0
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private weak var client: PortalClient?
+    @ObservationIgnored private weak var session: SessionStore?
+    @ObservationIgnored private var learningPlatform: LearningPlatform?
+    @ObservationIgnored private var cookieSaveTask: Task<Void, Never>?
     @ObservationIgnored private var clientEpoch: UUID?
     @ObservationIgnored private var entryURL: URL?
     @ObservationIgnored private var started = false
@@ -373,10 +379,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         ]
     }
 
-    func start(_ url: URL, client: PortalClient) async {
+    func start(_ url: URL, client: PortalClient, session: SessionStore? = nil) async {
         guard !started else { return }
         started = true
         self.client = client
+        self.session = session
+        learningPlatform = LearningPlatform.allCases.first { $0.accepts(WebVPN.unwrap(url) ?? url) }
+        session?.restoreLearningSession()
         clientEpoch = client.sessionGeneration
         webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
@@ -384,6 +393,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         let store = webView.configuration.websiteDataStore.httpCookieStore
         for cookie in client.browserCookies() { await store.setCookie(cookie) }
         guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
+        store.add(self)
         entryURL = destination
         currentURL = destination
         webView.load(URLRequest(url: destination))
@@ -466,7 +476,25 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     private func syncCookies() async {
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         guard let client, client.sessionGeneration == clientEpoch else { return }
-        client.absorbBrowserCookies(cookies)
+        if let learningPlatform {
+            client.replaceLearningCookies(cookies, platform: learningPlatform)
+            session?.persistLearningSession()
+        } else { client.absorbBrowserCookies(cookies) }
+    }
+
+    func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+        cookieSaveTask?.cancel()
+        cookieSaveTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(250)) }
+            catch { return }
+            await self?.syncCookies()
+        }
+    }
+
+    func saveSession() async {
+        cookieSaveTask?.cancel()
+        await syncCookies()
+        session?.persistWebSession()
     }
 
     func syncCardBalance() async throws -> CardBalance {

@@ -53,10 +53,12 @@ protocol WebSessionPersisting {
 
 /// Cookie、UA、个人资料只进本机 Keychain，不写 UserDefaults 或项目文件。
 struct KeychainWebSessionStore: WebSessionPersisting {
+    var account = "active"
+
     private var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: "edu.neu.lumen.web-session",
-         kSecAttrAccount as String: "active"]
+         kSecAttrAccount as String: account]
     }
 
     func load() -> SavedWebSession? {

@@ -69,12 +69,18 @@ const taskOnlyData = { id: 99, name: "软件测试课程", endTime: deadline, ch
   ], homeworks: [{ id: 8, name: "补充练习", deadline }] },
 ] };
 const strict = parse(taskOnlyData, meta);
-assert.deepEqual(strict.map(row => row.title), ["本周测验", "简答任务", "期末考试", "补充练习"],
-  "Course, chapter, lesson, video and discussion metadata must not become tasks");
+assert.deepEqual(strict.map(row => row.title), ["补充练习"],
+  "课件 lesson units must stay out of 测验与作业, including quizzes and homework units");
 const filtered = readCourse(FixtureDOMParser, "", [{ raw: JSON.stringify(taskOnlyData), termID: "42" }],
   { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl });
-assert.deepEqual(filtered.assignments.map(row => row.title).sort(), ["本周测验", "简答任务", "补充练习", "简答作业"].sort());
+assert.deepEqual(filtered.assignments.map(row => row.title).sort(), ["补充练习", "简答作业"].sort());
 assert.ok(filtered.assignments.every(row => ["作业", "测验"].includes(row.kind)));
+const assessmentCollections = parse({ chapters: [{ id: 1, lessons: taskOnlyData.chapters[0].lessons,
+  quizzes: [{ id: 21, name: "列表单元测验", test: { usedTryCount: 1 } }],
+  homeworks: [{ id: 22, name: "列表单元作业", test: { userSubmitStatus: 1 } }],
+}] }, meta);
+assert.deepEqual(assessmentCollections.map(row => row.title), ["列表单元测验", "列表单元作业"]);
+assert.ok(assessmentCollections.every(row => row.checkedOff));
 
 const outline = { chapters: [], exams: [{ id: 99, name: "期末考试", taskType: "exam", parts: [{ endTime: deadline, usedTryCount: 1 }] }] };
 const flight = `self.__next_f.push([1,${JSON.stringify('14:["$","div",null,{"outline":' + JSON.stringify(outline) + '}]\n')}])`;

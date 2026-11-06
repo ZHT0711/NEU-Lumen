@@ -1,6 +1,6 @@
 import Foundation
 
-struct CGProblem: Identifiable, Hashable {
+struct CGProblem: Identifiable, Hashable, Codable {
     enum Status: String { case complete, needsWork, notSubmitted, submitted }
     let id: String
     let title: String
@@ -43,7 +43,7 @@ struct CGProblem: Identifiable, Hashable {
     }
 }
 
-struct CGAssignment: Identifiable, Hashable {
+struct CGAssignment: Identifiable, Hashable, Codable {
     let id: String
     let title: String
     let url: URL?
@@ -66,7 +66,7 @@ struct CGAssignment: Identifiable, Hashable {
     }
 }
 
-struct CGAssignmentReport {
+struct CGAssignmentReport: Codable {
     let assignments: [CGAssignment]
     let warnings: [String]
 

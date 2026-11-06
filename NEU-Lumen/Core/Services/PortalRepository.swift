@@ -46,6 +46,8 @@ final class PortalRepository {
     private var cgRequestID = UUID()
     private var cgBrowser: PortalBrowser?
     private(set) var assignmentReports: [LearningPlatform: LearningAssignmentReport] = [:]
+    private(set) var assignmentSections: [LearningPlatform: [LearningAssignmentSection]] = [:]
+    private(set) var assignmentCacheWarning: String?
     private(set) var assignmentStates: [LearningPlatform: LoadState] = [:]
     private(set) var assignmentUpdatedAt: [LearningPlatform: Date] = [:]
     private var assignmentRequests: [LearningPlatform: UUID] = [:]
@@ -139,6 +141,8 @@ final class PortalRepository {
         for browser in assignmentBrowsers.values { browser.webView.stopLoading() }
         assignmentBrowsers = [:]
         assignmentReports = [:]
+        assignmentSections = [:]
+        assignmentCacheWarning = nil
         assignmentStates = [:]
         assignmentUpdatedAt = [:]
         cardBalance = nil
@@ -162,6 +166,17 @@ final class PortalRepository {
         holidays.activate(account: sid)
         systemCalendar.activate(account: sid)
         loadedForSID = sid
+        if !sid.isEmpty, let cached = AssignmentCacheStore(account: sid).load() {
+            cgReport = cached.cg
+            cgUpdatedAt = cached.cgUpdatedAt
+            if cached.cg != nil { cgState = .loaded }
+            assignmentReports = cached.reports
+            assignmentUpdatedAt = cached.updatedAt
+            for (platform, report) in cached.reports {
+                assignmentSections[platform] = report.sections(for: platform)
+                assignmentStates[platform] = .loaded
+            }
+        }
     }
 
     /// 会话过期 → 静默重登 → 重试一次。
@@ -480,7 +495,7 @@ final class PortalRepository {
             let report = try await withRecovery {
                 let browser = PortalBrowser()
                 self.cgBrowser = browser
-                await browser.start(self.cgEntryURL, client: self.session.client)
+                await browser.start(self.cgEntryURL, client: self.session.client, session: self.session)
                 return try await browser.syncCGAssignments()
             }
             guard generation == accountGeneration, request == cgRequestID else { return }
@@ -499,6 +514,7 @@ final class PortalRepository {
         cgReport = report
         cgState = .loaded
         cgUpdatedAt = Date()
+        saveAssignmentCache()
         session.persistWebSession()
     }
 
@@ -513,7 +529,7 @@ final class PortalRepository {
         let browser = PortalBrowser()
         assignmentBrowsers[platform] = browser
         do {
-            await browser.start(platform.entryURL, client: session.client)
+            await browser.start(platform.entryURL, client: session.client, session: session)
             let report = try await browser.syncAssignments(platform, previous: assignmentReports[platform])
             guard accountGeneration == generation, assignmentRequests[platform] == request else { return }
             applyAssignments(report, platform: platform)
@@ -529,9 +545,20 @@ final class PortalRepository {
         assignmentBrowsers[platform]?.webView.stopLoading()
         assignmentBrowsers[platform] = nil
         assignmentReports[platform] = report.merging(assignmentReports[platform])
+        assignmentSections[platform] = assignmentReports[platform]?.sections(for: platform)
         assignmentStates[platform] = .loaded
         assignmentUpdatedAt[platform] = Date()
+        saveAssignmentCache()
         session.persistWebSession()
+    }
+
+    private func saveAssignmentCache() {
+        guard let account = loadedForSID, !account.isEmpty else { return }
+        do {
+            try AssignmentCacheStore(account: account).save(.init(cg: cgReport, cgUpdatedAt: cgUpdatedAt,
+                reports: assignmentReports, updatedAt: assignmentUpdatedAt))
+            assignmentCacheWarning = nil
+        } catch { assignmentCacheWarning = "本机作业缓存未能保存，重启后请重新同步。" }
     }
 
     var grades: [GradeSemester] {

@@ -25,6 +25,8 @@ final class SessionStore {
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
     private var sessionEpoch = UUID()
     private var keepSession = false
+    private var learningSessionGeneration: UUID?
+    private var learningSessionAccount: String?
     private var recoveryTask: Task<Bool, Never>?
     private var lastNetworkRecovery = Date.distantPast
     private var pendingUsername: String?
@@ -243,10 +245,39 @@ final class SessionStore {
 
     /// 登录成功立即保存，切到后台时再保存一次续期后的 Cookie。
     func persistWebSession() {
+        restoreLearningSession()
+        persistLearningSession()
         guard keepSession, phase == .loggedIn, let user else { return }
         do {
             try webSessions.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent,
                                                  cookies: client.browserCookies()))
+        } catch { sessionSaveError = NetworkError.from(error).message }
+    }
+
+    private var learningSessions: KeychainWebSessionStore? {
+        guard phase == .loggedIn, let user else { return nil }
+        let account = user.sid.isEmpty ? user.uid : user.sid
+        guard !account.isEmpty else { return nil }
+        return KeychainWebSessionStore(account: "learning." + account)
+    }
+
+    func restoreLearningSession() {
+        guard let store = learningSessions else { return }
+        guard learningSessionGeneration != client.sessionGeneration || learningSessionAccount != store.account else { return }
+        learningSessionGeneration = client.sessionGeneration
+        learningSessionAccount = store.account
+        guard let saved = store.load(), user?.isSameAccount(as: saved.user) == true else { return }
+        client.retainMissingCookies(saved.restoredCookies())
+    }
+
+    /// 作业平台登录态按门户账号保存在本机，即使未勾选门户的保持登录也可恢复。
+    func persistLearningSession() {
+        guard let store = learningSessions, let user else { return }
+        let cookies = client.browserCookies().filter { cookie in
+            LearningPlatform.allCases.contains { $0.ownsCookie(cookie) }
+        }
+        do {
+            try store.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent, cookies: cookies))
             sessionSaveError = nil
         } catch { sessionSaveError = NetworkError.from(error).message }
     }
@@ -328,6 +359,7 @@ final class SessionStore {
     }
 
     func logout() {
+        learningSessions?.clear()
         sessionEpoch = UUID()
         recoveryTask?.cancel()
         recoveryTask = nil

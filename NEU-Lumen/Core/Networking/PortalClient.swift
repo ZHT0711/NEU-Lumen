@@ -775,6 +775,11 @@ final class PortalClient {
         adoptGatewayTicket()
     }
 
+    func replaceLearningCookies(_ cookies: [HTTPCookie], platform: LearningPlatform) {
+        http.cookies.replace(cookies, matching: platform.ownsCookie)
+        absorbBrowserCookies(cookies)
+    }
+
     // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
 
     static let serviceCard = "http://ecard.neu.edu.cn/selflogin/login.aspx"

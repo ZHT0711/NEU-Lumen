@@ -65,6 +65,17 @@ final class CookieJar {
 
     func clear() { locked { store.removeAll(); epoch = UUID() } }
 
+    /// WebKit snapshots also communicate deleted cookies after a platform logout.
+    func replace(_ cookies: [HTTPCookie], matching predicate: (HTTPCookie) -> Bool) {
+        locked {
+            store = store.filter { !predicate($0.value.cookie) }
+            for cookie in cookies where predicate(cookie) {
+                guard !cookie.value.isEmpty, cookie.expiresDate.map({ $0 > Date() }) ?? true else { continue }
+                store[key(cookie)] = Entry(cookie: cookie, hostOnly: !cookie.domain.hasPrefix("."))
+            }
+        }
+    }
+
     func allCookies() -> [HTTPCookie] {
         locked { store.values.map(\.cookie).filter { !($0.expiresDate.map { $0 <= Date() } ?? false) } }
     }

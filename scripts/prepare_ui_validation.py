@@ -88,6 +88,7 @@ extension PortalRepository {
             if platform == .mooc {
                 assignmentReports[platform]?.courses.append(LearningCourse(id: "empty", termID: "fixture", title: "只有课程信息", url: url))
             }
+            assignmentSections[platform] = assignmentReports[platform]?.sections(for: platform)
             assignmentStates[platform] = .loaded
         }
         let start = Semester.weekStart(forDay: Date())
@@ -175,22 +176,40 @@ func runSessionPersistenceCheck(save: Bool) {
     let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         .appendingPathComponent(save ? "session-save.txt" : "session-restore.txt")
     let vault = KeychainWebSessionStore()
+    let learningVault = KeychainWebSessionStore(account: "learning.restart-fixture")
+    let cache = AssignmentCacheStore(account: "restart-fixture")
     do {
         if save {
             let cookie = HTTPCookie(properties: [.name:"wengine_vpn_ticket", .value:"restart-fixture",
                 .domain:"webvpn.neu.edu.cn", .path:"/https/fixture/portal", .secure:"TRUE",
                 HTTPCookiePropertyKey(rawValue:"HttpOnly"):"TRUE"])!
             try vault.save(SavedWebSession(user: DemoData.user, userAgent: "Fixture WebKit", cookies: [cookie]))
+            let learningCookie = HTTPCookie(properties: [.name: "NTESSTUDYSI", .value: "learning-fixture",
+                .domain: ".icourse163.org", .path: "/", .secure: "TRUE"])!
+            try learningVault.save(SavedWebSession(user: DemoData.user, userAgent: "Fixture WebKit", cookies: [learningCookie]))
+            let course = LearningCourse(id: "fixture", termID: "1", title: "缓存课程", url: LearningPlatform.mooc.entryURL)
+            let row = LearningAssignment(id: "fixture-task", courseKey: course.key, courseTitle: course.title,
+                title: "缓存作业", kind: "作业", url: course.url, deadline: nil, deadlineText: "",
+                statusText: "已提交", completed: true, scoreText: "")
+            let report = LearningAssignmentReport(courses: [course], assignments: [row], warnings: [],
+                refreshedCourseKeys: [course.key], accountKey: "fixture")
+            try cache.save(.init(cg: nil, cgUpdatedAt: nil, reports: [.mooc: report], updatedAt: [.mooc: Date()]))
         } else {
             guard let saved = vault.load(), saved.user == DemoData.user, saved.userAgent == "Fixture WebKit",
                   let cookie = saved.restoredCookies().first, cookie.value == "restart-fixture",
                   cookie.path == "/https/fixture/portal", cookie.isSecure, cookie.isHTTPOnly else {
                 throw NetworkError(message: "Saved browser session did not survive process restart")
             }
+            guard learningVault.load()?.restoredCookies().first?.value == "learning-fixture",
+                  cache.load()?.reports[.mooc]?.assignments.first?.completed == true,
+                  AssignmentCacheStore(account: "different-restart-fixture").load() == nil else {
+                throw NetworkError(message: "Learning session or account-scoped homework cache did not survive restart")
+            }
+            learningVault.clear()
             vault.clear()
             guard vault.load() == nil else { throw NetworkError(message: "Session logout cleanup failed") }
         }
-        try "PASS: Keychain session \(save ? "save" : "restore after process restart and clear")".write(to: output, atomically: true, encoding: .utf8)
+        try "PASS: Keychain portal/learning sessions and account-scoped homework cache \(save ? "save" : "restore after process restart and clear")".write(to: output, atomically: true, encoding: .utf8)
     } catch {
         try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
     }

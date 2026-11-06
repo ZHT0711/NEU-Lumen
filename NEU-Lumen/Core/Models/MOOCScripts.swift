@@ -314,6 +314,8 @@ function extractHomeworkFromTermDto(input, course) {
     const nextLesson = node.lessonId || (looksLikeLesson(node) ? node.id : lessonId);
     for (const key of Object.keys(node)) {
       if (key === 'test') continue;
+      // Lesson units belong to 课件. The assessment list lives in chapter task collections.
+      if (key === 'lessons' || key === 'units') continue;
       if (explicitExam && key === 'parts') continue;
       const v = node[key];
       if (v && typeof v === 'object') {

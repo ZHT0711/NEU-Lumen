@@ -415,6 +415,20 @@ precondition(emptyLearning.merging(previousLearning).assignments.isEmpty)
 var otherLearning = interruptedLearning
 otherLearning.accountKey = "b"
 precondition(otherLearning.merging(previousLearning).assignments.isEmpty)
+let restoredLearning = try JSONDecoder().decode(LearningAssignmentReport.self, from: JSONEncoder().encode(previousLearning))
+precondition(restoredLearning.accountKey == "a" && restoredLearning.assignments == [oldTask])
+let restoredSections = restoredLearning.sections(for: .mooc)
+precondition(restoredSections.count == 1 && restoredSections[0].items == [oldTask] && restoredSections[0].read)
+let restoredCG = try JSONDecoder().decode(CGAssignmentReport.self, from: JSONEncoder().encode(CGAssignmentReport(assignments: [partialAssignment], warnings: [])))
+precondition(restoredCG.assignments == [partialAssignment])
+let learningCookies = CookieJar()
+let learningCookie = HTTPCookie(properties: [.name: "NTESSTUDYSI", .value: "session", .domain: ".icourse163.org", .path: "/"])!
+let otherCookie = HTTPCookie(properties: [.name: "other", .value: "retained", .domain: "personal.neu.edu.cn", .path: "/"])!
+learningCookies.absorb([learningCookie, otherCookie])
+learningCookies.replace([], matching: LearningPlatform.mooc.ownsCookie)
+precondition(!learningCookies.hasCookie(learningURL, "NTESSTUDYSI"))
+precondition(learningCookies.hasCookie(portal, "other"), "Platform logout must preserve other services")
+precondition(!LearningPlatform.mooc.ownsCookie(HTTPCookie(properties: [.name: "foreign", .value: "x", .domain: "163.com.evil.test", .path: "/"])!))
 print("CG opaque IDs and details, expected problem counts, campus inference and per-account partial learning report merge passed")
 
 let legacyCourseJSON = Data(#"{"id":"1","termID":"2","title":"课程","url":"https://i.chaoxing.com/"}"#.utf8)
