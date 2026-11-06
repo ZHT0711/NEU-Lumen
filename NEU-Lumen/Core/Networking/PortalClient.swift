@@ -1118,9 +1118,10 @@ final class PortalClient {
     }
 
     private static func cellText(_ html: String, _ range: Range<String.Index>) -> String {
+        let cell = String(html[range])
         let stripped = tagStripRegex.stringByReplacingMatches(
-            in: html,
-            range: NSRange(range, in: html),
+            in: cell,
+            range: NSRange(cell.startIndex..., in: cell),
             withTemplate: ""
         )
         return HTMLInputFields.decode(stripped).replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
