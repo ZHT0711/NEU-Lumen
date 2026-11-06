@@ -421,6 +421,9 @@ let restoredSections = restoredLearning.sections(for: .mooc)
 precondition(restoredSections.count == 1 && restoredSections[0].items == [oldTask] && restoredSections[0].read)
 let restoredCG = try JSONDecoder().decode(CGAssignmentReport.self, from: JSONEncoder().encode(CGAssignmentReport(assignments: [partialAssignment], warnings: [])))
 precondition(restoredCG.assignments == [partialAssignment])
+let savedAssignments = AssignmentCacheStore.Snapshot(cg: restoredCG, cgUpdatedAt: Date(), reports: [.mooc: previousLearning], updatedAt: [.mooc: Date()])
+let restoredAssignments = try JSONDecoder().decode(AssignmentCacheStore.Snapshot.self, from: JSONEncoder().encode(savedAssignments))
+precondition(restoredAssignments.reports[.mooc]?.assignments == [oldTask] && restoredAssignments.cg?.assignments == [partialAssignment])
 let learningCookies = CookieJar()
 let learningCookie = HTTPCookie(properties: [.name: "NTESSTUDYSI", .value: "session", .domain: ".icourse163.org", .path: "/"])!
 let otherCookie = HTTPCookie(properties: [.name: "other", .value: "retained", .domain: "personal.neu.edu.cn", .path: "/"])!
@@ -429,6 +432,13 @@ learningCookies.replace([], matching: LearningPlatform.mooc.ownsCookie)
 precondition(!learningCookies.hasCookie(learningURL, "NTESSTUDYSI"))
 precondition(learningCookies.hasCookie(portal, "other"), "Platform logout must preserve other services")
 precondition(!LearningPlatform.mooc.ownsCookie(HTTPCookie(properties: [.name: "foreign", .value: "x", .domain: "163.com.evil.test", .path: "/"])!))
+let learningRestoreClient = PortalClient()
+let currentGatewayCookie = HTTPCookie(properties: [.name: "wengine_vpn_ticket", .value: "current-ticket", .domain: "webvpn.neu.edu.cn", .path: "/"])!
+let oldGatewayCookie = HTTPCookie(properties: [.name: "wengine_vpn_ticket", .value: "stale-ticket", .domain: "webvpn.neu.edu.cn", .path: "/"])!
+learningRestoreClient.absorbBrowserCookies([learningCookie, otherCookie, currentGatewayCookie])
+learningRestoreClient.restoreLearningCookies([oldGatewayCookie])
+precondition(!learningRestoreClient.browserCookies().contains { $0.name == "NTESSTUDYSI" }, "Platform logout in a newer snapshot must override older portal cookies")
+precondition(learningRestoreClient.browserCookies().contains { $0.name == "wengine_vpn_ticket" && $0.value == "current-ticket" })
 print("CG opaque IDs and details, expected problem counts, campus inference and per-account partial learning report merge passed")
 
 let legacyCourseJSON = Data(#"{"id":"1","termID":"2","title":"课程","url":"https://i.chaoxing.com/"}"#.utf8)

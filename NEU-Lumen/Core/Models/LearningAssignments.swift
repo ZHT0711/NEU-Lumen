@@ -1,6 +1,6 @@
 import Foundation
 
-enum LearningPlatform: String, CaseIterable, Identifiable {
+enum LearningPlatform: String, CaseIterable, Identifiable, Codable {
     case cg, mooc, chaoxing
     var id: String { rawValue }
     var title: String {

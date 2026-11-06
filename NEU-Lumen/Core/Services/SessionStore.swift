@@ -267,7 +267,7 @@ final class SessionStore {
         learningSessionGeneration = client.sessionGeneration
         learningSessionAccount = store.account
         guard let saved = store.load(), user?.isSameAccount(as: saved.user) == true else { return }
-        client.retainMissingCookies(saved.restoredCookies())
+        client.restoreLearningCookies(saved.restoredCookies())
     }
 
     /// 作业平台登录态按门户账号保存在本机，即使未勾选门户的保持登录也可恢复。

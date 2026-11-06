@@ -30,6 +30,10 @@ struct AssignmentCacheStore {
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try resource.setResourceValues(values)
-        try JSONEncoder().encode(snapshot).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        var options: Data.WritingOptions = [.atomic]
+        #if os(iOS)
+        options.insert(.completeFileProtectionUntilFirstUserAuthentication)
+        #endif
+        try JSONEncoder().encode(snapshot).write(to: url, options: options)
     }
 }

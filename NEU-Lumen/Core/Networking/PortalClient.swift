@@ -780,6 +780,16 @@ final class PortalClient {
         absorbBrowserCookies(cookies)
     }
 
+    func restoreLearningCookies(_ cookies: [HTTPCookie]) {
+        // The learning snapshot can be newer than the portal snapshot, including logged-out platforms.
+        // Keep a freshly renewed gateway ticket from the current portal login.
+        http.cookies.replace(cookies) { cookie in
+            let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            return domain != "webvpn.neu.edu.cn" && LearningPlatform.allCases.contains { $0.ownsCookie(cookie) }
+        }
+        retainMissingCookies(cookies)
+    }
+
     // MARK: - 一卡通 / 网费 / 电费（接口与解析对齐泥洞项目实测实现）
 
     static let serviceCard = "http://ecard.neu.edu.cn/selflogin/login.aspx"
