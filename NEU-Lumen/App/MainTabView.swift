@@ -16,6 +16,12 @@ struct MainTabView: View {
 
     var body: some View {
         tabs
+            .overlay(alignment: .top) {
+                DynamicIslandView()
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .zIndex(10)
+            }
             .environment(\.tabBarScrollActivity, scrollActivity)
             .modifier(ScrollingTabBarStyle(activity: scrollActivity))
             .onChange(of: selection) { _, _ in scrollActivity.restore() }

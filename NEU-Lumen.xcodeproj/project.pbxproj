@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		A10000000000000000000001 /* NEU-LumenLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = NEU-LumenLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000002 /* NEULumenLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NEULumenLiveActivity.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicIslandActivityAttributes.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5AFE00000000000000000004 /* NEU-Lumen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NEU-Lumen.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -31,6 +35,12 @@
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
+/* Begin PBXBuildFile section */
+		A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* NEULumenLiveActivity.swift */; };
+		A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */; };
+		A10000000000000000000013 /* Embed Live Activity */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* NEU-LumenLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFrameworksBuildPhase section */
 		5AFE00000000000000000006 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
@@ -46,14 +56,26 @@
 			isa = PBXGroup;
 			children = (
 				5AFE00000000000000000009 /* NEU-Lumen */,
+				A10000000000000000000005 /* NEU-LumenLiveActivity */,
 				5AFE00000000000000000003 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000005 /* NEU-LumenLiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000002 /* NEULumenLiveActivity.swift */,
+				A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */,
+				A10000000000000000000004 /* Info.plist */,
+			);
+			path = NEU-LumenLiveActivity;
 			sourceTree = "<group>";
 		};
 		5AFE00000000000000000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				5AFE00000000000000000004 /* NEU-Lumen.app */,
+				A10000000000000000000001 /* NEU-LumenLiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -68,6 +90,7 @@
 				5AFE00000000000000000005 /* Sources */,
 				5AFE00000000000000000006 /* Frameworks */,
 				5AFE00000000000000000007 /* Resources */,
+				A10000000000000000000014 /* Embed Live Activity */,
 			);
 			buildRules = (
 			);
@@ -82,6 +105,15 @@
 			productName = "NEU-Lumen";
 			productReference = 5AFE00000000000000000004 /* NEU-Lumen.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000008 /* NEU-LumenLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000020 /* Build configuration list for NEU-LumenLiveActivity */;
+			buildPhases = (A10000000000000000000015 /* Sources */, A10000000000000000000016 /* Frameworks */, A10000000000000000000017 /* Resources */);
+			name = NEU-LumenLiveActivity;
+			productName = NEU-LumenLiveActivity;
+			productReference = A10000000000000000000001 /* NEU-LumenLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -113,9 +145,14 @@
 			projectRoot = "";
 			targets = (
 				5AFE00000000000000000008 /* NEU-Lumen */,
+				A10000000000000000000008 /* NEU-LumenLiveActivity */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10000000000000000000014 /* Embed Live Activity */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = "$(CONTENTS_FOLDER_PATH)/PlugIns"; dstSubfolderSpec = 13; files = (A10000000000000000000013 /* Embed Live Activity */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
 		5AFE00000000000000000007 /* Resources */ = {
@@ -126,6 +163,10 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+		A10000000000000000000015 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */, A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000016 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000017 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 
 /* Begin PBXSourcesBuildPhase section */
 		5AFE00000000000000000005 /* Sources */ = {
@@ -296,6 +337,8 @@
 			};
 			name = Release;
 		};
+		A10000000000000000000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = NEU-LumenLiveActivity/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = edu.neu.lumen.liveactivity; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Debug;};
+		A10000000000000000000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; INFOPLIST_FILE = NEU-LumenLiveActivity/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = edu.neu.lumen.liveactivity; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2";}; name = Release;};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -317,6 +360,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000000000000000000020 /* Build configuration list for NEU-LumenLiveActivity */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000018 /* Debug */, A10000000000000000000019 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
 /* End XCConfigurationList section */
 	};
 	rootObject = 5AFE00000000000000000001 /* Project object */;

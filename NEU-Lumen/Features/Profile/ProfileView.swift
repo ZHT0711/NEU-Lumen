@@ -10,6 +10,7 @@ struct ProfileView: View {
     }
     @State private var showWebLogin = false
     @State private var confirmLogout = false
+    @State private var dynamicIslandStore = DynamicIslandStore()
 
     private var version: String {
         let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -123,6 +124,16 @@ struct ProfileView: View {
                     }
                     Text(environment.repository.suggestedCampus.map { "根据学院/专业识别为\($0.title)，可手动调整。" }
                          ?? "学院/专业尚无法确定校区，当前展示\(environment.repository.campus.title)插画，可手动选择。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("灵动岛") {
+                    NavigationLink {
+                        DynamicIslandSettingsView(store: dynamicIslandStore)
+                    } label: {
+                        Label("配置应用外灵动岛", systemImage: "circle.dotted.and.circle")
+                    }
+                    Text("支持下一节课、校园卡余额和自定义文字，并同步到锁屏与系统灵动岛。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
