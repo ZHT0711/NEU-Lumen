@@ -19,7 +19,8 @@ struct NEULumenLiveActivity: Widget {
                 }
             }
             .padding(16)
-            .activityBackgroundTint(Color(.systemBackground))
+            .foregroundStyle(.white)
+            .activityBackgroundTint(.black)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -35,10 +36,20 @@ struct NEULumenLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.trailing) {
                     if !context.state.value.isEmpty { Text(context.state.value).font(.caption.monospacedDigit()) }
                 }
+                DynamicIslandExpandedRegion(.bottom) {
+                    HStack {
+                        Text("NEU-Lumen").font(.caption2).foregroundStyle(.secondary)
+                        Spacer()
+                        Text(context.state.updatedAt, style: .time)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } compactLeading: {
                 Image(systemName: context.state.kind == "cardBalance" ? "creditcard.fill" : "book.closed.fill")
             } compactTrailing: {
-                Text(context.state.value.isEmpty ? "Lumen" : context.state.value).font(.caption2.monospacedDigit())
+                Text(context.state.value.isEmpty ? String(context.state.title.prefix(2)) : context.state.value)
+                    .font(.caption2.monospacedDigit())
             } minimal: {
                 Image(systemName: context.state.kind == "cardBalance" ? "creditcard.fill" : "book.closed.fill")
             }

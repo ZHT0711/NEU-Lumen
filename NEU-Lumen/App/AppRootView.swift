@@ -31,6 +31,22 @@ struct AppRootView: View {
         .task {
             networkMonitor.start { environment.session.networkDidChange() }
             await environment.session.restoreSession()
+            if environment.session.phase == .loggedIn, environment.dynamicIslandStore.enabled {
+                DynamicIslandActivityManager.shared.startOrUpdate(
+                    store: environment.dynamicIslandStore,
+                    repository: environment.repository
+                )
+            }
+        }
+        .onChange(of: environment.session.phase) { _, phase in
+            if phase == .loggedIn, environment.dynamicIslandStore.enabled {
+                DynamicIslandActivityManager.shared.startOrUpdate(
+                    store: environment.dynamicIslandStore,
+                    repository: environment.repository
+                )
+            } else if phase == .loggedOut {
+                DynamicIslandActivityManager.shared.end()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .inactive || phase == .background { environment.session.persistWebSession() }

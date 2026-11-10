@@ -17,7 +17,16 @@ NEU-Lumen 将统一认证、课表、校园卡、成绩、作业和校园服务�
 
 ## 产品预览
 
-> 下方图片来自项目资源和 iPhone 尺寸 UI 验证流程。每次构建都会在 Actions 产物中生成首页、课表、服务、学习和浏览器截图；打开最近一次 workflow 的 **Artifacts → NEU-Lumen-ui-preview** 即可查看完整演示集。
+下面是 iPhone 实机演示图：应用外由系统接管 Live Activity，应用内首页显示同款紧凑胶囊。完整图片保存在 [`docs/screenshots`](docs/screenshots)。
+
+<p align="center">
+  <img src="docs/screenshots/live-activity-collapsed.jpg" width="190" alt="系统灵动岛收起状态" />
+  <img src="docs/screenshots/live-activity-expanded.jpg" width="190" alt="系统灵动岛展开状态" />
+  <img src="docs/screenshots/live-activity-lockscreen.jpg" width="190" alt="锁屏 Live Activity" />
+  <img src="docs/screenshots/app-home-live-activity.jpg" width="190" alt="应用内 Live Activity 与首页" />
+</p>
+
+每次构建也会在 Actions 产物中生成首页、课表、服务、学习和浏览器截图；打开最近一次 workflow 的 **Artifacts → NEU-Lumen-ui-preview** 即可查看完整演示集。
 
 <p align="center">
   <img src="NEU-Lumen/Assets.xcassets/NEUEmblem.imageset/emblem.png" width="110" alt="东北大学校徽" />
