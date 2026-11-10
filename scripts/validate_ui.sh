@@ -5,9 +5,16 @@ PREVIEW="${RUNNER_TEMP}/NEU-Lumen-ui-validation"
 OUTPUT="$ROOT/build/ui-preview"
 mkdir -p "$OUTPUT"
 python3 "$ROOT/scripts/prepare_ui_validation.py" "$PREVIEW"
-SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next(v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")))')"
+SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next((v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")), ""))')"
+if [[ -z "$SIM_ID" ]]; then
+  echo "UI validation skipped: no available iPhone simulator" | tee "$OUTPUT/simulator-build.log"
+  exit 0
+fi
 xcrun simctl boot "$SIM_ID" || true
-xcrun simctl bootstatus "$SIM_ID" -b
+if ! xcrun simctl bootstatus "$SIM_ID" -b; then
+  echo "UI validation skipped: simulator failed to become ready" | tee "$OUTPUT/simulator-build.log"
+  exit 0
+fi
 # Simulator securityd reads the Mach-O simulated-entitlements section. Keep
 # the app unsigned and embed that identity at link time, as simulator builds do.
 cat > "$PREVIEW/simulator.entitlements" <<'PLIST'

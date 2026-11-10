@@ -10,7 +10,6 @@ struct ProfileView: View {
     }
     @State private var showWebLogin = false
     @State private var confirmLogout = false
-    @State private var dynamicIslandStore = DynamicIslandStore()
     @State private var easterEggTapCount = 0
     @State private var showAquaCoreEasterEgg = false
 
@@ -139,7 +138,7 @@ struct ProfileView: View {
 
                 Section("灵动岛") {
                     NavigationLink {
-                        DynamicIslandSettingsView(store: dynamicIslandStore)
+                        DynamicIslandSettingsView(store: environment.dynamicIslandStore)
                     } label: {
                         Label("配置应用外灵动岛", systemImage: "circle.dotted.and.circle")
                     }

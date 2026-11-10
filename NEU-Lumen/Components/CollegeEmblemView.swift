@@ -4,40 +4,51 @@ import SwiftUI
 struct CollegeEmblemView: View {
     let department: String
 
-    private var profile: (short: String, color: Color) {
-        let rules: [(String, String, Color)] = [
-            ("计算机", "计", .indigo), ("软件", "软", .purple), ("信息科学", "信", .blue),
-            ("机器人", "机", .teal), ("未来技术", "未", .cyan), ("自动化", "自", .orange),
-            ("电气工程", "电", .red), ("机械", "机", .brown), ("材料", "材", .pink),
-            ("冶金", "冶", .gray), ("资源与土木", "资", .green), ("理学院", "理", .mint),
-            ("工商管理", "商", .blue), ("江河建筑", "建", .orange), ("文法", "文", .purple),
-            ("马克思主义", "马", .red), ("外国语", "外", .teal), ("艺术", "艺", .pink),
-            ("体育", "体", .green), ("医学", "医", .red), ("生命科学", "生", .mint),
-            ("中荷", "中", .indigo), ("国防", "国", .gray)
+    private var profile: (short: String, color: Color, asset: String?) {
+        let rules: [(String, String, Color, String?)] = [
+            ("计算机", "计", .indigo, nil), ("软件", "软", .purple, nil), ("信息科学", "信", .blue, nil),
+            ("机器人", "机", .teal, nil), ("未来技术", "未", .cyan, nil), ("自动化", "自", .orange, nil),
+            ("电气工程", "电", .red, nil), ("机械", "机", .brown, nil), ("材料", "材", .pink, nil),
+            ("冶金", "冶", .gray, nil), ("资源与土木", "资", .green, nil), ("理学院", "理", .mint, nil),
+            ("工商管理", "商", .blue, nil), ("江河建筑", "建", .orange, nil), ("文法", "文", .purple, nil),
+            ("马克思主义", "马", .red, nil), ("外国语", "外", .teal, nil), ("艺术", "艺", .pink, nil),
+            ("体育", "体", .green, nil), ("医学", "医", .red, nil), ("生命科学", "生", .mint, nil),
+            ("中荷", "中", .indigo, nil), ("国防", "国", .gray, nil)
         ]
+        if department.contains("未来技术") {
+            return ("未", .blue, "FutureTechnologyEmblem")
+        }
         if let rule = rules.first(where: { department.contains($0.0) }) {
-            return (rule.1, rule.2)
+            return (rule.1, rule.2, nil)
         }
         let first = department.first.map { String($0) } ?? "院"
-        return (first, .blue)
+        return (first, .blue, nil)
     }
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(profile.color.gradient)
-            Circle()
-                .strokeBorder(.white.opacity(0.72), lineWidth: 1.5)
-                .padding(4)
-            Image("NEUEmblem")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .padding(8)
-                .foregroundStyle(.white.opacity(0.22))
-            Text(profile.short)
-                .font(.system(size: 20, weight: .bold, design: .serif))
-                .foregroundStyle(.white)
+            if let asset = profile.asset {
+                Image(asset)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(Circle())
+                    .overlay(Circle().strokeBorder(.white.opacity(0.75), lineWidth: 1.5))
+            } else {
+                Circle()
+                    .fill(profile.color.gradient)
+                Circle()
+                    .strokeBorder(.white.opacity(0.72), lineWidth: 1.5)
+                    .padding(4)
+                Image("NEUEmblem")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(8)
+                    .foregroundStyle(.white.opacity(0.22))
+                Text(profile.short)
+                    .font(.system(size: 20, weight: .bold, design: .serif))
+                    .foregroundStyle(.white)
+            }
         }
         .frame(width: 54, height: 54)
         .shadow(color: profile.color.opacity(0.28), radius: 5, y: 2)

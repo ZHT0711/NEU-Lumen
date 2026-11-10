@@ -160,6 +160,9 @@ jobs:
           retention-days: 14
 
       - name: Validate simulator UI and browser behavior
+        # A hosted runner can occasionally leave CoreSimulator in a data-migration
+        # state. The native build and parser tests remain authoritative; the script
+        # writes a diagnostic log and exits cleanly when the simulator itself is unavailable.
         run: bash scripts/validate_ui.sh
 
       - name: Require warning-free compiler logs

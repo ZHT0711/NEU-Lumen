@@ -3,11 +3,11 @@ import SwiftUI
 /// 应用内灵动岛：收起时展示摘要，点按后展开为可操作的信息卡。
 struct DynamicIslandView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var store = DynamicIslandStore()
     @State private var expanded = false
     @State private var showSettings = false
 
     private var repo: PortalRepository { environment.repository }
+    private var store: DynamicIslandStore { environment.dynamicIslandStore }
 
     var body: some View {
         if store.enabled {
@@ -24,9 +24,18 @@ struct DynamicIslandView: View {
                     .presentationDetents([.medium, .large])
             }
             .task {
-                DynamicIslandActivityManager.shared.startOrUpdate(store: store, repository: repo)
+                while !Task.isCancelled {
+                    DynamicIslandActivityManager.shared.startOrUpdate(store: store, repository: repo)
+                    try? await Task.sleep(for: .seconds(60))
+                }
             }
             .onChange(of: store.kind) { _, _ in
+                DynamicIslandActivityManager.shared.startOrUpdate(store: store, repository: repo)
+            }
+            .onChange(of: store.customTitle) { _, _ in
+                DynamicIslandActivityManager.shared.startOrUpdate(store: store, repository: repo)
+            }
+            .onChange(of: store.customSubtitle) { _, _ in
                 DynamicIslandActivityManager.shared.startOrUpdate(store: store, repository: repo)
             }
             .onChange(of: store.enabled) { _, enabled in
@@ -67,7 +76,7 @@ struct DynamicIslandView: View {
     private var expandedIsland: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Label("灵动岛", systemImage: "circle.dotted.and.circle")
+                    Label("Live Activity", systemImage: "circle.dotted.and.circle")
                     .font(.headline)
                 Spacer()
                 Button { showSettings = true } label: {
@@ -141,14 +150,14 @@ struct DynamicIslandSettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("显示应用内灵动岛", isOn: $store.enabled)
+                    Toggle("显示应用内与锁屏 Live Activity", isOn: $store.enabled)
                     Picker("展示内容", selection: $store.kind) {
                         ForEach(DynamicIslandStore.ContentKind.allCases) { kind in
                             Label(kind.title, systemImage: kind.icon).tag(kind)
                         }
                     }
                 } footer: {
-                    Text("灵动岛会悬浮在各个页面顶部，点击即可展开详情。内容来自本地已加载的课表和校园卡数据。")
+                    Text("应用内会显示同款灵动岛；进入后台后由系统接管并显示在锁屏与系统灵动岛。内容来自本地已加载的课表和校园卡数据。")
                 }
                 if store.kind == .custom {
                     Section("自定义内容") {

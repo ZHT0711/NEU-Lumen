@@ -754,10 +754,12 @@ final class PortalRepository {
 final class AppEnvironment {
     let session: SessionStore
     let repository: PortalRepository
+    let dynamicIslandStore: DynamicIslandStore
 
     init() {
         let store = SessionStore()
         self.session = store
         self.repository = PortalRepository(session: store)
+        self.dynamicIslandStore = DynamicIslandStore()
     }
 }

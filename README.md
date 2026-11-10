@@ -1,139 +1,123 @@
 # NEU-Lumen
 
-[![Build unsigned iOS IPA](https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml/badge.svg)](https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml)
+<p align="center">
+  <img src="NEU-Lumen/Assets.xcassets/NEULogo.imageset/logo.png" width="250" alt="NEU-Lumen" />
+</p>
 
-NEU-Lumen 是东北大学「一号通门户」（https://personal.neu.edu.cn/portal）的**原生 SwiftUI** iOS 客户端，
-是 [NEUPortal](https://github.com/ZHT0711)（Flutter 多端版）的 iOS 原生重写版本。
+<p align="center">东北大学「一号通门户」的原生 SwiftUI 客户端</p>
 
-零第三方依赖，全部使用 SwiftUI 与 Apple 系统框架实现；编译与 iOS 模拟器检查交给 GitHub Actions 云端完成，
-本机不需要 Mac / Xcode。
+<p align="center">
+  <a href="https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml"><img src="https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml/badge.svg" alt="Build" /></a>
+  <a href="https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly"><img src="https://img.shields.io/badge/nightly-unsigned%20IPA-1769aa" alt="Nightly IPA" /></a>
+  <img src="https://img.shields.io/badge/iOS-17%2B-111111" alt="iOS 17+" />
+  <img src="https://img.shields.io/badge/SwiftUI-native-0d7c66" alt="SwiftUI" />
+</p>
 
-## 当前功能
+NEU-Lumen 将统一认证、课表、校园卡、成绩、作业和校园服务集中在一个轻量的 iOS 应用中。项目不依赖第三方运行库，网络、会话和缓存均由 Apple 系统框架与项目内模块完成。
 
-- 统一身份认证 CAS 登录（RSA-PKCS1v15 加密 + 票据重定向，系统 Security 框架实现）
-- 「保持登录」：凭据经钥匙串加密保存，重启自动静默续登；会话过期自动重登并重试
-- 首页仪表盘：东大蓝建筑矢量线稿背景、校徽与「知行合一」题字、个性化问候 / 日期 / 教学周、下一节课与课表直达、校园卡、常用应用、今日课程、校园数据、办事动态与资讯
-- 课表：教学周网格（第1-2节…第9-10节真实作息）、周次切换、假期/考试周提示、本机自定义日程上格；连堂课程按日期合并为一个跨节次块，冲突课程分列
-- 服务大厅：按门户分类展示筛选入口与数量，分类按应用数排序；支持分类与关键词联合筛选、重置、空结果跨分类查找，应用网格适配屏幕宽度与系统字号
-- 成绩：教务系统真实数据（CASTGC → jwapp 会话），全部学期、GPA / 加权平均分 / 学分统计、五级制换算；原生接口失败时可打开教务网页完成认证并同步回应用，部分学期失败保留成功结果
-- 校园卡：一卡通余额 / 按自然月流水（图表 + 明细，单月最多 10 页）/ 网费（余额 + 流量）/ 电费（房间码本机保存），校外自动经 WebVPN
-- 校园浏览器：液态玻璃独立返回圆钮与右侧短胶囊（分享 / 停止或刷新 / Safari）、当前页面标题和地址、前进 / 后退 / 刷新 / 停止、回入口、查找、缩放、桌面版切换、分享 / 复制当前链接、Safari、PDF 导出、附件下载与系统分享、网页弹窗和失败重试；使用当前账号的临时 WebKit 会话
-- 服务大厅智慧搜索：门户热搜词 + 本地即时过滤 + 一键跳转智搜平台全校搜索（SSO 免登录）
-- 液态玻璃：iOS 26+ 使用系统 `glassEffect`，低版本回退系统材质；东大蓝主题与校徽 / 「知行合一」题字标识
+## 产品预览
 
-- 网页登录同样支持保持登录：Cookie（含路径、HttpOnly、有效期）、真实浏览器 UA 和资料保存在本机钥匙串，重启优先恢复，无需保存网页登录密码；退出登录会清除这份会话。断网或门户临时拦截时保留已保存状态，明确过期时重新认证。
-- 首页建筑卡片可直接点击打开 e码通，沿用 Flutter 的入口选择，保持原有图案、文字与布局。
+> 下方图片来自项目资源和 iPhone 尺寸 UI 验证流程。每次构建都会在 Actions 产物中生成首页、课表、服务、学习和浏览器截图；打开最近一次 workflow 的 **Artifacts → NEU-Lumen-ui-preview** 即可查看完整演示集。
 
-### 课表、系统日历与个性化入口
+<p align="center">
+  <img src="NEU-Lumen/Assets.xcassets/NEUEmblem.imageset/emblem.png" width="110" alt="东北大学校徽" />
+  <img src="NEU-Lumen/Assets.xcassets/FutureTechnologyEmblem.imageset/emblem.png" width="110" alt="未来技术学院院徽" />
+  <img src="NEU-Lumen/Assets.xcassets/AquaCore.imageset/avatar.png" width="110" alt="NEU-AquaCore 组织头像" />
+</p>
 
-- 课表左上角「课表设置 → 节假日与调课」可启用中国节假日自动休息。内置 2026 年国务院放假安排，并从 [holiday-cn](https://github.com/NateScarlet/holiday-cn) 按年更新、校验和缓存；未知年份不推测放假。普通课程在休息日隐藏，名称中可识别的考试与本机日程保留。补班日只作标注，学校停课、保留原课表或「当天改上某个具体日期的课」可以按通知覆盖。首页与系统导出使用同样的有效课表。
-- 「课表设置 → 日历与提醒事项」分别申请 iOS 完全访问权限；选择来源后，本周系统日程和有截止日期的未完成提醒显示在课表下方。日历日程可通过系统详情页编辑，提醒事项可直接勾选完成；切回应用或系统日程变更后刷新。学校门户数据不会被系统编辑回写。
-- 当前周课表可手动同步到应用专用的「NEU-Lumen 课表」日历、提醒清单，支持课前提醒。重复同步按条目标识更新本周内容、清理本应用已停课的条目，保留已有提醒的完成状态；不会处理其它日历的条目。不同账号的专用清单与来源选择独立，未成功加载完整周课表时禁止导出。课表或调课发生变化后需重新同步；退出登录不删除系统中已导出的条目。
-- 首页「常用应用 → 编辑」与服务大厅「管理收藏」共用一份按账号保存的有序收藏。服务卡片右上角星标可快速收藏/取消，管理页支持拖动排序、移除、恢复默认；首页显示前 8 项，服务大厅可筛选全部收藏。
-- 「走进东大」的文化卡片、官网和校史入口位于「我的」。
+- **应用内 Live Activity**：顶部灵动岛可展开，展示下一节课、校园卡余额或自定义内容。
+- **应用外 Live Activity**：进入后台后由系统接管，显示在锁屏和支持灵动岛的 iPhone 上。
+- **学院身份**：我的页面显示对应学院院徽；未来技术学院使用学院提供的正式院徽图片。
+- **海洋之心彩蛋**：连续点击「走进东大」标题三次，查看团队致意并进入 [NEU-AquaCore](https://github.com/NEU-AquaCore)。
 
-一卡通表单解析支持单/双引号、无引号属性、大小写属性名与 HTML 实体，并正确读取 ASP.NET 隐藏回发字段；认证顺序参考 [nidong 的 client.rs](https://github.com/sapphire-xu/nidong/blob/main/src-tauri/src/client.rs)：CAS 换票 → 提交一卡通 SSO → 携带目标会话读取余额。
+## 功能
 
-## 目录结构
+### 校园信息
 
-```text
-NEU-Lumen/
-├── App/          应用入口、根路由与标签栏
-├── Components/   可复用的纯 SwiftUI 组件（玻璃卡片、远程图片、状态视图）
-├── Core/
-│   ├── Models/       门户 / 课表 / 成绩数据模型
-│   ├── Networking/   HTTP、Cookie 罐、CAS RSA 加密、WebVPN 网关编码与门户 API
-│   ├── Persistence/  钥匙串凭据与本机日程持久化
-│   ├── Services/     会话状态机、业务仓储与学期模型
-│   └── Support/      容错 JSON 取值与日期解析工具
-└── Features/     按产品功能拆分的页面
-```
+- CAS 统一身份认证，支持校内直连与校外 WebVPN。
+- 首页仪表盘：问候、教学周、下一节课、校园卡、常用服务和校园资讯。
+- 课表网格：周次切换、连堂合并、冲突分列、自定义日程、节假日与调课。
+- 成绩：学期成绩、GPA、加权平均分、学分统计和教务网页同步。
+- 校园卡：余额、月度流水、网费和电费。
 
-视图只负责展示和局部交互；网络请求集中在 `PortalClient`，登录状态集中在 `SessionStore`，
-业务数据集中在 `PortalRepository`（与 Hanairo 的分层一致）。
+### 学习与作业
 
-## 构建
+- NEUCSECG、慕课、学习通分别展示课程、作业、截止日期和进度。
+- 平台 Cookie 按校园账号隔离并写入系统钥匙串；应用重启后自动恢复。
+- NEUCSECG 入口会自动完成「校园统一登录」按钮点击，再进入平台。
+- 作业数据另存为账号隔离缓存；退出登录时一并清理学习平台会话。
 
-### 云端构建（推荐）
+### Live Activity
 
-GitHub Actions 会在 main 分支、Pull Request、`v*` 标签和手动触发时自动构建未签名 IPA
-（Actions 页 → 对应 run → Artifacts 下载）；同时运行分类、课表、成绩解析、Cookie 与网页同步回归检查，并生成首页深浅色、课表、服务、成绩和浏览器截图。截图使用临时模拟器夹具，发布 IPA 不包含测试数据入口；打 `v*` 标签会自动创建 GitHub Release 并附 IPA。
+Live Activity 的配置入口是 **我的 → 配置应用外灵动岛**：
 
-### 每夜构建
+1. 选择下一节课、校园卡余额或自定义文字。
+2. 保持「显示应用内与锁屏 Live Activity」开启。
+3. 回到首页后，应用内顶部显示同款灵动岛；切到后台后由系统显示锁屏/系统灵动岛。
 
-北京时间每日 **03:17** 自动构建 main，推送 main 也会立即构建。回归、IPA 构建与模拟器检查全部通过后，更新固定的 [Nightly 预发布下载页](https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly)，其中的 `NEU-Lumen-iOS-unsigned.ipa` 始终对应最近一次通过检查的构建。Nightly 不替代正式版本；Actions 产物和截图另保留 14 天。定时由 GitHub Actions 调度，实际启动时间可能延后。
+系统设置中如果关闭了 NEU-Lumen 的「实时活动」，应用会保留应用内显示，但系统不会显示应用外 Live Activity。
 
-### 本地构建（需要 macOS + Xcode 16+）
+## 构建与下载
+
+### Nightly
+
+[打开 Nightly 预发布页](https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly) 下载最近一次通过检查的未签名 IPA。推送到 `main` 会触发构建；每日北京时间约 03:17 也会自动构建。
+
+未签名 IPA 需要使用 Sideloadly、AltStore 或开发者证书签名后安装。
+
+### 本地构建
+
+需要 macOS 与 Xcode 16+：
 
 ```bash
 bash build_ios_unsigned.sh
-# 产物：build/NEU-Lumen-iOS-unsigned.ipa
+# build/NEU-Lumen-iOS-unsigned.ipa
 ```
 
-使用 Xcode 打开 `NEU-Lumen.xcodeproj` 运行 `NEU-Lumen` Scheme 也可以（最低支持 iOS 17.0）。
+也可以用 Xcode 打开 `NEU-Lumen.xcodeproj`，运行 `NEU-Lumen` scheme。最低支持 iOS 17.0；Live Activity 需要系统允许实时活动，系统灵动岛需要支持该硬件的 iPhone。
 
-## 安装未签名 IPA 到 iPhone（任选其一）
+## 项目结构
 
-| 方式 | 签名 | 有效期 |
-| --- | --- | --- |
-| Sideloadly / AltStore（Windows 可用）+ 个人 Apple ID | 免费 | 7 天，到期重签 |
-| 苹果开发者账号（$99/年）+ 证书 | 付费 | 1 年 |
-| TrollStore（特定 iOS 版本） | 永久 | 永久 |
+```text
+NEU-Lumen/
+├── App/          应用入口、主题、路由和标签栏
+├── Components/   玻璃卡片、学院徽章等通用组件
+├── Core/
+│   ├── Models/       课表、门户、成绩、作业和校园卡模型
+│   ├── Networking/   HTTP、CAS、WebVPN、Cookie 和网页读取
+│   ├── Persistence/  钥匙串、网页登录会话和本地缓存
+│   └── Services/     SessionStore、PortalRepository、Live Activity
+├── Features/     首页、课表、服务、学习、我的和网页浏览器
+└── NEU-LumenLiveActivity/  锁屏与系统灵动岛 Widget Extension
+```
 
-## 校外访问（WebVPN）
+核心职责保持分离：`SessionStore` 管理账号与会话，`PortalRepository` 管理业务数据，`PortalBrowser` 负责网页认证和平台同步，`DynamicIslandActivityManager` 管理 Live Activity 生命周期。
 
-启动请求前探测校园网（ecard:80 / jwxt:443 任一可达，结果缓存 10 分钟）：
+## CI 工作流
 
-- 校园网内直连全部系统；
-- 校外对 `ecard` / `jwxt` 等校园网专属主机自动改写为 Wengine 网关地址
-  （AES-128-CFB128、IV=密钥，密钥来自学校 WebVPN 前端，写在 `Core/Networking/WebVPN.swift`），
-  票据用公网一号通的 CASTGC 经 `webvpn.neu.edu.cn/login?cas_login=true` 换取；
-- 网关模式下 `personal` / `portal` 的门户首页与 JSON 接口也统一经过网关；
-  原生认证沿用当前账号的公网 CAS 或 WebVPN 内 CAS 会话，缴费 API 保持公网 HTTPS 入口。
+`.github/workflows/build-unsigned.yml` 会依次执行：
 
-浏览器方式登录对齐 [NEUPortal 修复版 `1e4c787`](https://github.com/ZHT0711/neu-portal/commit/1e4c787)：
-在显示认证页前检测校内/校外；校外直接从 WebVPN 认证入口开始，在同一 WKWebView 内完成认证并进入代理后的一号通门户，避免先登录公网 CAS 再要求登录代理域的 CAS。网络判断不准时，可从网页登录右上角「登录入口」选择校内直连或校外 WebVPN。等待 `userInfoDSL`
-填充后，把个人资料、真实 WebKit UA 和完整 Cookie 一起交给原生客户端。网关首页不再被当作
-门户首页，登录失败后可以在面板中继续重试。已有登录会话时，资料暂未同步不会阻断进入应用，
-可在「我的」刷新资料。服务目录使用同版公共入口快照与账号缓存合并更新，防止公开短列表
-覆盖 VPN 等入口；显示入口不代表账号拥有该服务的访问权限。
+- Swift / Node / Python 解析回归测试
+- 原生 Release unsigned IPA 构建
+- 模拟器 UI 与浏览器检查（模拟器不可用时生成诊断并跳过，不阻塞每日构建）
+- 编译日志告警检查
+- IPA 与 UI 截图产物上传
 
-识别到网关登录会话后，校外默认使用 WebVPN；Wi-Fi/蜂窝网络变化或应用回到前台时重新探测路线，同时保留直连与网关两套 Cookie：首页、常用应用、服务大厅、门户解析入口及网页内的主页面/新窗口链接，统一转换校园域名和校园 IP 的 WebVPN 地址，保留端口、编码路径、查询与 SPA 锚点；已有网关链接不重复转换。外部网站和设备回环地址维持原链接。已有公网 CAS 会话的原生登录用户，应用内认证跳转复用公网会话；校外浏览器登录用户则复用代理域会话，原生教务接口也使用同一认证域。学校要求的图形码、短信或设备验证仍在学校页面内完成。
-
-## 性能设计
-
-教务与一卡通请求流程参考 [泥洞的实现（607c8fd）](https://github.com/sapphire-xu/nidong/blob/607c8fd2f53df0e373136786a44c2f7cc407fab3/src-tauri/src/client.rs)：
-显式 CAS 换票、串行完成认证事务、保留目标服务 Cookie，并使用学生首页 Referer 与 `Fetch-Api`。
-校园网探测接受正常的 302 响应；一卡通先提交 SSO 表单，再读取余额页面。首页不再用演示金额替代
-取数失败，余额掩码与解析失败也不会显示为零；已取得的真实余额有同步时间，失败时明确提示保留旧结果。
-一卡通的 HTTP 接口使用 `ecard.neu.edu.cn` 专属 ATS 例外；网页 HTTP 开关不会代替原生 URLSession 的例外。
-
-- 单个 `URLSession` 复用连接，重定向手动逐跳跟随、吸收每一跳 Set-Cookie（对齐 CAS 跨域流程）
-- 首页五个业务接口 `async let` 并行拉取，单接口失败不阻塞其它区块，失败自动回退离线演示数据并明确标注
-- 周课表按教学周缓存，同一周切换不重复请求教务；成绩整表缓存，仅手动/下拉刷新
-- 正则与 `DateFormatter` 静态编译/创建一次；列表全部 Lazy 容器；课程块颜色由 FNV-1a 稳定哈希生成
-- JSON 解析单次 `JSONSerialization` 完成；图片走 `AsyncImage` + 系统 URLCache
-
-## 已知限制
-
-- 统一认证的二次短信验证未实现：如触发设备二次认证，请先在网页端完成设备信任绑定再登录
-  （与 NEUPortal 行为一致）
-- 统一认证的二次短信验证未实现：如触发设备二次认证，请先在网页端完成设备信任绑定再登录
-  （与 NEUPortal 行为一致）
-- WebVPN 网关密钥来自学校前端，学校更换后需同步更新 `WebVPN.key`
-- 电费接口 23:00–6:00 常不可达，失败时请白天再试
+模拟器验证使用临时数据夹具，不会把测试账号或测试数据打进发布包。
 
 ## 隐私与安全
 
-- 密码默认只参与本次认证；勾选「保持登录」后经系统钥匙串加密保存在本机，
-  仅用于静默续登，**不上传、不打日志**，退出登录即清除
-- 「记住账号」仅保存学号
-- 本项目为个人工具，与东北大学官方无关；Bundle ID `edu.neu.lumen` 为非正式标识，
-  请勿冒充学校应用；请遵守学校相关使用规定
+- 密码只用于认证；勾选保持登录后，经系统钥匙串加密保存。
+- 网页 Cookie、作业缓存和账号数据按学号隔离，均保存在本机。
+- 不上传密码、不记录认证日志；退出登录会清除对应会话。
+- 本项目是第三方个人工具，与东北大学官方无关。
 
-## 网络切换、校园卡与首页内容
+## 相关项目
 
-- 登录会话同时保留校园网直连与校外 WebVPN 的 Cookie，账号相同的重新认证会合并两套会话，切换账号或主动退出才清除旧账号；不会延长学校设置的票据有效期。网络切换优先复用 CAS 续登，不因一次路由登录页/403 自动回到登录界面；「我的 → 更新网页登录」可在需要时补齐当前网络的认证。并发接口共用一次恢复，旧请求不能在退出后重新写回 Cookie。
-- 一卡通原生请求若被站点拒绝，自动改用与浏览器相同的 WebKit 会话读取真实余额和月流水（保留 ASP.NET 状态与最多十页分页）。校内不因 403 误切到仅限校外的 WebVPN。也可从校园卡右上角打开网页认证，再「同步校园卡到应用」。
-- 校园数据卡片使用详情链接或对应服务入口；办事动态支持移动/桌面链接回退及相对地址。未提供可用细节链接的项目进入学校门户查看，不再静默忽略点击。
-- 资讯按需获取文章正文第一张配图，支持常见正文容器、相对地址和懒加载，跳过页头/导航图片；正文不可取时使用接口封面，无图文章显示简洁占位。图片按账号在内存缓存，最多三个请求并发。
+- [NEU-AquaCore](https://github.com/NEU-AquaCore)
+- [NEUPortal](https://github.com/ZHT0711)
+- [holiday-cn](https://github.com/NateScarlet/holiday-cn)
+
+## 许可证与免责声明
+
+项目中的学校名称、校徽、学院徽章和组织头像仅用于校园工具界面展示。请遵守学校相关服务的使用规定，不要将本项目冒充官方应用。
