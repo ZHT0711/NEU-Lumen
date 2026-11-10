@@ -461,7 +461,10 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         updateState()
-        Task { await syncCookies() }
+        Task {
+            await syncCookies()
+            await clickCampusUnifiedLoginIfNeeded()
+        }
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { show(error) }
@@ -480,6 +483,18 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
             client.replaceLearningCookies(cookies, platform: learningPlatform)
             session?.persistLearningSession()
         } else { client.absorbBrowserCookies(cookies) }
+    }
+
+    /// NEUCSECG 的入口页会先显示一个“校园统一登录”按钮，再跳转到统一认证。
+    /// 自动点击只限于该平台和该按钮文本，避免影响其他校园网页的交互。
+    private func clickCampusUnifiedLoginIfNeeded() async {
+        guard let current = webView.url,
+              (WebVPN.unwrap(current) ?? current).host == "neucsecg.neu.edu.cn" else { return }
+        _ = try? await webView.callAsyncJavaScript(#"""
+        const nodes = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+        const target = nodes.find(node => (node.innerText || node.value || '').replace(/\s+/g, '').includes('校园统一登录'));
+        if (target) { target.click(); true } else { false }
+        """#, arguments: [:], in: nil, contentWorld: .page)
     }
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {

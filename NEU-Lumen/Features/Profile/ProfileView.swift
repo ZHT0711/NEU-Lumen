@@ -11,6 +11,8 @@ struct ProfileView: View {
     @State private var showWebLogin = false
     @State private var confirmLogout = false
     @State private var dynamicIslandStore = DynamicIslandStore()
+    @State private var easterEggTapCount = 0
+    @State private var showAquaCoreEasterEgg = false
 
     private var version: String {
         let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
@@ -20,7 +22,18 @@ struct ProfileView: View {
 
     private var campusExploreSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("走进东大", systemImage: "building.columns").font(.headline)
+            Button {
+                easterEggTapCount += 1
+                if easterEggTapCount >= 3 {
+                    easterEggTapCount = 0
+                    showAquaCoreEasterEgg = true
+                }
+            } label: {
+                Label("走进东大", systemImage: "building.columns")
+                    .font(.headline)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("连续点击三次发现彩蛋")
             Button {
                 path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
             } label: {
@@ -73,10 +86,7 @@ struct ProfileView: View {
             List {
                 Section {
                     HStack(spacing: 14) {
-                        Image("NEUEmblemDark")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 52, height: 52)
+                        CollegeEmblemView(department: environment.session.user?.department ?? "")
                         VStack(alignment: .leading, spacing: 4) {
                             Text(environment.session.user?.displayName ?? "未登录")
                                 .font(.headline)
@@ -194,6 +204,10 @@ struct ProfileView: View {
             .tracksTabBarScrolling()
             .sheet(isPresented: $showWebLogin) {
                 WebLoginSheet { await environment.session.completeWebLogin($0) }
+            }
+            .sheet(isPresented: $showAquaCoreEasterEgg) {
+                AquaCoreEasterEggView()
+                    .presentationDetents([.medium])
             }
             .navigationTitle("我的")
             .navigationDestination(for: AppDestination.self) { destination in
