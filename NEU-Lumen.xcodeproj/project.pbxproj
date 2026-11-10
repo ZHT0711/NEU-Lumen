@@ -151,7 +151,7 @@
 /* End PBXProject section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		A10000000000000000000014 /* Embed Live Activity */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = "$(CONTENTS_FOLDER_PATH)/PlugIns"; dstSubfolderSpec = 13; files = (A10000000000000000000013 /* Embed Live Activity */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000014 /* Embed Live Activity */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A10000000000000000000013 /* Embed Live Activity */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
