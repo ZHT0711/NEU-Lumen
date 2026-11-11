@@ -52,11 +52,26 @@ extension PortalRepository {
     }
 
     func seedUIValidation() {
-        loadedForSID = ""
+        loadedForSID = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         user = DemoData.user
         dataCards = DemoData.dataCards
         apps = DemoData.apps
-        favorites.activate(account: "", apps: apps)
+        appsLoaded = true
+        favorites.activate(account: loadedForSID ?? "", apps: apps)
+        cardBalance = CardBalance(balance: 66.50, subsidy: 7.50, status: "正常卡")
+        cardState = .loaded
+        cardUpdatedAt = Date()
+        netInfo = NetUsageInfo(balance: 25.00, monthBytes: 3 * 1024 * 1024 * 1024,
+            monthSeconds: 7200, monthTimes: 12, flowFromPortal: true)
+        netState = .loaded
+        electricInfo = ElectricInfo(unbound: true, remainKwh: nil, roomNo: nil, roomLabel: nil, lastReadAt: nil)
+        electricState = .loaded
+        cardBills = [
+            CardBill(time: Date(), timeText: "09:00", subject: "餐费", amount: -8.50, fee: 0, balanceAfter: 66.50, station: "第一食堂"),
+            CardBill(time: Date().addingTimeInterval(-86400), timeText: "12:10", subject: "餐费", amount: -12.00, fee: 0, balanceAfter: 75.00, station: "第二食堂")
+        ]
+        billsCache["\(billsYear)-\(billsMonth)"] = cardBills
+        billsState = .loaded
         news = DemoData.news.enumerated().map { index, item in
             NewsItem(id: item.id, title: item.title, date: item.date, category: item.category,
                 url: "http://127.0.0.1:8787/article.html?id=\(index)", picUrl: "")
@@ -103,6 +118,31 @@ extension PortalRepository {
         }
         weekCache[start] = items
         weekState = .loaded
+    }
+}
+''')
+# Screenshot-only fixture routing: never replace real app networking in the IPA,
+# and leave browser/session/ActivityKit integration checks on their real code paths.
+fixture_source = repository.read_text(encoding="utf-8")
+for signature in [
+    'func loadCardOverview() async {',
+    'func loadDisplayWeek(starting sunday: Date, force: Bool = false) async {',
+    'func refreshHome() async {',
+]:
+    if fixture_source.count(signature) != 1:
+        raise RuntimeError(f"Screenshot fixture hook changed: {signature}")
+    fixture_source = fixture_source.replace(signature, signature + '''
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) { return }
+''')
+repository.write_text(fixture_source, encoding="utf-8")
+session_source = destination / "NEU-Lumen/Core/Services/SessionStore.swift"
+with session_source.open("a", encoding="utf-8") as stream:
+    stream.write('''
+// Only in the disposable simulator screenshot copy; no authentication or persistence.
+extension SessionStore {
+    func seedScreenshotSession() {
+        user = DemoData.user
+        phase = .loggedIn
     }
 }
 ''')
@@ -160,6 +200,9 @@ struct UIValidationRoot: View {
             if ProcessInfo.processInfo.arguments.contains("--session-restore-check") {
                 runSessionPersistenceCheck(save: false)
                 return
+            }
+            if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) {
+                environment.session.seedScreenshotSession()
             }
             environment.repository.seedUIValidation()
             if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }

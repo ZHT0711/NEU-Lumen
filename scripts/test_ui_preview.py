@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -82,6 +84,22 @@ class UIPreviewTests(unittest.TestCase):
         (self.path / preview.MANIFEST).write_text(json.dumps(manifest))
         with patch.dict(os.environ, self.env), self.assertRaises(ValueError):
             preview.release_assets(self.path)
+
+    def test_screenshot_fixtures_are_disposable_and_loaded(self):
+        root = Path(__file__).resolve().parents[1]
+        destination = self.path / 'generated-project'
+        subprocess.run([sys.executable, str(root / 'scripts/prepare_ui_validation.py'), str(destination)], check=True, capture_output=True)
+        session = 'NEU-Lumen/Core/Services/SessionStore.swift'
+        repository = 'NEU-Lumen/Core/Services/PortalRepository.swift'
+        self.assertNotIn('seedScreenshotSession', (root / session).read_text())
+        self.assertNotIn('hasPrefix("--screen=")', (root / repository).read_text())
+        generated = (destination / repository).read_text()
+        self.assertEqual(generated.count('hasPrefix("--screen=")'), 3)
+        self.assertIn('cardBalance = CardBalance(balance: 66.50', generated)
+        self.assertIn('billsCache["\\(billsYear)-\\(billsMonth)"] = cardBills', generated)
+        self.assertIn('func seedScreenshotSession()', (destination / session).read_text())
+        app = (destination / 'NEU-Lumen/App/NEULumenApp.swift').read_text()
+        self.assertLess(app.index('environment.session.seedScreenshotSession()'), app.index('environment.repository.seedUIValidation()'))
 
     def test_readme_and_workflow_contract(self):
         root = Path(__file__).resolve().parents[1]
