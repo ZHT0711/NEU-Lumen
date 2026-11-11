@@ -104,6 +104,7 @@ jobs:
           "${RUNNER_TEMP}/service-catalog-tests"
           node Tests/AcademicBridge/check.mjs
           node Tests/Learning/check.mjs
+          node Tests/Learning/cg-login.mjs
           node Tests/OffCampusLogin/document.mjs
           python3 -m unittest discover -s scripts -p 'test_*.py'
 
@@ -160,20 +161,7 @@ jobs:
           retention-days: 14
 
       - name: Validate simulator UI and browser behavior
-        # A hosted runner can occasionally leave CoreSimulator in a data-migration
-        # state. The native build and parser tests remain authoritative; the script
-        # writes a diagnostic log and exits cleanly when the simulator itself is unavailable.
-        continue-on-error: true
         run: bash scripts/validate_ui.sh
-
-      - name: Preserve UI validation result
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/ui-preview
-          if [[ ! -f build/ui-preview/simulator-build.log ]]; then
-            echo "UI validation did not produce a simulator build log; see the step log for the hosted-runner failure." > build/ui-preview/simulator-build.log
           fi
 
       - name: Require warning-free compiler logs

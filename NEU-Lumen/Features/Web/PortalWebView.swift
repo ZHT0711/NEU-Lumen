@@ -343,6 +343,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     @ObservationIgnored private var clientEpoch: UUID?
     @ObservationIgnored private var entryURL: URL?
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var attemptedCGLogin = false
     @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
 
     override init() {
@@ -485,16 +486,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         } else { client.absorbBrowserCookies(cookies) }
     }
 
-    /// NEUCSECG 的入口页会先显示一个“校园统一登录”按钮，再跳转到统一认证。
-    /// 自动点击只限于该平台和该按钮文本，避免影响其他校园网页的交互。
+    /// At most one automatic sign-in attempt per browser, including redirect failures.
     private func clickCampusUnifiedLoginIfNeeded() async {
-        guard let current = webView.url,
+        guard !attemptedCGLogin, let current = webView.url,
               (WebVPN.unwrap(current) ?? current).host == "neucsecg.neu.edu.cn" else { return }
-        _ = try? await webView.callAsyncJavaScript(#"""
-        const nodes = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
-        const target = nodes.find(node => (node.innerText || node.value || '').replace(/\s+/g, '').includes('校园统一登录'));
-        if (target) { target.click(); true } else { false }
-        """#, arguments: [:], in: nil, contentWorld: .page)
+        attemptedCGLogin = true
+        _ = try? await webView.callAsyncJavaScript(CGAssignmentReport.campusLoginScript,
+            arguments: [:], in: nil, contentWorld: .page)
     }
 
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {

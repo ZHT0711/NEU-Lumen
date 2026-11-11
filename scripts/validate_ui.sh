@@ -7,13 +7,13 @@ mkdir -p "$OUTPUT"
 python3 "$ROOT/scripts/prepare_ui_validation.py" "$PREVIEW"
 SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next((v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")), ""))')"
 if [[ -z "$SIM_ID" ]]; then
-  echo "UI validation skipped: no available iPhone simulator" | tee "$OUTPUT/simulator-build.log"
-  exit 0
+  echo "No available iPhone simulator" >&2
+  exit 1
 fi
 xcrun simctl boot "$SIM_ID" || true
 if ! xcrun simctl bootstatus "$SIM_ID" -b; then
-  echo "UI validation skipped: simulator failed to become ready" | tee "$OUTPUT/simulator-build.log"
-  exit 0
+  echo "Simulator failed to become ready" >&2
+  exit 1
 fi
 # Simulator securityd reads the Mach-O simulated-entitlements section. Keep
 # the app unsigned and embed that identity at link time, as simulator builds do.
@@ -30,7 +30,9 @@ xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
   -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
   > "$OUTPUT/simulator-build.log" 2>&1
-xcrun simctl install "$SIM_ID" "$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
+APP_PATH="$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
+python3 "$ROOT/scripts/check_live_activity_bundle.py" "$APP_PATH"
+xcrun simctl install "$SIM_ID" "$APP_PATH"
 python3 "$ROOT/scripts/ui_fixture_server.py" "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
@@ -41,6 +43,7 @@ for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profil
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done
+
 xcrun simctl ui "$SIM_ID" appearance dark
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=home
 sleep 3
@@ -71,3 +74,16 @@ for STAGE in save restore; do
   cat "$OUTPUT/session-${STAGE}.txt"
   grep -q "^PASS:" "$OUTPUT/session-${STAGE}.txt"
 done
+
+xcrun simctl ui "$SIM_ID" appearance light
+xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --live-activity-checks
+for _ in $(seq 1 90); do
+  if [[ -f "$CONTAINER/Documents/live-activity-checks.txt" ]]; then break; fi
+  sleep 1
+done
+cp "$CONTAINER/Documents/live-activity-checks.txt" "$OUTPUT/live-activity-checks.txt"
+cat "$OUTPUT/live-activity-checks.txt"
+grep -q "^PASS:" "$OUTPUT/live-activity-checks.txt"
+xcrun simctl launch "$SIM_ID" com.apple.Preferences
+sleep 3
+xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"

@@ -26,8 +26,15 @@
 	<true/>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>edu.neu.lumen.activity</string>
+			<key>CFBundleURLSchemes</key>
+			<array><string>neulumen</string></array>
+		</dict>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>

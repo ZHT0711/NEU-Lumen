@@ -1,66 +1,166 @@
-import Foundation
 import ActivityKit
+import Foundation
+import Observation
 
-/// 管理锁屏和系统灵动岛上的 Live Activity 生命周期。
+/// ActivityKit operations are serialized, including logout and account switches.
 @MainActor
+@Observable
 final class DynamicIslandActivityManager {
-    static let shared = DynamicIslandActivityManager()
-    private var activity: Activity<NEULumenActivityAttributes>?
+    struct Request: Equatable {
+        var enabled: Bool
+        var accountID: String?
+        var campus: String
+        var state: NEULumenActivityAttributes.ContentState?
+        var isForeground: Bool
+        var refreshDate: Date
+        var contentReady = true
+        var contentKind: String?
+    }
+
+    private(set) var isRunning = false
+    private(set) var status = "尚未开启"
     private(set) var lastError: String?
 
-    private init() {
-        let existing = Activity<NEULumenActivityAttributes>.activities
-        activity = existing.first
-        for orphan in existing.dropFirst() {
-            Task { await orphan.end(nil, dismissalPolicy: .immediate) }
+    @ObservationIgnored private var activity: Activity<NEULumenActivityAttributes>?
+    @ObservationIgnored private var stateTask: Task<Void, Never>?
+    @ObservationIgnored private var worker: Task<Void, Never>?
+    @ObservationIgnored private var pendingRequest: Request?
+    @ObservationIgnored private var latestRequest: Request?
+    @ObservationIgnored private var accountID: String?
+    @ObservationIgnored private var automaticStartBlocked = false
+
+    func synchronize(_ request: Request) {
+        latestRequest = request
+        pendingRequest = request
+        guard worker == nil else { return }
+        worker = Task {
+            while let request = pendingRequest {
+                pendingRequest = nil
+                await apply(request)
+            }
+            worker = nil
         }
     }
 
-    func startOrUpdate(store: DynamicIslandStore, repository: PortalRepository) {
+    func restart() {
+        guard let request = latestRequest, request.isForeground else { return }
+        automaticStartBlocked = false
+        lastError = nil
+        synchronize(request)
+    }
+
+    private func apply(_ request: Request) async {
+        if accountID != request.accountID {
+            if accountID != nil { await endAll() }
+            accountID = request.accountID
+            automaticStartBlocked = false
+            lastError = nil
+        }
+        guard request.enabled, request.accountID != nil else {
+            await endAll()
+            automaticStartBlocked = false
+            lastError = nil
+            status = request.enabled ? "等待登录" : "已关闭"
+            return
+        }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            lastError = "系统设置中未允许 NEU-Lumen 使用实时活动"
+            await endAll()
+            status = "系统未允许实时活动"
+            lastError = "请在系统设置中允许 NEU-Lumen 使用实时活动。"
             return
         }
-        let state = makeState(store: store, repository: repository)
-        let content = ActivityContent(state: state, staleDate: Date().addingTimeInterval(60 * 30))
-        if activity == nil { activity = Activity<NEULumenActivityAttributes>.activities.first }
-        if let activity {
-            Task {
-                await activity.update(content)
-                self.lastError = nil
+        // Restore only active activities belonging to this account. Old schemas
+        // have no owner and are ended before any new account data is published.
+        let existing = Activity<NEULumenActivityAttributes>.activities
+        if activity == nil {
+            if let restored = existing.first(where: {
+                $0.attributes.accountID == request.accountID &&
+                ($0.activityState == .active || $0.activityState == .stale)
+            }) {
+                observe(restored)
             }
+        }
+        for orphan in existing where orphan.id != activity?.id {
+            await orphan.end(nil, dismissalPolicy: .immediate)
+        }
+        // An awaited operation may have allowed a newer logout/configuration in.
+        guard pendingRequest == nil else { return }
+
+        guard var state = request.state else {
+            if request.contentReady || activity?.content.state.kind != request.contentKind {
+                await endAll()
+            }
+            status = isRunning ? "等待最新数据" : "等待可用的课表或校园卡数据"
             return
         }
-        let attributes = NEULumenActivityAttributes(campus: repository.campus.title)
+
+        if let activity {
+            var previous = activity.content.state
+            if state.updatedAt == .distantPast { previous.updatedAt = .distantPast }
+            guard previous != state else { return }
+            if state.updatedAt == .distantPast { state.updatedAt = request.refreshDate }
+            await activity.update(content(for: state))
+            lastError = nil
+            return
+        }
+        guard request.isForeground, !automaticStartBlocked else { return }
+        if state.updatedAt == .distantPast { state.updatedAt = request.refreshDate }
         do {
-            activity = try Activity.request(attributes: attributes, content: content, pushType: nil)
+            let attributes = NEULumenActivityAttributes(campus: request.campus, accountID: request.accountID)
+            let started = try Activity.request(attributes: attributes,
+                content: content(for: state), pushType: nil)
+            observe(started)
             lastError = nil
         } catch {
+            automaticStartBlocked = true
+            status = "开启失败"
             lastError = error.localizedDescription
         }
     }
 
-    func end() {
-        guard let activity else { return }
-        Task { await activity.end(nil, dismissalPolicy: .immediate) }
-        self.activity = nil
+    private func content(for state: NEULumenActivityAttributes.ContentState)
+        -> ActivityContent<NEULumenActivityAttributes.ContentState> {
+        // Custom text remains valid until the system ends the activity.
+        let staleDate = state.kind == "custom" ? nil :
+            (state.endDate ?? state.updatedAt.addingTimeInterval(30 * 60))
+        return ActivityContent(state: state, staleDate: staleDate, relevanceScore: 50)
     }
 
-    private func makeState(store: DynamicIslandStore, repository: PortalRepository) -> NEULumenActivityAttributes.ContentState {
-        switch store.kind {
-        case .nextCourse:
-            let next = repository.nextCourse()
-            return .init(title: next?.slot.name ?? "暂无课程",
-                         subtitle: next.map { "\(Semester.hm($0.slot.startMinutes)) · \($0.slot.room.isEmpty ? "地点待定" : $0.slot.room)" } ?? "去配置页选择自定义内容",
-                         value: next.map { Semester.hm($0.slot.startMinutes) } ?? "",
-                         kind: store.kind.rawValue, updatedAt: Date())
-        case .cardBalance:
-            let value = repository.cardSummaryText.map { "¥\($0)" } ?? "未同步"
-            return .init(title: "校园卡余额", subtitle: "当前可用余额 \(value)", value: value,
-                         kind: store.kind.rawValue, updatedAt: Date())
-        case .custom:
-            return .init(title: store.customTitle.isEmpty ? "自定义内容" : store.customTitle,
-                         subtitle: store.customSubtitle, value: "", kind: store.kind.rawValue, updatedAt: Date())
+    private func observe(_ activity: Activity<NEULumenActivityAttributes>) {
+        stateTask?.cancel()
+        self.activity = activity
+        isRunning = true
+        status = activity.activityState == .stale ? "内容待更新" : "正在显示"
+        stateTask = Task { [weak self] in
+            for await state in activity.activityStateUpdates {
+                guard let self, !Task.isCancelled, self.activity?.id == activity.id else { return }
+                switch state {
+                case .active:
+                    self.status = "正在显示"
+                case .stale:
+                    self.status = "内容待更新"
+                case .ended, .dismissed:
+                    self.activity = nil
+                    self.isRunning = false
+                    self.automaticStartBlocked = true
+                    self.status = "已结束，可手动重新开启"
+                    return
+                @unknown default:
+                    break
+                }
+            }
         }
+    }
+
+    private func endAll() async {
+        stateTask?.cancel()
+        stateTask = nil
+        var existing = Activity<NEULumenActivityAttributes>.activities
+        if let activity, !existing.contains(where: { $0.id == activity.id }) {
+            existing.append(activity)
+        }
+        activity = nil
+        isRunning = false
+        for activity in existing { await activity.end(nil, dismissalPolicy: .immediate) }
     }
 }

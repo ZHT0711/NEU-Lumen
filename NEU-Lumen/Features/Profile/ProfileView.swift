@@ -10,7 +10,6 @@ struct ProfileView: View {
     }
     @State private var showWebLogin = false
     @State private var confirmLogout = false
-    @State private var easterEggTapCount = 0
     @State private var showAquaCoreEasterEgg = false
 
     private var version: String {
@@ -21,18 +20,10 @@ struct ProfileView: View {
 
     private var campusExploreSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button {
-                easterEggTapCount += 1
-                if easterEggTapCount >= 3 {
-                    easterEggTapCount = 0
-                    showAquaCoreEasterEgg = true
-                }
-            } label: {
-                Label("走进东大", systemImage: "building.columns")
-                    .font(.headline)
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("连续点击三次发现彩蛋")
+            Label("走进东大", systemImage: "building.columns")
+                .font(.headline)
+                .onTapGesture(count: 3) { showAquaCoreEasterEgg = true }
+                .accessibilityAction(named: Text("海洋之心彩蛋")) { showAquaCoreEasterEgg = true }
             Button {
                 path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
             } label: {
@@ -136,14 +127,12 @@ struct ProfileView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
-                Section("灵动岛") {
+                Section("实时活动") {
                     NavigationLink {
-                        DynamicIslandSettingsView(store: environment.dynamicIslandStore)
+                        LiveActivitySettingsView()
                     } label: {
-                        Label("配置应用外灵动岛", systemImage: "circle.dotted.and.circle")
+                        Label("锁屏与灵动岛", systemImage: "circle.dotted.and.circle")
                     }
-                    Text("支持下一节课、校园卡余额和自定义文字，并同步到锁屏与系统灵动岛。")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("会话") {

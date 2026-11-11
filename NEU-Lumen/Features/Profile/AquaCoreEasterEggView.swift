@@ -6,36 +6,35 @@ struct AquaCoreEasterEggView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 18) {
-                ZStack {
-                    Circle()
-                        .fill(.white.opacity(0.14))
-                        .frame(width: 108, height: 108)
+            ScrollView {
+                VStack(spacing: 18) {
                     Image("AquaCore")
                         .resizable()
                         .scaledToFit()
+                        .frame(width: 96, height: 96)
                         .clipShape(Circle())
-                        .padding(9)
+                        .accessibilityLabel("AquaCore 团队头像")
+                    Text("欢迎加入海洋之心团队")
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                    Text("让热爱汇成浪潮，一起做有趣、有用的校园项目。")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white.opacity(0.82))
+                    Link(destination: URL(string: "https://github.com/NEU-AquaCore")!) {
+                        Label("探索 AquaCore", systemImage: "arrow.up.right")
+                            .font(.headline)
+                            .foregroundStyle(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(.white, in: Capsule())
+                    }
+                    .padding(.horizontal, 28)
                 }
-                Text("欢迎加入海洋之心团队")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Text("让热爱汇成浪潮，一起做有趣、有用的校园项目。")
-                    .font(.subheadline)
-                    .multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.82))
-                Link(destination: URL(string: "https://github.com/NEU-AquaCore")!) {
-                    Label("探索 AquaCore", systemImage: "arrow.up.right")
-                        .font(.headline)
-                        .foregroundStyle(.blue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(.white, in: Capsule())
-                }
-                .padding(.horizontal, 28)
+                .frame(maxWidth: .infinity)
+                .padding(24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(24)
             .background {
                 LinearGradient(
                     colors: [Color(red: 0.03, green: 0.27, blue: 0.45), Color(red: 0.04, green: 0.58, blue: 0.70)],

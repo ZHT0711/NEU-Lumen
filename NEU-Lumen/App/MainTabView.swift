@@ -13,14 +13,22 @@ struct MainTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .home
     @State private var scrollActivity = TabBarScrollActivity()
+    @State private var showActivitySettings = false
+    @State private var showActivityCard = false
 
     var body: some View {
         tabs
-            .overlay(alignment: .top) {
-                DynamicIslandView()
-                    .padding(.top, 8)
-                    .padding(.horizontal, 16)
-                    .zIndex(10)
+            .onOpenURL { url in
+                guard url.scheme == "neulumen" else { return }
+                showActivityCard = url.host == "activity" && url.path == "/card"
+                showActivitySettings = url.host == "dynamic-island" || url.path == "/settings"
+                if url.host == "activity", url.path == "/course" { selection = .schedule }
+            }
+            .sheet(isPresented: $showActivitySettings) {
+                NavigationStack { LiveActivitySettingsView() }
+            }
+            .sheet(isPresented: $showActivityCard) {
+                NavigationStack { CardView() }
             }
             .environment(\.tabBarScrollActivity, scrollActivity)
             .modifier(ScrollingTabBarStyle(activity: scrollActivity))

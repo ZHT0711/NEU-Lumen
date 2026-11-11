@@ -746,6 +746,42 @@ final class PortalRepository {
         guard let balance = cardBalance else { return nil }
         return String(format: "%.2f", balance.balance)
     }
+
+    func liveActivityDataIsReady(for kind: DynamicIslandStore.ContentKind) -> Bool {
+        let sid = session.user?.sid.isEmpty == false ? session.user?.sid : session.user?.uid
+        guard let sid, !sid.isEmpty, loadedForSID == sid else { return false }
+        switch kind {
+        case .nextCourse: return weekCache[Semester.weekStart(forDay: Date())] != nil
+        case .cardBalance: return cardUpdatedAt != nil
+        case .custom: return true
+        }
+    }
+
+    /// Publish only data loaded for the currently authenticated account.
+    func liveActivityState(store: DynamicIslandStore) -> NEULumenActivityAttributes.ContentState? {
+        let sid = session.user?.sid.isEmpty == false ? session.user?.sid : session.user?.uid
+        guard let sid, !sid.isEmpty, loadedForSID == sid else { return nil }
+        switch store.kind {
+        case .nextCourse:
+            guard let next = nextCourse() else { return nil }
+            let day = Calendar.current.startOfDay(for: next.date)
+            let start = Calendar.current.date(byAdding: .minute, value: next.slot.startMinutes, to: day)
+            let end = Calendar.current.date(byAdding: .minute, value: next.slot.endMinutes, to: day)
+            return .init(title: String(next.slot.name.prefix(80)),
+                subtitle: String((next.slot.room.isEmpty ? "地点待定" : next.slot.room).prefix(160)),
+                value: Semester.hm(next.slot.startMinutes), kind: store.kind.rawValue,
+                updatedAt: .distantPast, startDate: start, endDate: end)
+        case .cardBalance:
+            guard let balance = cardSummaryText, let updatedAt = cardUpdatedAt else { return nil }
+            return .init(title: "校园卡余额", subtitle: "最近同步的可用余额", value: "¥\(balance)",
+                kind: store.kind.rawValue, updatedAt: updatedAt)
+        case .custom:
+            let title = store.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .init(title: String((title.isEmpty ? "东大提醒" : title).prefix(80)),
+                subtitle: String(store.customSubtitle.prefix(160)), value: "", kind: store.kind.rawValue,
+                updatedAt: .distantPast)
+        }
+    }
 }
 
 /// 组合根：App 根部创建并注入。
@@ -755,6 +791,7 @@ final class AppEnvironment {
     let session: SessionStore
     let repository: PortalRepository
     let dynamicIslandStore: DynamicIslandStore
+    let liveActivityManager = DynamicIslandActivityManager()
 
     init() {
         let store = SessionStore()

@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// 应用内灵动岛的展示配置。配置只保存显示偏好，不保存任何账号或校园数据。
+/// 系统实时活动的显示偏好，沿用已有配置键以兼容升级。
 @MainActor
 @Observable
 final class DynamicIslandStore {
@@ -42,7 +42,7 @@ final class DynamicIslandStore {
     var enabled = true { didSet { save() } }
     var kind: ContentKind = .nextCourse { didSet { save() } }
     var customTitle = "东大提醒" { didSet { save() } }
-    var customSubtitle = "自定义你的灵动岛内容" { didSet { save() } }
+    var customSubtitle = "自定义你的实时活动内容" { didSet { save() } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -58,7 +58,7 @@ final class DynamicIslandStore {
         enabled = true
         kind = .nextCourse
         customTitle = "东大提醒"
-        customSubtitle = "自定义你的灵动岛内容"
+        customSubtitle = "自定义你的实时活动内容"
     }
 
     private func save() {

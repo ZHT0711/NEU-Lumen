@@ -35,11 +35,6 @@ struct GradesView: View {
                         ForEach(LearningPlatform.allCases) { platform in Text(platform.title).tag(platform) }
                     }
                     .pickerStyle(.segmented).padding(.horizontal, 16).padding(.bottom, 12)
-                    Label("登录状态按平台保存在本机钥匙串，重新打开应用会自动恢复。", systemImage: "lock.shield.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 4)
                     if platform == .cg { CGAssignmentsView { showAssignmentWeb = true } }
                     else { PlatformAssignmentsView(platform: platform) { showAssignmentWeb = true } }
                 } else {

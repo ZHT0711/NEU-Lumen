@@ -6,7 +6,7 @@ import sys
 root = Path(__file__).resolve().parents[1]
 destination = Path(sys.argv[1]).resolve()
 destination.mkdir(parents=True, exist_ok=True)
-for name in ["NEU-Lumen", "NEU-Lumen.xcodeproj"]:
+for name in ["NEU-Lumen", "NEU-LumenLiveActivity", "NEU-Lumen.xcodeproj"]:
     shutil.copytree(root / name, destination / name, dirs_exist_ok=True)
 repository = destination / "NEU-Lumen/Core/Services/PortalRepository.swift"
 with repository.open("a", encoding="utf-8") as stream:
@@ -164,6 +164,9 @@ struct UIValidationRoot: View {
             environment.repository.seedUIValidation()
             if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }
             ready = true
+            if ProcessInfo.processInfo.arguments.contains("--live-activity-checks") {
+                await runLiveActivityChecks(environment.liveActivityManager)
+            }
             if ProcessInfo.processInfo.arguments.contains("--browser-checks") {
                 await runBrowserChecks(testBrowser, client: environment.session.client)
             }
@@ -502,3 +505,122 @@ browser_source.write_text(browser_source.read_text(encoding="utf-8").replace(
     'guard original.host == "neucsecg.neu.edu.cn" else {',
     'guard ["neucsecg.neu.edu.cn", "127.0.0.1"].contains(original.host ?? "") else {'
 ), encoding="utf-8")
+
+manager_source = destination / 'NEU-Lumen/Core/Services/DynamicIslandActivityManager.swift'
+with manager_source.open('a', encoding='utf-8') as stream:
+    stream.write(r'''
+
+extension DynamicIslandActivityManager {
+    func settleForValidation() async throws {
+        for _ in 0..<200 {
+            if worker == nil { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw NetworkError(message: "ActivityKit operations did not settle")
+    }
+}
+''')
+
+(destination / 'NEU-Lumen/App/LiveActivityValidation.swift').write_text(r'''
+import ActivityKit
+import SwiftUI
+
+@MainActor
+func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
+    let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("live-activity-checks.txt")
+    func require(_ condition: Bool, _ message: String) throws {
+        if !condition { throw NetworkError(message: message) }
+    }
+    func active() -> [Activity<NEULumenActivityAttributes>] {
+        Activity<NEULumenActivityAttributes>.activities.filter {
+            $0.activityState == .active || $0.activityState == .stale
+        }
+    }
+    do {
+        for _ in 0..<100 {
+            if UIApplication.shared.applicationState == .active { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try require(UIApplication.shared.applicationState == .active, "Fixture is not foreground")
+        try require(ActivityAuthorizationInfo().areActivitiesEnabled, "Simulator disabled Live Activities")
+        let legacy = try JSONDecoder().decode(NEULumenActivityAttributes.self,
+            from: Data(#"{"campus":"浑南校区"}"#.utf8))
+        try require(legacy.accountID == nil, "Legacy activity attributes failed to decode")
+        let legacyState = try JSONDecoder().decode(NEULumenActivityAttributes.ContentState.self,
+            from: Data(#"{"title":"旧配置","subtitle":"","value":"","kind":"custom","updatedAt":0}"#.utf8))
+        try require(legacyState.endDate == nil && legacyState.symbol == "sparkles", "Legacy state failed to decode")
+
+        var request = DynamicIslandActivityManager.Request(enabled: true, accountID: "fixture-a",
+            campus: "浑南校区", state: .init(title: "原生实时活动", subtitle: "ActivityKit 生命周期验证",
+            value: "", kind: "custom", updatedAt: .distantPast), isForeground: true, refreshDate: Date())
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(manager.isRunning && active().count == 1,
+            "Native start failed: \(manager.status) \(manager.lastError ?? "")")
+        let firstID = active()[0].id
+        request.state?.title = "已更新的原生实时活动"
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().first?.id == firstID && active().first?.content.state.title == request.state?.title,
+            "Native update did not reuse the existing activity")
+
+        request.enabled = false
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(!manager.isRunning && active().isEmpty, "Disabling left an activity running")
+        request.enabled = true
+        request.isForeground = false
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().isEmpty, "Started an activity in the background")
+        request.isForeground = true
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().count == 1, "Foreground resume did not start an activity")
+
+        request.accountID = "fixture-b"
+        request.state?.title = "另一个账号的实时活动"
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().count == 1 && active().first?.attributes.accountID == "fixture-b",
+            "Account switch kept the previous account's activity")
+        let dismissed = active()[0]
+        await dismissed.end(nil, dismissalPolicy: .immediate)
+        for _ in 0..<100 {
+            if !manager.isRunning { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try require(!manager.isRunning, "System end was not observed")
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().isEmpty, "A dismissed activity was automatically recreated")
+        manager.restart()
+        try await manager.settleForValidation()
+        try require(active().count == 1, "Explicit restart failed")
+
+        let restored = DynamicIslandActivityManager()
+        let restoredID = active()[0].id
+        restored.synchronize(request)
+        try await restored.settleForValidation()
+        try require(active().count == 1 && active()[0].id == restoredID, "Restore created a duplicate")
+        request.accountID = nil
+        restored.synchronize(request)
+        try await restored.settleForValidation()
+        try require(active().isEmpty, "Logout left account content visible")
+
+        // Leave a real course activity visible for a system screenshot.
+        request.accountID = "fixture-preview"
+        request.state = .init(title: "程序设计基础", subtitle: "浑南 A101", value: "09:00",
+            kind: "nextCourse", updatedAt: .distantPast,
+            startDate: Date().addingTimeInterval(-600), endDate: Date().addingTimeInterval(2400))
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().count == 1, "Preview activity failed to start")
+        try "PASS: native ActivityKit start, update, disable, foreground, account isolation, dismissal, restart, restore, logout; id=\(active()[0].id)"
+            .write(to: output, atomically: true, encoding: .utf8)
+    } catch {
+        try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
+    }
+}
+''', encoding='utf-8')

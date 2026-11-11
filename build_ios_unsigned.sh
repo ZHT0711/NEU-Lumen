@@ -42,6 +42,7 @@ fi
 
 echo "========== 生成未签名 IPA =========="
 
+python3 "$ROOT/scripts/check_live_activity_bundle.py" "$APP_PATH"
 mkdir -p "$STAGING/Payload"
 ditto --norsrc "$APP_PATH" "$STAGING/Payload/$APP_NAME.app"
 ditto -c -k --norsrc --keepParent "$STAGING/Payload" "$IPA_PATH"

@@ -17,13 +17,12 @@ NEU-Lumen 将统一认证、课表、校园卡、成绩、作业和校园服务�
 
 ## 产品预览
 
-下面是 iPhone 实机演示图：应用外由系统接管 Live Activity，应用内首页显示同款紧凑胶囊。完整图片保存在 [`docs/screenshots`](docs/screenshots)。
+以下图片记录早期版本的界面。当前版本使用 ActivityKit 与 WidgetKit 实现系统实时活动，最新模拟器截图随 Actions 构建产物提供。
 
 <p align="center">
   <img src="docs/screenshots/live-activity-collapsed.jpg" width="190" alt="系统灵动岛收起状态" />
   <img src="docs/screenshots/live-activity-expanded.jpg" width="190" alt="系统灵动岛展开状态" />
   <img src="docs/screenshots/live-activity-lockscreen.jpg" width="190" alt="锁屏 Live Activity" />
-  <img src="docs/screenshots/app-home-live-activity.jpg" width="190" alt="应用内 Live Activity 与首页" />
 </p>
 
 每次构建也会在 Actions 产物中生成首页、课表、服务、学习和浏览器截图；打开最近一次 workflow 的 **Artifacts → NEU-Lumen-ui-preview** 即可查看完整演示集。
@@ -34,9 +33,8 @@ NEU-Lumen 将统一认证、课表、校园卡、成绩、作业和校园服务�
   <img src="NEU-Lumen/Assets.xcassets/AquaCore.imageset/avatar.png" width="110" alt="NEU-AquaCore 组织头像" />
 </p>
 
-- **应用内 Live Activity**：顶部灵动岛可展开，展示下一节课、校园卡余额或自定义内容。
-- **应用外 Live Activity**：进入后台后由系统接管，显示在锁屏和支持灵动岛的 iPhone 上。
-- **学院身份**：我的页面显示对应学院院徽；未来技术学院使用学院提供的正式院徽图片。
+- **系统实时活动**由 ActivityKit 创建，WidgetKit 扩展提供锁屏、灵动岛紧凑、最小和展开样式，支持课程倒计时、余额和自定义文字。
+- **学院身份**使用已有学院图片。未来技术学院显示对应院徽，其余学院使用东北大学校徽。
 - **海洋之心彩蛋**：连续点击「走进东大」标题三次，查看团队致意并进入 [NEU-AquaCore](https://github.com/NEU-AquaCore)。
 
 ## 功能
@@ -58,13 +56,15 @@ NEU-Lumen 将统一认证、课表、校园卡、成绩、作业和校园服务�
 
 ### Live Activity
 
-Live Activity 的配置入口是 **我的 → 配置应用外灵动岛**：
+Live Activity 的配置入口是 **我的 → 锁屏与灵动岛**。
 
 1. 选择下一节课、校园卡余额或自定义文字。
-2. 保持「显示应用内与锁屏 Live Activity」开启。
-3. 回到首页后，应用内顶部显示同款灵动岛；切到后台后由系统显示锁屏/系统灵动岛。
+2. 开启「启用实时活动」，应用在前台且所选数据可用时向系统创建实时活动。
+3. 配置页展示实际运行状态和失败原因，也可手动开启已结束的活动。
 
-系统设置中如果关闭了 NEU-Lumen 的「实时活动」，应用会保留应用内显示，但系统不会显示应用外 Live Activity。
+请在系统设置中允许 NEU-Lumen 使用实时活动。课程和余额采用当前账号已加载的数据，修改配置或应用内数据变化时同步更新。进入后台后，系统继续显示已发布内容和课程倒计时。课程结束或余额同步超过 30 分钟后提示打开应用更新。自定义文字保留到活动结束，系统活动最长持续时间由 iOS 管理。
+
+退出登录、关闭功能或切换账号时清理旧活动。手动结束后可在配置页重新开启。
 
 ## 构建与下载
 
@@ -108,7 +108,8 @@ NEU-Lumen/
 
 - Swift / Node / Python 解析回归测试
 - 原生 Release unsigned IPA 构建
-- 模拟器 UI 与浏览器检查（模拟器不可用时生成诊断并跳过，不阻塞每日构建）
+- 模拟器 UI、浏览器与原生 ActivityKit 生命周期检查
+- 真机及模拟器产物中 WidgetKit 扩展的可执行文件、入口、版本和深层链接校验
 - 编译日志告警检查
 - IPA 与 UI 截图产物上传
 

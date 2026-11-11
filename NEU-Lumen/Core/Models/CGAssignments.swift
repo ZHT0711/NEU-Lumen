@@ -99,6 +99,33 @@ struct CGAssignmentReport: Codable {
     }
 
     /// Runs with the CG website's own session, including WebVPN URL prefixes.
+    /// Wait briefly for client-rendered controls and click only the visible sign-in action.
+    static let campusLoginScript = #"""
+    function clickLogin() {
+      const nodes = Array.from(document.querySelectorAll('a,button,input[type="button"],input[type="submit"]'));
+      const target = nodes.find(node => {
+        const text = (node.innerText || node.value || '').replace(/\s+/g, '');
+        return text === '校园统一登录' && !node.disabled &&
+          node.getAttribute('aria-disabled') !== 'true' && node.getClientRects().length > 0;
+      });
+      if (!target) return false;
+      target.click();
+      return true;
+    }
+    if (clickLogin()) return true;
+    return await new Promise(resolve => {
+      let timeout;
+      const finish = value => {
+        observer.disconnect();
+        clearTimeout(timeout);
+        resolve(value);
+      };
+      const observer = new MutationObserver(() => { if (clickLogin()) finish(true); });
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      timeout = setTimeout(() => finish(false), 5000);
+    });
+    """#
+
     static let browserScript = #"""
     const root = new URL(rootURL);
     const original = new URL(originalRootURL);
