@@ -140,5 +140,5 @@ func testConfigurationMigration() throws {
     let reset = DynamicIslandStore(defaults: defaults)
     precondition(reset.enabled && reset.kind == .nextCourse && !reset.customDeadlineEnabled && reset.customValue.isEmpty)
 }
-try testConfigurationMigration()
+try await testConfigurationMigration()
 print("Live activity configuration: old four-field migration, limits, symbol/palette validation, countdown and reset passed")
