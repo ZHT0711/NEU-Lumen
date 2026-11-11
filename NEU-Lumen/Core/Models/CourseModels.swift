@@ -107,7 +107,9 @@ struct TimetablePlacement: Identifiable {
     var periodCount: Int { lastPeriod - firstPeriod + 1 }
 
     static func layout(_ occurrences: [CourseOccurrence], on date: Date) -> [TimetablePlacement] {
-        let daily = occurrences.mergeConsecutive().filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
+        let calendar = Calendar.current
+        // 合并按自然日分组；先筛选当天，避免七列各自重复合并整周。
+        let daily = occurrences.filter { calendar.isDate($0.date, inSameDayAs: date) }.mergeConsecutive()
         var assigned: [(CourseOccurrence, Int, Int, Int)] = []
         var laneEnds: [Int] = []
         for occurrence in daily {

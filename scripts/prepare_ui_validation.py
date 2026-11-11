@@ -413,6 +413,9 @@ grades_source = destination / "NEU-Lumen/Features/Grades/GradesView.swift"
 grades_source.write_text(grades_source.read_text(encoding="utf-8").replace(
     '@State private var platform = LearningPlatform.cg',
     '@State private var platform = ProcessInfo.processInfo.arguments.contains("--screen=mooc") ? LearningPlatform.mooc : ProcessInfo.processInfo.arguments.contains("--screen=chaoxing") ? .chaoxing : .cg'
+).replace(
+    '@State private var section = "作业"',
+    '@State private var section = ProcessInfo.processInfo.arguments.contains("--screen=grades") ? "成绩" : "作业"'
 ), encoding="utf-8")
 
 platform_source = destination / "NEU-Lumen/Core/Models/LearningAssignments.swift"

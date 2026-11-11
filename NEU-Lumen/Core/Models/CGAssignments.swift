@@ -6,19 +6,22 @@ struct CGProblem: Identifiable, Hashable, Codable {
     let title: String
     let url: URL?
     let statusText: String
-    var scoreText: String { capture(#"得分\s*[:：]\s*([\d.]+)"#) }
-    var submittedAt: String { capture(#"最后一次提交时间\s*[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)"#) }
+    private static let scoreRegex = try! NSRegularExpression(pattern: #"得分\s*[:：]\s*([\d.]+)"#)
+    private static let submittedAtRegex = try! NSRegularExpression(pattern: #"最后一次提交时间\s*[:：]\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)"#)
+    private static let testResultsRegex = try! NSRegularExpression(pattern: #"测试数据\s*\d+\s*[^测]+?(?=测试数据\s*\d+|详细|$)"#)
+    private static let testCountRegex = try! NSRegularExpression(pattern: #"共有测试数据\s*[:：]\s*(\d+)"#)
+
+    var scoreText: String { capture(Self.scoreRegex) }
+    var submittedAt: String { capture(Self.submittedAtRegex) }
     var testResults: [String] {
-        let regex = try! NSRegularExpression(pattern: #"测试数据\s*\d+\s*[^测]+?(?=测试数据\s*\d+|详细|$)"#)
-        return regex.matches(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)).compactMap {
+        return Self.testResultsRegex.matches(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)).compactMap {
             guard let range = Range($0.range, in: statusText) else { return nil }
             return String(statusText[range]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
 
-    private func capture(_ pattern: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)),
+    private func capture(_ regex: NSRegularExpression) -> String {
+        guard let match = regex.firstMatch(in: statusText, range: NSRange(statusText.startIndex..., in: statusText)),
               let range = Range(match.range(at: 1), in: statusText) else { return "" }
         return String(statusText[range])
     }
@@ -26,9 +29,10 @@ struct CGProblem: Identifiable, Hashable, Codable {
     var status: Status {
         if ["还未提交", "尚未提交", "未提交"].contains(where: statusText.contains) { return .notSubmitted }
         if ["未通过", "错误", "部分正确", "超时", "超限", "异常", "失败"].contains(where: statusText.contains) { return .needsWork }
-        if !testResults.isEmpty {
-            if let count = Int(capture(#"共有测试数据\s*[:：]\s*(\d+)"#)), count > testResults.count { return .submitted }
-            return testResults.allSatisfy { $0.contains("完全正确") } ? .complete : .submitted
+        let results = testResults
+        if !results.isEmpty {
+            if let count = Int(capture(Self.testCountRegex)), count > results.count { return .submitted }
+            return results.allSatisfy { $0.contains("完全正确") } ? .complete : .submitted
         }
         if statusText.contains("完全正确") { return .complete }
         return .submitted

@@ -330,6 +330,8 @@ struct HomeView: View {
 
     private var quickAppsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // 收藏顺序与前八项规则不变，只避免空态和网格重复解析目录。
+            let favorites = repo.favorites.apps(in: repo.apps)
             HStack {
                 sectionHeader("常用应用", icon: "square.grid.2x2")
                 Spacer()
@@ -342,12 +344,12 @@ struct HomeView: View {
                     .font(.caption.weight(.medium))
                 }
             }
-            if repo.favorites.apps(in: repo.apps).isEmpty {
+            if favorites.isEmpty {
                 Button("添加常用应用") { showFavorites = true }.font(.subheadline).padding()
             }
             GlassCard {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
-                    ForEach(Array(repo.favorites.apps(in: repo.apps).prefix(8))) { app in
+                    ForEach(Array(favorites.prefix(8))) { app in
                         Button {
                             open(app)
                         } label: {

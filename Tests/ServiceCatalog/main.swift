@@ -61,6 +61,63 @@ let conflicts = TimetablePlacement.layout([week[0], occurrence(monday,510,555,na
 precondition(conflicts.count == 2 && Set(conflicts.map(\.lane)).count == 2, "冲突课程分列且都保留")
 print("Timetable: 11 checks passed")
 
+// 对照旧的“整周先合并”路径，验证筛选前移不改变块、节次或冲突列。
+func legacyLayout(_ occurrences: [CourseOccurrence], on date: Date) -> [TimetablePlacement] {
+    let daily = occurrences.mergeConsecutive().filter { Calendar.current.isDate($0.date, inSameDayAs: date) }
+    var assigned: [(CourseOccurrence, Int, Int, Int)] = []
+    var laneEnds: [Int] = []
+    for item in daily {
+        let first = Semester.periodOf(startMinutes: item.slot.startMinutes)
+        let last = max(first, Semester.endPeriod(of: item.slot.endMinutes))
+        let lane = laneEnds.firstIndex { $0 < first } ?? laneEnds.count
+        if lane == laneEnds.count { laneEnds.append(last) } else { laneEnds[lane] = last }
+        assigned.append((item, first, last, lane))
+    }
+    return assigned.map { TimetablePlacement(occurrence: $0.0, firstPeriod: $0.1, lastPeriod: $0.2,
+        lane: $0.3, laneCount: max(1, laneEnds.count)) }
+}
+func checkLayoutEquivalence(_ occurrences: [CourseOccurrence], on date: Date) {
+    let actual = TimetablePlacement.layout(occurrences, on: date)
+    let expected = legacyLayout(occurrences, on: date)
+    precondition(actual.map(\.occurrence) == expected.map(\.occurrence), "课程内容、日期与合并范围不变")
+    precondition(actual.count == expected.count)
+    for index in actual.indices {
+        precondition(actual[index].firstPeriod == expected[index].firstPeriod && actual[index].lastPeriod == expected[index].lastPeriod)
+        precondition(actual[index].lane == expected[index].lane && actual[index].laneCount == expected[index].laneCount)
+    }
+}
+struct LayoutGenerator {
+    private var seed: UInt64 = 42
+    mutating func next(_ limit: Int) -> Int {
+        seed = seed &* 6364136223846793005 &+ 1
+        return Int((seed >> 32) % UInt64(limit))
+    }
+}
+var layoutGenerator = LayoutGenerator()
+let layoutDates = (0..<7).map { Calendar.current.date(byAdding: .day, value: $0, to: PortalDate.day(monday)!)! }
+for _ in 0..<40 {
+    var mixed: [CourseOccurrence] = []
+    for index in 0..<56 {
+        let date = layoutDates[layoutGenerator.next(7)]
+        let start = 480 + layoutGenerator.next(20) * 25
+        let kind = ["course", "exam", "custom"][layoutGenerator.next(3)]
+        let slot = CourseSlot(weekday: PlannerEvent.mondayBasedWeekday(date), startMinutes: start,
+            endMinutes: start + 25 + layoutGenerator.next(4) * 25, name: ["数学", "数 学", "英语"][layoutGenerator.next(3)],
+            room: ["A101", "A102"][layoutGenerator.next(2)], teacher: ["张老师", "李老师"][layoutGenerator.next(2)],
+            kind: kind, weekStart: 1 + layoutGenerator.next(3), weekEnd: 10 + layoutGenerator.next(3),
+            eventID: kind == "custom" ? "event-\(index)" : nil)
+        let item = CourseOccurrence(date: date, slot: slot)
+        mixed.append(item)
+        if index % 8 == 0 { mixed.append(item) }
+    }
+    for date in layoutDates { checkLayoutEquivalence(mixed, on: date) }
+}
+checkLayoutEquivalence([], on: layoutDates[0])
+checkLayoutEquivalence(week, on: Calendar.current.date(byAdding: .day, value: 9, to: layoutDates[0])!)
+let midday = CourseOccurrence(date: layoutDates[0].addingTimeInterval(12 * 3600), slot: week[4].slot)
+checkLayoutEquivalence(week + [midday], on: layoutDates[0].addingTimeInterval(15 * 3600))
+print("Timetable performance regression: 283 legacy-path equivalence checks passed")
+
 let termJSON: [String:Any] = ["code":0,"datas":["rows":[["itemCode":"2026-1","itemName":"秋季","selected":"1"]]]]
 let terms = try AcademicResponse.terms(termJSON)
 precondition(terms.count == 1 && terms[0].current, "兼容数字响应码、嵌套列表和字符串选中状态")

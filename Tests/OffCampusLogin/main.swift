@@ -374,6 +374,28 @@ precondition(NetworkError.isCancellation(CancellationError()) && NetworkError.is
 precondition(!NetworkError.from(CancellationError()).message.contains("Swift"))
 print("Card visible labels, ASP.NET spans, thousands, zero subsidy, masked/malformed values and cancellation messages passed")
 
+// 三个字段共用输入解析时仍保持 input > ASP.NET label > 可见文字的原有优先级。
+let cachedInputFixtures: [(String, Double, Double?, String)] = [
+    (#"<input id='ctl00$TXTODDFARE' value='￥1,234.50'><input name=txtSubsidy value='0'><input id='prefix_txtStatus' value='正&#24120;卡'><span id='lblOddFare'>999</span>"#, 1234.50, 0, "正常卡"),
+    (#"<input id=txtOddFare value=' '><span id='prefix_lblOddFare'>12.50</span><output id='prefix_lblSpecialOddFare'>7.25</output><label id='labStatus'>挂失</label>"#, 12.50, 7.25, "挂失"),
+    (#"<input id=txtOddFare value='1.25'><div>主钱包余额：99元 补助余额：2.50元 卡状态：正常卡</div>"#, 1.25, 2.50, "正常卡"),
+    (#"<input id='notxtOddFare' value='999'><div>主钱包余额：3.75元</div>"#, 3.75, nil, ""),
+    (#"<span id='lblOddFare'>4.25</span><input id='txtSpecialOddFare' value='6.50'><input name='txtStatus' value='冻结'>"#, 4.25, 6.50, "冻结"),
+    (#"<!-- <input id='txtOddFare' value='999'> --><style>input[value='999']{}</style><input id='txtOddFare' value='0'>"#, 0, nil, "")
+]
+for _ in 0..<20 {
+    for (html, balance, subsidy, status) in cachedInputFixtures {
+        let result = try CardBalanceDocument.parse(html)
+        precondition(result.balance == balance && result.subsidy == subsidy && result.status == status,
+                     "同页字段优先级及连续解析不同页面不串值")
+    }
+}
+do {
+    _ = try CardBalanceDocument.parse(#"<input id='txtOddFare' value='***'><span id='lblOddFare'>99</span>主钱包余额：88元"#)
+    preconditionFailure("已有掩码 input 不得回退为示例金额")
+} catch { }
+print("Card parsing performance regression: 120 multi-field/page isolation checks and masked-input precedence passed")
+
 let cgReport = try CGAssignmentReport.decode(["assignments": [[
     "id": "7", "title": "课后作业", "deadline": "2026-11-10 23:59:59", "loaded": true,
     "problems": [["id": "1", "title": "题目一", "statusText": "得分：100 完全正确"],
@@ -396,6 +418,32 @@ precondition(detailedProblem.scoreText == "10.00", "CG score field was \(detaile
 precondition(detailedProblem.submittedAt == "2026-11-02 12:13:14", "CG submission date was \(detailedProblem.submittedAt)")
 precondition(detailedProblem.testResults.count == 2 && detailedProblem.status == .needsWork)
 precondition(CGProblem(id: "pending", title: "待评判", url: nil, statusText: "得分：100 测试数据1 结果待公布").status == .submitted)
+let cgStatusFixtures: [(String, CGProblem.Status, String, String, Int)] = [
+    ("", .submitted, "", "", 0),
+    ("完全正确", .complete, "", "", 0),
+    ("未提交 完全正确", .notSubmitted, "", "", 0),
+    ("完全正确 答案错误", .needsWork, "", "", 0),
+    ("共有测试数据：2 测试数据1 完全正确 测试数据2 完全正确 详细", .complete, "", "", 2),
+    ("共有测试数据：3 测试数据1 完全正确 测试数据2 完全正确", .submitted, "", "", 2),
+    ("共有测试数据：0 测试数据1 完全正确", .complete, "", "", 1),
+    ("得分:100 测试数据1 结果待公布", .submitted, "100", "", 1),
+    ("😀 得分：10.50 最后一次提交时间：2026-11-02 12:13 测试数据 1 完全正确", .complete, "10.50", "2026-11-02 12:13", 1),
+    ("得分：0 最后一次提交时间:2026-11-02 12:13:14 测试数据1 超时", .needsWork, "0", "2026-11-02 12:13:14", 1)
+]
+for _ in 0..<20 {
+    for (text, status, score, submittedAt, count) in cgStatusFixtures {
+        let problem = CGProblem(id: "shared-id", title: "题目", url: nil, statusText: text)
+        precondition(problem.status == status && problem.scoreText == score && problem.submittedAt == submittedAt)
+        precondition(problem.testResults.count == count)
+        precondition(problem.status == status, "重复读取及相同 ID 的不同状态文本不串值")
+        let data = try JSONEncoder().encode(problem)
+        let restored = try JSONDecoder().decode(CGProblem.self, from: data)
+        precondition(restored == problem && restored.status == status && restored.testResults == problem.testResults)
+        let object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        precondition(Set(object.keys) == Set(["id", "title", "statusText"]), "只读正则不得改变历史缓存格式")
+    }
+}
+print("CG parsing performance regression: 200 repeated status/detail/Codable checks passed")
 let partialAssignment = CGAssignment(id: "partial", title: "作业", url: nil, deadlineText: "", late: false,
     history: false, loaded: true, problems: [CGProblem(id: "1", title: "已读题", url: nil, statusText: "完全正确")], expectedProblemCount: 2)
 precondition(!partialAssignment.isComplete && partialAssignment.problemCount == 2)

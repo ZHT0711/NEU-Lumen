@@ -228,6 +228,8 @@ struct ScheduleView: View {
 
     private var grid: some View {
         let today = Calendar.current.startOfDay(for: Date())
+        // 同次网格构建复用整周课程，避免每个日期列重复投影、解析和合并。
+        let weekOccurrences = occurrences
         return HStack(alignment: .top, spacing: 4) {
             VStack(spacing: 0) {
                 Color.clear.frame(height: 42)
@@ -236,12 +238,13 @@ struct ScheduleView: View {
                 }
             }
             ForEach(weekDates, id: \.self) { date in
+                let isToday = Calendar.current.isDate(date, inSameDayAs: today)
                 VStack(spacing: 0) {
-                    dayHeader(date, isToday: Calendar.current.isDate(date, inSameDayAs: today))
+                    dayHeader(date, isToday: isToday)
                         .frame(height: 42)
                     TimetableDayColumn(
-                        placements: TimetablePlacement.layout(occurrences, on: date),
-                        isToday: Calendar.current.isDate(date, inSameDayAs: today),
+                        placements: TimetablePlacement.layout(weekOccurrences, on: date),
+                        isToday: isToday,
                         periodHeight: periodHeight
                     ) { selected = $0 }
                 }

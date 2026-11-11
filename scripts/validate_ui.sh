@@ -3,6 +3,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREVIEW="${RUNNER_TEMP}/NEU-Lumen-ui-validation"
 OUTPUT="$ROOT/build/ui-preview"
+# Never package stale screenshots from a previous attempt.
+rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 python3 "$ROOT/scripts/prepare_ui_validation.py" "$PREVIEW"
 SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next((v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")), ""))')"
@@ -10,6 +12,16 @@ if [[ -z "$SIM_ID" ]]; then
   echo "No available iPhone simulator" >&2
   exit 1
 fi
+xcrun simctl list devices available -j | python3 -c '
+import json, sys
+all_devices = json.load(sys.stdin)["devices"]
+for runtime, devices in all_devices.items():
+    for device in devices:
+        if device["udid"] == sys.argv[1]:
+            print(json.dumps({"name": device["name"], "runtime": runtime, "udid": device["udid"]}))
+            sys.exit(0)
+sys.exit("Selected simulator is missing")
+' "$SIM_ID" > "$OUTPUT/simulator-device.json"
 xcrun simctl boot "$SIM_ID" || true
 if ! xcrun simctl bootstatus "$SIM_ID" -b; then
   echo "Simulator failed to become ready" >&2
@@ -87,3 +99,4 @@ grep -q "^PASS:" "$OUTPUT/live-activity-checks.txt"
 xcrun simctl launch "$SIM_ID" com.apple.Preferences
 sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
+python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"

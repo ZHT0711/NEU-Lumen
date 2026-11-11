@@ -23,7 +23,7 @@ struct ProfileView: View {
             Label("走进东大", systemImage: "building.columns")
                 .font(.headline)
                 .onTapGesture(count: 3) { showAquaCoreEasterEgg = true }
-                .accessibilityAction(named: Text("海洋之心彩蛋")) { showAquaCoreEasterEgg = true }
+                .accessibilityAction(named: Text("查看致意")) { showAquaCoreEasterEgg = true }
             Button {
                 path.append(.web(URL(string: "https://www.neu.edu.cn/xygk/dxwh.htm")!))
             } label: {

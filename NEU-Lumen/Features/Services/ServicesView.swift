@@ -215,8 +215,10 @@ struct ServicesView: View {
 
     private var appsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // 标题、空态与网格使用同一轮筛选结果；下一次构建仍读取最新状态。
+            let apps = filtered
             HStack {
-                Text("\(selectedCategory ?? (favoritesOnly ? "我的收藏" : "全部应用"))（\(filtered.count)）")
+                Text("\(selectedCategory ?? (favoritesOnly ? "我的收藏" : "全部应用"))（\(apps.count)）")
                     .font(.subheadline.bold())
                 Spacer()
                 if selectedCategory != nil || !keyword.isEmpty || favoritesOnly {
@@ -228,7 +230,7 @@ struct ServicesView: View {
                     .font(.caption.weight(.medium))
                 }
             }
-            if filtered.isEmpty {
+            if apps.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
@@ -247,7 +249,7 @@ struct ServicesView: View {
             } else {
                 GlassCard {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 10)], spacing: 14) {
-                        ForEach(filtered) { app in
+                        ForEach(apps) { app in
                             Button {
                                 open(app)
                             } label: {

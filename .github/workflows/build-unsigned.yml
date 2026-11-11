@@ -19,7 +19,9 @@ permissions:
 
 concurrency:
   group: build-ios-unsigned-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
-  cancel-in-progress: true
+  # Do not interrupt a release transaction when a newer main push arrives.
+  # Stale successful builds are filtered before rolling publication.
+  cancel-in-progress: false
 
 jobs:
   select_run:
@@ -162,7 +164,6 @@ jobs:
 
       - name: Validate simulator UI and browser behavior
         run: bash scripts/validate_ui.sh
-          fi
 
       - name: Require warning-free compiler logs
         run: python3 scripts/check_build_diagnostics.py "${RUNNER_TEMP}/catalog-tests.log" "${RUNNER_TEMP}/planner-tests.log" "${RUNNER_TEMP}/login-tests.log" build/ios-build.log build/ui-preview/simulator-build.log
@@ -280,6 +281,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
+      - name: Download screenshots from the same build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}" --dir release-assets/ui-preview
       - name: Publish dated prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,6 +304,8 @@ jobs:
       group: publish-nightly
       cancel-in-progress: false
     steps:
+      - name: Checkout publishing scripts
+        uses: actions/checkout@v6
       - name: Check current main commit
         id: current
         env:
@@ -320,37 +328,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
 
+      - name: Download screenshots from the same build
+        if: steps.current.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}" --dir release-assets/ui-preview
+
       - name: Publish nightly prerelease
         if: steps.current.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if gh api "repos/${GH_REPO}/git/ref/tags/nightly" >/dev/null 2>&1; then
-            gh api --method PATCH "repos/${GH_REPO}/git/refs/tags/nightly" \
-              -f sha="${GITHUB_SHA}" -F force=true >/dev/null
-          else
-            gh api --method POST "repos/${GH_REPO}/git/refs" \
-              -f ref=refs/tags/nightly -f sha="${GITHUB_SHA}" >/dev/null
-          fi
-
-          cat > nightly-notes.md <<EOF
-          NEU-Lumen 每夜构建（滚动更新的预发布版本）。
-
-          - 定时构建：北京时间每日 03:17；main 更新也会构建。
-          - 提交：${GITHUB_SHA}
-          - 构建：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          - 产物：NEU-Lumen-iOS-unsigned.ipa，需自行签名安装。
-          - 仅在回归、IPA 构建和模拟器检查全部通过后更新下载包。
-          EOF
-
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release edit nightly --title "NEU-Lumen Nightly" \
-              --notes-file nightly-notes.md --prerelease --latest=false
-          else
-            gh release create nightly --verify-tag --title "NEU-Lumen Nightly" \
-              --notes-file nightly-notes.md --prerelease --latest=false
-          fi
-          gh release upload nightly release-assets/NEU-Lumen-iOS-unsigned.ipa --clobber
+        run: python3 scripts/publish_nightly.py

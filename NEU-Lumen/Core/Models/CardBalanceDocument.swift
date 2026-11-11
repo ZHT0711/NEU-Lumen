@@ -3,24 +3,28 @@ import Foundation
 /// The card site renders wallet amounts as input values, ASP.NET labels or visible text.
 enum CardBalanceDocument {
     private static let number = #"[+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?"#
+    private static let labels = try! NSRegularExpression(pattern: #"<(span|label|output)\b([^>]*)>(.*?)</\1\s*>"#,
+                                                       options: [.caseInsensitive, .dotMatchesLineSeparators])
 
     static func parse(_ html: String) throws -> CardBalance {
         let page = html.replacingOccurrences(of: #"(?is)<!--.*?-->|<script\b[^>]*>.*?</script\s*>|<style\b[^>]*>.*?</style\s*>"#,
                                              with: " ", options: .regularExpression)
         let text = plainText(page)
-        let wallet = field(in: page, names: ["txtOddFare", "lblOddFare", "labOddFare"])
+        // 同一页的主钱包、补助和状态共用输入框解析结果，不跨页或账号缓存。
+        let inputs = HTMLInputFields.parse(page)
+        let wallet = field(in: page, inputs: inputs, names: ["txtOddFare", "lblOddFare", "labOddFare"])
             ?? labelledAmount(in: text, labels: "主钱包余额|主钱包|校园卡余额|卡内余额")
         guard let wallet, let amount = money(wallet) else {
             throw NetworkError(message: "一卡通网页尚未提供可读取的主钱包余额，请进入“个人基本信息”页后同步")
         }
-        let subsidy = field(in: page, names: ["txtSpecialOddFare", "lblSpecialOddFare", "txtSubsidy", "lblSubsidy"])
+        let subsidy = field(in: page, inputs: inputs, names: ["txtSpecialOddFare", "lblSpecialOddFare", "txtSubsidy", "lblSubsidy"])
             ?? labelledAmount(in: text, labels: "补助余额|补助钱包余额|补贴余额")
-        let status = field(in: page, names: ["txtStatus", "lblStatus", "labStatus"])
+        let status = field(in: page, inputs: inputs, names: ["txtStatus", "lblStatus", "labStatus"])
             ?? capture(#"卡状态\s*[:：]\s*([^\s]+)"#, in: text) ?? ""
         return CardBalance(balance: amount, subsidy: subsidy.flatMap(money), status: status)
     }
 
-    private static func field(in html: String, names: [String]) -> String? {
+    private static func field(in html: String, inputs: [[String: String]], names: [String]) -> String? {
         func matches(_ attributes: [String: String]) -> Bool {
             [attributes["id"], attributes["name"]].compactMap { $0?.lowercased() }.contains { value in
                 names.contains { name in
@@ -29,12 +33,10 @@ enum CardBalanceDocument {
                 }
             }
         }
-        for attributes in HTMLInputFields.parse(html) where matches(attributes) {
+        for attributes in inputs where matches(attributes) {
             if let value = attributes["value"], !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return value }
         }
-        let regex = try! NSRegularExpression(pattern: #"<(span|label|output)\b([^>]*)>(.*?)</\1\s*>"#,
-                                             options: [.caseInsensitive, .dotMatchesLineSeparators])
-        for match in regex.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+        for match in labels.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
             guard let attributes = Range(match.range(at: 2), in: html), let body = Range(match.range(at: 3), in: html),
                   matches(HTMLInputFields.attributes(in: String(html[attributes]))) else { continue }
             let value = plainText(String(html[body]))
