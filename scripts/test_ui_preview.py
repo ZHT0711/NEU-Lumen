@@ -41,12 +41,12 @@ class UIPreviewTests(unittest.TestCase):
         self.assertEqual(manifest['run_url'], 'https://github.com/owner/repo/actions/runs/123')
         self.assertEqual(manifest['device_type'], 'iPhone simulator')
         self.assertIn('not a real campus account', manifest['data_source'])
-        self.assertEqual(len(manifest['screenshots']), 15)
+        self.assertEqual(len(manifest['screenshots']), len(preview.SCREENSHOTS))
         with zipfile.ZipFile(self.path / preview.ARCHIVE) as archive:
             self.assertEqual(set(archive.namelist()), set((*preview.SCREENSHOTS, preview.MANIFEST)))
         with patch.dict(os.environ, self.env):
             assets = preview.release_assets(self.path)
-        self.assertEqual(len(assets), 17)
+        self.assertEqual(len(assets), len(preview.SCREENSHOTS) + 2)
         self.assertNotIn(self.path / 'server.log', assets)
 
     def test_missing_and_invalid_screenshot_block_package(self):

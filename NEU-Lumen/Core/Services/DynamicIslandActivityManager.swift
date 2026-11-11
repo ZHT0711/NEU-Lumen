@@ -90,7 +90,8 @@ final class DynamicIslandActivityManager {
             if request.contentReady || activity?.content.state.kind != request.contentKind {
                 await endAll()
             }
-            status = isRunning ? "等待最新数据" : "等待可用的课表或校园卡数据"
+            lastError = nil
+            status = isRunning ? "显示上次内容，等待最新数据" : waitingStatus(for: request)
             return
         }
 
@@ -118,11 +119,33 @@ final class DynamicIslandActivityManager {
         }
     }
 
+    private func waitingStatus(for request: Request) -> String {
+        let source: String
+        switch request.contentKind {
+        case "nextCourse": source = "课表"
+        case "cardBalance": source = "校园卡"
+        case "netBalance": source = "网费"
+        case "electricBalance": source = "电费"
+        case "assignments": source = "作业"
+        case "planner": source = "日程"
+        case "dayOverview": source = "今日概览"
+        case "academicOverview": source = "成绩"
+        default: source = "所选内容"
+        }
+        return request.contentReady ? "\(source)暂无可展示的数据" : "等待读取\(source)数据"
+    }
+
     private func content(for state: NEULumenActivityAttributes.ContentState)
         -> ActivityContent<NEULumenActivityAttributes.ContentState> {
-        // Custom text remains valid until the system ends the activity.
-        let staleDate = state.kind == "custom" ? nil :
-            (state.endDate ?? state.updatedAt.addingTimeInterval(30 * 60))
+        // A user-defined countdown expires at its target; plain text has no deadline.
+        let staleDate: Date?
+        if (state.kind == "nextCourse" || state.kind == "planner"), let start = state.startDate, start > state.updatedAt {
+            // System timers can finish in the background, but changing to the next
+            // course requires fresh app data. Mark the start boundary honestly.
+            staleDate = start
+        } else if let end = state.endDate { staleDate = end }
+        else if state.kind == "custom" { staleDate = nil }
+        else { staleDate = state.updatedAt.addingTimeInterval(30 * 60) }
         return ActivityContent(state: state, staleDate: staleDate, relevanceScore: 50)
     }
 

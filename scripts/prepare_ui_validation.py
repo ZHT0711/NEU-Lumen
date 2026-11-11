@@ -8,6 +8,10 @@ destination = Path(sys.argv[1]).resolve()
 destination.mkdir(parents=True, exist_ok=True)
 for name in ["NEU-Lumen", "NEU-LumenLiveActivity", "NEU-Lumen.xcodeproj"]:
     shutil.copytree(root / name, destination / name, dirs_exist_ok=True)
+demo_source = destination / "NEU-Lumen/Core/Services/DemoData.swift"
+demo_source.write_text(demo_source.read_text(encoding="utf-8").replace(
+    'department: "计算机科学与工程学院"', 'department: "未来技术学院"'
+), encoding="utf-8")
 repository = destination / "NEU-Lumen/Core/Services/PortalRepository.swift"
 with repository.open("a", encoding="utf-8") as stream:
     stream.write(r'''
@@ -117,7 +121,63 @@ extension PortalRepository {
             }
         }
         weekCache[start] = items
+        weekCache[Calendar.current.date(byAdding: .day, value: 7, to: start)!] = []
+        weekCache[Calendar.current.date(byAdding: .day, value: -7, to: start)!] = []
         weekState = .loaded
+        gradesUpdatedAt = Date()
+        netUpdatedAt = Date()
+        electricUpdatedAt = Date()
+    }
+
+    func verifyLiveActivityPublication() throws {
+        func require(_ condition: Bool, _ message: String) throws {
+            if !condition { throw NetworkError(message: message) }
+        }
+        let suite = "live-activity-publication." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = DynamicIslandStore(defaults: defaults)
+        let now = Date()
+        for kind in DynamicIslandStore.ContentKind.allCases {
+            store.kind = kind
+            store.accent = "purple"
+            guard let state = liveActivityState(store: store, now: now) else {
+                throw NetworkError(message: "Seeded source has no payload: " + kind.rawValue)
+            }
+            try require(state.kind == kind.rawValue && state.accent == "purple", "Source/style mapping changed")
+            try require(state.destination.scheme == "neulumen", "Source has an unsafe deep link")
+            try require(try JSONEncoder().encode(state).count < 4096, "Activity payload exceeds system size budget")
+        }
+        let savedAccount = loadedForSID
+        loadedForSID = "another-fixture-account"
+        store.kind = .custom
+        try require(liveActivityState(store: store, now: now) == nil, "Old account data leaked into custom activity")
+        loadedForSID = savedAccount
+        let savedBalance = cardBalance
+        cardBalance = CardBalance(balance: 0, subsidy: 0, status: "正常卡")
+        store.kind = .cardBalance
+        try require(liveActivityState(store: store, now: now)?.value == "¥0.00", "Real zero balance became unread")
+        cardBalance = savedBalance
+        let savedWeeks = weekCache
+        weekCache = [:]
+        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now)!
+        let event = PlannerEvent(name: "Fixture future manual", dateIso: PortalDate.isoDay(tomorrow), startMinutes: 600, endMinutes: 660)
+        planner.add(event)
+        defer { planner.remove(id: event.id); weekCache = savedWeeks; loadedForSID = savedAccount; cardBalance = savedBalance }
+        for kind in [DynamicIslandStore.ContentKind.nextCourse, .planner] {
+            store.kind = kind
+            try require(liveActivityState(store: store, now: now)?.title == event.name, "Future manual event depends on remote timetable cache")
+        }
+        store.kind = .custom
+        store.customTitle = "{course}"
+        store.customSubtitle = "余额 {card} · 未读取电量 {electric}"
+        store.customValue = "{pending}"
+        store.customIcon = "bell.fill"
+        store.customDeadlineEnabled = true
+        store.customDeadline = now.addingTimeInterval(3600)
+        let custom = liveActivityState(store: store, now: now)
+        try require(custom?.title == event.name && custom?.symbol == "bell.fill", "Custom variables/icon were not applied")
+        try require(custom?.endDate == store.customDeadline && custom?.countdownTitle == "距截止", "Custom target countdown lost its date")
     }
 }
 ''')
@@ -178,6 +238,7 @@ struct UIValidationRoot: View {
                 case "calendar": SystemCalendarSheet(sunday: Semester.weekStart(forDay: Date()))
                 case "grades", "mooc", "chaoxing": GradesView()
                 case "card": NavigationStack { CardView() }
+                case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
                 case "browser":
                     TabView {
                         NavigationStack { PortalWebViewScreen(url: URL(string: "http://127.0.0.1:8787/index.html")!) }
@@ -187,6 +248,7 @@ struct UIValidationRoot: View {
                 }
             } else { ProgressView() }
         }
+        .background { if ready { LiveActivityCoordinator() } }
         .overlay(alignment: .bottomTrailing) {
             if ProcessInfo.processInfo.arguments.contains("--browser-checks") {
                 PortalWebView(browser: testBrowser).frame(width: 1, height: 1).opacity(0.01)
@@ -201,10 +263,33 @@ struct UIValidationRoot: View {
                 runSessionPersistenceCheck(save: false)
                 return
             }
+            if ProcessInfo.processInfo.arguments.contains("--live-activity-data-checks") {
+                environment.session.seedScreenshotSession()
+                environment.repository.seedUIValidation()
+                let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("live-activity-data-checks.txt")
+                do {
+                    try environment.repository.verifyLiveActivityPublication()
+                    try "PASS: nine real repository payloads, 4KB budget, account isolation, zero balance, future manual without portal cache and custom target/templates".write(to: output, atomically: true, encoding: .utf8)
+                } catch {
+                    try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
+                }
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) {
                 environment.session.seedScreenshotSession()
+                environment.dynamicIslandStore.kind = screen == "live-activity-custom" ? .custom : .nextCourse
             }
             environment.repository.seedUIValidation()
+            if screen == "live-activity-custom" {
+                environment.dynamicIslandStore.customTitle = "{course}"
+                environment.dynamicIslandStore.customSubtitle = "卡 {card} · 网 {net}"
+                environment.dynamicIslandStore.customValue = "{week}"
+                environment.dynamicIslandStore.customIcon = "bell.fill"
+                environment.dynamicIslandStore.accent = "purple"
+                environment.dynamicIslandStore.customDeadlineEnabled = true
+                environment.dynamicIslandStore.customDeadline = Date().addingTimeInterval(3600)
+            }
             if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }
             ready = true
             if ProcessInfo.processInfo.arguments.contains("--live-activity-checks") {
@@ -603,6 +688,8 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
         let legacyState = try JSONDecoder().decode(NEULumenActivityAttributes.ContentState.self,
             from: Data(#"{"title":"旧配置","subtitle":"","value":"","kind":"custom","updatedAt":0}"#.utf8))
         try require(legacyState.endDate == nil && legacyState.symbol == "sparkles", "Legacy state failed to decode")
+        try require(legacyState.accent == nil && legacyState.symbolName == nil && legacyState.secondaryValue == nil && legacyState.progress == nil,
+            "Legacy content did not decode optional new fields")
 
         var request = DynamicIslandActivityManager.Request(enabled: true, accountID: "fixture-a",
             campus: "浑南校区", state: .init(title: "原生实时活动", subtitle: "ActivityKit 生命周期验证",
@@ -618,6 +705,20 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
         try await manager.settleForValidation()
         try await waitFor({ active().first?.id == firstID && active().first?.content.state.title == request.state?.title },
             "Native update did not propagate: id=\(active().first?.id ?? "none"), title=\(active().first?.content.state.title ?? "none")")
+
+        request.state?.accent = "pink"
+        request.state?.symbolName = "heart.fill"
+        request.state?.secondaryValue = "附加信息"
+        request.state?.progress = 0.5
+        let customTarget = Date().addingTimeInterval(3600)
+        request.state?.endDate = customTarget
+        request.state?.countdownTitle = "距截止"
+        manager.synchronize(request)
+        try await manager.settleForValidation()
+        try require(active().first?.content.state.accent == "pink" && active().first?.content.state.symbol == "heart.fill",
+            "Native theme/icon update did not reach ActivityKit")
+        try require(abs((active().first?.content.staleDate ?? .distantPast).timeIntervalSince(customTarget)) < 1,
+            "Custom countdown did not expire at its target")
 
         request.enabled = false
         manager.synchronize(request)

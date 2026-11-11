@@ -37,6 +37,7 @@ final class PortalRepository {
     private(set) var weekState: LoadState = .idle
 
     private var gradesCache: [GradeSemester]?
+    private(set) var gradesUpdatedAt: Date?
     private var gradeRequestID = 0
     private(set) var gradesState: LoadState = .idle
     private(set) var gradesWarning: String?
@@ -79,8 +80,10 @@ final class PortalRepository {
     private var billsRequestID = UUID()
     private(set) var netInfo: NetUsageInfo?
     private(set) var netState: LoadState = .idle
+    private(set) var netUpdatedAt: Date?
     private(set) var electricInfo: ElectricInfo?
     private(set) var electricState: LoadState = .idle
+    private(set) var electricUpdatedAt: Date?
 
     private static let monthFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -99,6 +102,15 @@ final class PortalRepository {
 
     private var accountGeneration = UUID()
     private var loadedForSID: String?
+    private var currentAccountKey: String? {
+        guard let user = session.user else { return nil }
+        let key = user.sid.isEmpty ? user.uid : user.sid
+        return key.isEmpty ? nil : key
+    }
+    private var hasCurrentLiveActivityAccount: Bool {
+        LiveActivityDataPolicy.accountMatches(current: currentAccountKey, loaded: loadedForSID,
+                                             authenticated: session.phase == .loggedIn)
+    }
     private var appsLoaded = false
     private var appsLoading = false
 
@@ -112,7 +124,7 @@ final class PortalRepository {
 
     /// 登录用户变化时清空缓存，避免串号。
     func ensureLoadedForCurrentUser() async {
-        let sid = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
+        let sid = currentAccountKey ?? ""
         guard loadedForSID != sid else { return }
         accountGeneration = UUID()
         campusOverride = UserDefaults.standard.string(forKey: "lumen.campus." + sid).flatMap(Campus.init(rawValue:))
@@ -129,6 +141,7 @@ final class PortalRepository {
         weekCache.removeAll()
         loadingWeeks.removeAll()
         gradesCache = nil
+        gradesUpdatedAt = nil
         gradeRequestID += 1
         gradesWarning = nil
         cgRequestID = UUID()
@@ -152,7 +165,9 @@ final class PortalRepository {
         billsCache.removeAll()
         truncatedCache.removeAll()
         netInfo = nil
+        netUpdatedAt = nil
         electricInfo = nil
+        electricUpdatedAt = nil
         cardState = .idle
         billsState = .idle
         netState = .idle
@@ -199,13 +214,17 @@ final class PortalRepository {
             if NetworkError.isCancellation(error) {
                 await session.waitForRecovery()
                 try checkRequest()
-                return try await operation()
+                let value = try await operation()
+                try checkRequest()
+                return value
             }
             if let e = error as? NetworkError, e.isSessionExpired {
                 guard await session.silentRelogin() else { throw e }
                 try checkRequest()
                 user = session.user
-                return try await operation()
+                let value = try await operation()
+                try checkRequest()
+                return value
             }
             throw error
         }
@@ -363,8 +382,10 @@ final class PortalRepository {
     /// 拉取某天所在教学周；命中缓存直接返回，不重复请求教务。
     /// 同一周已有在途加载时等待其完成，避免快速翻周时请求被吞掉。
     func loadWeek(containing date: Date, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard hasCurrentLiveActivityAccount else { return }
         let generation = accountGeneration
-        let weekStart = Semester.weekStart(forDay: date)
+        let weekStart = LiveActivityDataPolicy.portalWeekStart(for: date)
         if !force, weekCache[weekStart] != nil {
             weekState = .loaded
             return
@@ -423,7 +444,7 @@ final class PortalRepository {
         for (target, source) in holidays.replacementDates {
             guard let targetDate = PortalDate.day(target), targetDate >= first, targetDate < end,
                   let sourceDate = PortalDate.day(source) else { continue }
-            let sourceWeek = Semester.weekStart(forDay: sourceDate)
+            let sourceWeek = LiveActivityDataPolicy.portalWeekStart(for: sourceDate)
             if sourceWeek != sunday && sourceWeek != nextSunday {
                 await loadWeek(containing: sourceDate, force: force)
             }
@@ -452,7 +473,7 @@ final class PortalRepository {
         let replacementsLoaded = holidays.replacementDates.allSatisfy { target, source in
             guard let date = PortalDate.day(target), date >= first && date < end,
                   let sourceDate = PortalDate.day(source) else { return true }
-            return weekCache[Semester.weekStart(forDay: sourceDate)] != nil
+            return weekCache[LiveActivityDataPolicy.portalWeekStart(for: sourceDate)] != nil
         }
         return weekCache[sunday] != nil && weekCache[next] != nil && replacementsLoaded
     }
@@ -462,18 +483,91 @@ final class PortalRepository {
             replacements: holidays.replacementDates))
     }
 
-    /// 今日时间轴：门户周缓存 ∩ 今天 + 本机日程，合并相邻节次。
-    func todayTimeline() -> [CourseOccurrence] {
-        let today = Calendar.current.startOfDay(for: Date())
-        let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: today)!
-        let portal = effectivePortalOccurrences(from: today, to: tomorrow)
-        return (portal + planner.occurrences(onDay: today)).mergeConsecutive()
+    /// 今日时间轴包含跨午夜仍进行中的事项，和课表页使用同一调休/本机数据。
+    func todayTimeline(now: Date = Date()) -> [CourseOccurrence] {
+        guard hasCurrentLiveActivityAccount else { return [] }
+        return activitySchedule(now: now, dayOnly: true).items.map(\.occurrence)
     }
 
-    /// 下一节未结束的课程。
-    func nextCourse() -> CourseOccurrence? {
-        let now = Semester.minutesNow()
-        return todayTimeline().first { $0.slot.endMinutes > now }
+    /// 不再只看今天：从当前时刻选未来七个自然日内最早未结束的事项。
+    /// 本机手动课程/日程不需要门户周缓存；正在进行的事项优先。
+    func nextCourse(now: Date = Date()) -> CourseOccurrence? {
+        guard hasCurrentLiveActivityAccount else { return nil }
+        return activitySchedule(now: now).next?.occurrence
+    }
+
+    private func activityRange(now: Date, dayOnly: Bool) -> (first: Date, end: Date) {
+        let cal = Calendar.current
+        let first = cal.startOfDay(for: now)
+        return (first, cal.date(byAdding: .day, value: dayOnly ? 1 : 7, to: first)!)
+    }
+
+    private func localOccurrences(from first: Date, to end: Date) -> [CourseOccurrence] {
+        planner.events.compactMap { event in
+            guard let date = PortalDate.day(event.dateIso), date >= first && date < end else { return nil }
+            return CourseOccurrence(date: date, slot: event.toSlot())
+        }
+    }
+
+    private func portalRangeIsLoaded(from first: Date, to end: Date) -> Bool {
+        let cal = Calendar.current
+        var day = cal.startOfDay(for: first)
+        while day < end {
+            guard weekCache[LiveActivityDataPolicy.portalWeekStart(for: day)] != nil else { return false }
+            if let source = holidays.replacementDates[PortalDate.isoDay(day)], let sourceDate = PortalDate.day(source),
+               weekCache[LiveActivityDataPolicy.portalWeekStart(for: sourceDate)] == nil { return false }
+            day = cal.date(byAdding: .day, value: 1, to: day)!
+        }
+        return true
+    }
+
+    private func activitySchedule(now: Date, dayOnly: Bool = false, localOnly: Bool = false) -> LiveActivitySchedule {
+        let range = activityRange(now: now, dayOnly: dayOnly)
+        // Yesterday is needed only to retain an overnight event intersecting today.
+        let sourceFirst = Calendar.current.date(byAdding: .day, value: -1, to: range.first)!
+        let portal = localOnly ? [] : effectivePortalOccurrences(from: sourceFirst, to: range.end)
+        return LiveActivitySchedule.snapshot(portal + localOccurrences(from: sourceFirst, to: range.end),
+            from: range.first, to: range.end, at: now,
+            portalLoaded: localOnly || portalRangeIsLoaded(from: sourceFirst, to: range.end))
+    }
+
+    /// 全局协调器只在登录/前台/类别切换/跨日准备所选来源；分钟 tick 只渲染缓存。
+    /// 自定义变量和作业只读当前账号现有缓存，不暗中登录三方平台。
+    func prepareLiveActivityData(for store: DynamicIslandStore, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard hasCurrentLiveActivityAccount, store.enabled else { return }
+        let generation = accountGeneration
+        switch store.kind {
+        case .nextCourse, .dayOverview:
+            let now = Date()
+            let range = activityRange(now: now, dayOnly: store.kind == .dayOverview)
+            let first = Calendar.current.date(byAdding: .day, value: -1, to: range.first)!
+            var weeks = Set<Date>()
+            var day = first
+            while day < range.end {
+                weeks.insert(LiveActivityDataPolicy.portalWeekStart(for: day))
+                if let source = holidays.replacementDates[PortalDate.isoDay(day)], let date = PortalDate.day(source) {
+                    weeks.insert(LiveActivityDataPolicy.portalWeekStart(for: date))
+                }
+                day = Calendar.current.date(byAdding: .day, value: 1, to: day)!
+            }
+            for week in weeks.sorted() {
+                await loadWeek(containing: week, force: force)
+                guard generation == accountGeneration, hasCurrentLiveActivityAccount, !Task.isCancelled else { return }
+            }
+        case .cardBalance:
+            if force || cardBalance == nil { await loadCardOverview() }
+        case .netBalance:
+            if force || netInfo == nil { await loadCardOverview() }
+        case .electricBalance:
+            if force || electricInfo == nil { await loadCardOverview() }
+        case .academicOverview:
+            await loadGrades(force: force)
+        case .planner, .assignments, .custom:
+            // PlannerEventStore loads synchronously. AssignmentCacheStore was
+            // restored by ensureLoadedForCurrentUser; missing templates stay unread.
+            break
+        }
     }
 
     // MARK: - 成绩
@@ -566,6 +660,8 @@ final class PortalRepository {
     }
 
     func loadGrades(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard hasCurrentLiveActivityAccount else { return }
         if !force, gradesCache != nil {
             gradesState = .loaded
             return
@@ -593,6 +689,7 @@ final class PortalRepository {
     func applyGradeReport(_ report: GradeReport) {
         gradeRequestID += 1
         gradesCache = report.semesters
+        gradesUpdatedAt = Date()
         gradesWarning = report.failedTerms.isEmpty ? nil : "部分学期未能同步：" + report.failedTerms.joined(separator: "、")
         gradesState = .loaded
     }
@@ -639,13 +736,13 @@ final class PortalRepository {
             }
         }
         switch net {
-        case .success(let value): netInfo = value; netState = .loaded
+        case .success(let value): netInfo = value; netUpdatedAt = Date(); netState = .loaded
         case .failure(let error):
             if NetworkError.isCancellation(error) { netState = netInfo == nil ? .idle : .loaded }
             else { netState = netInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
         }
         switch elec {
-        case .success(let value): electricInfo = value; electricState = .loaded
+        case .success(let value): electricInfo = value; electricUpdatedAt = Date(); electricState = .loaded
         case .failure(let error):
             if NetworkError.isCancellation(error) { electricState = electricInfo == nil ? .idle : .loaded }
             else { electricState = electricInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
@@ -747,39 +844,207 @@ final class PortalRepository {
         return String(format: "%.2f", balance.balance)
     }
 
-    func liveActivityDataIsReady(for kind: DynamicIslandStore.ContentKind) -> Bool {
-        let sid = session.user?.sid.isEmpty == false ? session.user?.sid : session.user?.uid
-        guard let sid, !sid.isEmpty, loadedForSID == sid else { return false }
+    func liveActivityDataIsReady(for kind: DynamicIslandStore.ContentKind, now: Date = Date()) -> Bool {
+        guard hasCurrentLiveActivityAccount else { return false }
         switch kind {
-        case .nextCourse: return weekCache[Semester.weekStart(forDay: Date())] != nil
-        case .cardBalance: return cardUpdatedAt != nil
-        case .custom: return true
+        case .nextCourse: return activitySchedule(now: now).isReady
+        case .cardBalance: return cardBalance != nil && cardUpdatedAt != nil
+        case .netBalance: return netInfo != nil
+        case .electricBalance: return electricInfo != nil
+        case .assignments: return activityAssignments.hasLoadedData
+        case .planner, .custom: return true
+        case .dayOverview:
+            let schedule = activitySchedule(now: now, dayOnly: true)
+            return schedule.portalLoaded || !schedule.items.isEmpty
+        case .academicOverview: return gradesCache != nil
         }
     }
 
-    /// Publish only data loaded for the currently authenticated account.
-    func liveActivityState(store: DynamicIslandStore) -> NEULumenActivityAttributes.ContentState? {
-        let sid = session.user?.sid.isEmpty == false ? session.user?.sid : session.user?.uid
-        guard let sid, !sid.isEmpty, loadedForSID == sid else { return nil }
+    /// A nil state means unread, never an already loaded empty timetable.
+    /// The coordinator can retain an existing Activity while contentReady is false.
+    func liveActivityDataStatus(for kind: DynamicIslandStore.ContentKind, now: Date = Date()) -> String {
+        guard hasCurrentLiveActivityAccount else { return "等待当前账号登录与缓存加载" }
+        func sourceStatus(_ state: LoadState, ready: Bool) -> String {
+            if ready { return "已读取当前账号数据" }
+            switch state {
+            case .loading: return "正在读取"
+            case .failed(let message): return "未读取：" + message
+            default: return "未读取，请同步所选来源"
+            }
+        }
+        switch kind {
+        case .nextCourse, .planner:
+            let local = kind == .planner
+            let schedule = activitySchedule(now: now, localOnly: local)
+            switch schedule.availability {
+            case .notLoaded: return sourceStatus(weekState, ready: false)
+            case .empty: return local ? "未来七天暂无个人日程" : "未来七天暂无课程或日程"
+            case .finished: return local ? "范围内个人日程全部已结束" : "范围内课程与日程全部已结束"
+            case .upcoming, .ongoing:
+                return schedule.portalLoaded ? "已读取当前账号事项" : "已有可用事项；门户课表尚未完整读取"
+            }
+        case .cardBalance: return sourceStatus(cardState, ready: cardBalance != nil)
+        case .netBalance: return sourceStatus(netState, ready: netInfo != nil)
+        case .electricBalance:
+            if electricInfo?.unbound == true { return "已读取：尚未绑定宿舍" }
+            return sourceStatus(electricState, ready: electricInfo != nil)
+        case .assignments:
+            let assignments = activityAssignments
+            guard assignments.hasLoadedData else { return "作业未读取，请在学习页登录所需平台并同步" }
+            return "已读取 \(assignments.loadedPlatformCount) 个平台；仅汇总已同步作业" + (assignments.hasUnreadData ? "（部分未读取）" : "")
+        case .dayOverview:
+            let schedule = activitySchedule(now: now, dayOnly: true)
+            if !schedule.portalLoaded { return schedule.items.isEmpty ? sourceStatus(weekState, ready: false) : "已读取日程；门户课表尚未完整读取" }
+            return schedule.items.isEmpty ? "今天暂无课程或日程" : schedule.remainingCount == 0 ? "今天的事项全部已结束" : "已读取今日课表与日程"
+        case .academicOverview: return sourceStatus(gradesState, ready: gradesCache != nil)
+        case .custom: return "只读当前账号已加载缓存；缺失变量显示未读取"
+        }
+    }
+
+    private var activityAssignments: LiveActivityAssignments {
+        LiveActivityAssignments(cg: cgReport, reports: assignmentReports)
+    }
+
+    private func activityTemplateValues(now: Date) -> [String: String] {
+        var values = ["date": LiveActivityDataPolicy.dateText(now, format: "yyyy-MM-dd"),
+                      "time": LiveActivityDataPolicy.dateText(now, format: "HH:mm")]
+        let week = Semester.weekNumberOf(now)
+        values["week"] = (1...Semester.totalWeeks).contains(week) ? "第\(week)周" : "非教学周"
+        let schedule = activitySchedule(now: now)
+        if let next = schedule.next {
+            values["course"] = next.occurrence.slot.name
+            values["room"] = next.occurrence.slot.room
+            values["start"] = LiveActivityDataPolicy.dateText(next.start, format: "MM-dd HH:mm")
+            values["end"] = LiveActivityDataPolicy.dateText(next.end, format: "MM-dd HH:mm")
+        } else if schedule.isReady {
+            values["course"] = schedule.availability == .empty ? "无课程或日程" : "全部已结束"
+        }
+        values["card"] = LiveActivityDataPolicy.money(cardBalance?.balance)
+        values["net"] = LiveActivityDataPolicy.money(netInfo?.balance)
+        if let electric = electricInfo {
+            if electric.unbound { values["electric"] = "未绑定" }
+            else if let kwh = electric.remainKwh, kwh.isFinite { values["electric"] = String(format: "%.1f kWh", kwh) }
+        }
+        values["pending"] = activityAssignments.pendingText
+        if gradesCache != nil, let gpa = LiveActivityAcademic(semesters: grades).gpa {
+            values["gpa"] = String(format: "%.2f", gpa)
+        }
+        return values
+    }
+
+    /// Pure publication from current-account caches. nil is reserved for unread sources.
+    func liveActivityState(store: DynamicIslandStore, now: Date = Date()) -> NEULumenActivityAttributes.ContentState? {
+        guard hasCurrentLiveActivityAccount else { return nil }
+        func content(_ title: String, subtitle: String, value: String,
+                     updatedAt: Date = .distantPast, start: Date? = nil, end: Date? = nil,
+                     symbol: String? = nil, secondary: String? = nil, progress: Double? = nil,
+                     countdown: String? = nil, destination: String = "settings") -> NEULumenActivityAttributes.ContentState {
+            .init(title: String(title.prefix(80)), subtitle: String(subtitle.prefix(160)),
+                  value: String(value.prefix(32)), kind: store.kind.rawValue, updatedAt: updatedAt,
+                  startDate: start, endDate: end, accent: LiveActivityDataPolicy.accent(store.accent),
+                  symbolName: LiveActivityDataPolicy.symbol(symbol ?? store.kind.icon),
+                  secondaryValue: secondary.map { String($0.prefix(64)) },
+                  progress: store.showProgress ? LiveActivityDataPolicy.progress(progress) : nil,
+                  countdownTitle: countdown,
+                  destinationPath: LiveActivityDataPolicy.destinations.contains(destination) ? destination : "settings")
+        }
         switch store.kind {
-        case .nextCourse:
-            guard let next = nextCourse() else { return nil }
-            let day = Calendar.current.startOfDay(for: next.date)
-            let start = Calendar.current.date(byAdding: .minute, value: next.slot.startMinutes, to: day)
-            let end = Calendar.current.date(byAdding: .minute, value: next.slot.endMinutes, to: day)
-            return .init(title: String(next.slot.name.prefix(80)),
-                subtitle: String((next.slot.room.isEmpty ? "地点待定" : next.slot.room).prefix(160)),
-                value: Semester.hm(next.slot.startMinutes), kind: store.kind.rawValue,
-                updatedAt: .distantPast, startDate: start, endDate: end)
+        case .nextCourse, .planner:
+            let local = store.kind == .planner
+            let schedule = activitySchedule(now: now, localOnly: local)
+            guard schedule.isReady else { return nil }
+            guard let next = schedule.next else {
+                let empty = schedule.availability == .empty
+                return content(local ? (empty ? "近期暂无个人日程" : "范围内日程已结束") :
+                    (empty ? "暂无后续课程或日程" : "课程与日程已结束"),
+                    subtitle: local ? "未来七天的本机日程已读取" : "未来七个自然日的课表与日程已读取",
+                    value: empty ? "无事项" : "已结束", destination: "course")
+            }
+            let ongoing = next.isOngoing(at: now)
+            let label = local ? (ongoing ? "距结束" : "距开始") : (ongoing ? "距下课" : "距上课")
+            let date = LiveActivityDataPolicy.dateText(next.start, format: "MM-dd HH:mm")
+            let room = next.occurrence.slot.room.isEmpty ? "地点未读取" : next.occurrence.slot.room
+            let partial = !schedule.portalLoaded ? " · 课表未完整读取" : ""
+            return content(next.occurrence.slot.name, subtitle: "\(room) · \(date)\(partial)",
+                value: LiveActivityDataPolicy.countdown(to: ongoing ? next.end : next.start, at: now),
+                start: next.start, end: next.end, secondary: ongoing ? "进行中" : "即将开始",
+                progress: next.progress(at: now), countdown: label, destination: "course")
         case .cardBalance:
-            guard let balance = cardSummaryText, let updatedAt = cardUpdatedAt else { return nil }
-            return .init(title: "校园卡余额", subtitle: "最近同步的可用余额", value: "¥\(balance)",
-                kind: store.kind.rawValue, updatedAt: updatedAt)
+            guard let balance = LiveActivityDataPolicy.money(cardBalance?.balance), let updatedAt = cardUpdatedAt else { return nil }
+            return content("校园卡余额", subtitle: cardWarning == nil ? "最近同步的真实可用余额" : "本次同步失败，保留上次真实余额",
+                value: balance, updatedAt: updatedAt, secondary: cardBalance?.status, destination: "card")
         case .custom:
-            let title = store.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            return .init(title: String((title.isEmpty ? "东大提醒" : title).prefix(80)),
-                subtitle: String(store.customSubtitle.prefix(160)), value: "", kind: store.kind.rawValue,
-                updatedAt: .distantPast)
+            let values = activityTemplateValues(now: now)
+            let rawTitle = store.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = LiveActivityTemplate.render(rawTitle.isEmpty ? "东大提醒" : rawTitle, values: values, limit: 80)
+            let subtitle = LiveActivityTemplate.render(store.customSubtitle, values: values, limit: 160)
+            var value = LiveActivityTemplate.render(store.customValue, values: values, limit: 32)
+            let deadline = store.customDeadlineEnabled && store.customDeadline.timeIntervalSinceReferenceDate.isFinite ? store.customDeadline : nil
+            if let deadline, value.isEmpty {
+                value = deadline > now ? LiveActivityDataPolicy.countdown(to: deadline, at: now) : "已到期"
+            }
+            return content(title, subtitle: subtitle, value: value, end: deadline, symbol: store.customIcon,
+                countdown: deadline.map { $0 > now ? "距截止" : "已到期" }, destination: "settings")
+        case .netBalance:
+            guard let net = netInfo, let balance = LiveActivityDataPolicy.money(net.balance) else { return nil }
+            return content("校园网余额", subtitle: "最近成功同步的余额与用量", value: balance,
+                updatedAt: netUpdatedAt ?? .distantPast,
+                secondary: net.flowFromPortal ? "本月流量 \(net.usedFlowText)" : "本月流量未读取", destination: "card")
+        case .electricBalance:
+            guard let electric = electricInfo else { return nil }
+            if electric.unbound {
+                return content("宿舍电量", subtitle: "在校园卡页填写宿舍房间码后同步", value: "未绑定",
+                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card")
+            }
+            guard let remaining = electric.remainKwh, remaining.isFinite else {
+                return content("宿舍电量", subtitle: "接口已读取，但未提供可用余量", value: "未读取",
+                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card")
+            }
+            return content("宿舍电量", subtitle: "最近读取的剩余电量", value: String(format: "%.1f kWh", remaining),
+                updatedAt: electricUpdatedAt ?? .distantPast,
+                secondary: remaining <= 5 ? "电量偏低，请及时检查缴费" : "以校园电费系统最新数据为准", destination: "card")
+        case .assignments:
+            let assignments = activityAssignments
+            guard assignments.hasLoadedData else { return nil }
+            let timestamp = ([cgUpdatedAt].compactMap { $0 } + Array(assignmentUpdatedAt.values)).max() ?? .distantPast
+            let coverage = "仅汇总已同步的 \(assignments.loadedPlatformCount) 个平台" + (assignments.hasUnreadData ? " · 部分未读取" : "")
+            guard let pending = assignments.pendingText else {
+                return content("学习作业", subtitle: coverage, value: "待同步", updatedAt: timestamp,
+                    secondary: "请进入学习页完成平台登录与同步", destination: "learning")
+            }
+            guard let next = assignments.next(at: now) else {
+                return content("已同步作业已完成", subtitle: coverage, value: "待办 \(pending)", updatedAt: timestamp,
+                    progress: assignments.progress, destination: "learning")
+            }
+            let deadline = next.deadline.flatMap { $0 > now ? $0 : nil }
+            let overdue = assignments.overdueCount(at: now)
+            return content(next.title, subtitle: "\(next.platform) · \(coverage)", value: "待办 \(pending)",
+                updatedAt: timestamp, end: deadline,
+                secondary: overdue > 0 ? "\(overdue) 项已截止但未完成" : "按截止日期优先展示",
+                progress: assignments.progress, countdown: deadline == nil ? nil : "距截止", destination: "learning")
+        case .dayOverview:
+            let schedule = activitySchedule(now: now, dayOnly: true)
+            guard schedule.isReady else { return nil }
+            let next = schedule.next
+            let summary = next.map { "下一项：" + $0.occurrence.slot.name } ?? "今天已加载的事项已全部结束"
+            let count = schedule.items.count
+            return content("今日总览", subtitle: schedule.portalLoaded ? summary : summary + " · 课表未完整读取",
+                value: "剩余 \(schedule.remainingCount)", secondary: "已结束 \(schedule.finishedCount) / 已加载 \(count)",
+                progress: count > 0 ? Double(schedule.finishedCount) / Double(count) : nil, destination: "course")
+        case .academicOverview:
+            guard gradesCache != nil else { return nil }
+            let academic = LiveActivityAcademic(semesters: grades)
+            guard let gpa = academic.gpa else {
+                return content("学业总览", subtitle: academic.semester?.name ?? "成绩报告已读取", value: "暂无可统计成绩",
+                    updatedAt: gradesUpdatedAt ?? .distantPast,
+                    secondary: "缺失或未知成绩不会作为零分统计", destination: "learning")
+            }
+            var details: [String] = []
+            if let average = academic.weightedAverage { details.append(String(format: "均分 %.1f", average)) }
+            if let credits = academic.credits { details.append(String(format: "计入 %.1f 学分", credits)) }
+            return content("学业总览", subtitle: academic.semester?.name ?? "已加载学期",
+                value: String(format: "GPA %.2f", gpa), updatedAt: gradesUpdatedAt ?? .distantPast,
+                secondary: details.joined(separator: " · "), progress: academic.progress, destination: "learning")
         }
     }
 }
@@ -793,6 +1058,7 @@ final class AppEnvironment {
     let dynamicIslandStore: DynamicIslandStore
     let liveActivityManager = DynamicIslandActivityManager()
     var pendingActivityURL: URL?
+    var pendingLearningSection: String?
 
     init() {
         let store = SessionStore()

@@ -15,8 +15,10 @@ SCREENSHOTS = (
     'mooc-light.png', 'chaoxing-light.png', 'card-light.png',
     'profile-light.png', 'favorites-light.png', 'holidays-light.png',
     'calendar-light.png', 'browser-light.png', 'browser-dark.png',
+    'live-activity-light.png', 'live-activity-custom-light.png',
+    'live-activity-dark.png', 'profile-dark.png',
 )
-CHECKS = ('browser-checks.txt', 'session-save.txt', 'session-restore.txt', 'live-activity-checks.txt')
+CHECKS = ('browser-checks.txt', 'session-save.txt', 'session-restore.txt', 'live-activity-checks.txt', 'live-activity-data-checks.txt')
 MANIFEST = 'ui-preview.json'
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
 

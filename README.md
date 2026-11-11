@@ -40,6 +40,12 @@
 
 [全部截图](https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/NEU-Lumen-ui-preview.zip) · [对应提交与截图来源](https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/ui-preview.json)
 
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/live-activity-light.png" width="245" alt="实时活动配置" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/live-activity-custom-light.png" width="245" alt="自定义模板与内容预览" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/profile-dark.png" width="245" alt="深色个人页与学院徽章" />
+</p>
+
 ## 安装
 
 下载 [未签名 IPA](https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/NEU-Lumen-iOS-unsigned.ipa)，使用 Sideloadly、AltStore 或开发者证书签名后安装。

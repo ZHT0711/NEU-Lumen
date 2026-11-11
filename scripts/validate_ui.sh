@@ -50,7 +50,7 @@ SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profile favorites holidays calendar; do
+for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
@@ -60,6 +60,11 @@ xcrun simctl ui "$SIM_ID" appearance dark
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=home
 sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/home-dark.png"
+for DARK_SCREEN in profile live-activity; do
+  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$DARK_SCREEN"
+  sleep 3
+  xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$DARK_SCREEN-dark.png"
+done
 xcrun simctl ui "$SIM_ID" appearance light
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=browser --browser-checks
 CONTAINER="$(xcrun simctl get_app_container "$SIM_ID" edu.neu.lumen data)"
@@ -74,6 +79,16 @@ xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/browser-dark.png"
 cp "$CONTAINER/Documents/browser-checks.txt" "$OUTPUT/browser-checks.txt"
 cat "$OUTPUT/browser-checks.txt"
 grep -q "^PASS:" "$OUTPUT/browser-checks.txt"
+
+xcrun simctl ui "$SIM_ID" appearance light
+xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --live-activity-data-checks
+for _ in $(seq 1 30); do
+  if [[ -f "$CONTAINER/Documents/live-activity-data-checks.txt" ]]; then break; fi
+  sleep 1
+done
+cp "$CONTAINER/Documents/live-activity-data-checks.txt" "$OUTPUT/live-activity-data-checks.txt"
+cat "$OUTPUT/live-activity-data-checks.txt"
+python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("PASS:")' "$OUTPUT/live-activity-data-checks.txt"
 
 # 真正终止并重新启动 App，验证 iOS Keychain 跨进程保存与清除会话。
 for STAGE in save restore; do

@@ -22,15 +22,15 @@ struct NEULumenLiveActivity: Widget {
                 }
             }
             .padding(16)
-            .activityBackgroundTint(.clear)
-            .activitySystemActionForegroundColor(.primary)
+            .activityBackgroundTint(activityAccent(context.state.accent).opacity(0.12))
+            .activitySystemActionForegroundColor(activityAccent(context.state.accent))
             .widgetURL(context.state.destination)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: context.state.symbol)
                         .font(.title3)
-                        .foregroundStyle(.cyan)
+                        .foregroundStyle(activityAccent(context.state.accent))
                         .accessibilityHidden(true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
@@ -41,14 +41,20 @@ struct NEULumenLiveActivity: Widget {
                         ActivityDetails(state: context.state)
                         if context.isStale {
                             Text("打开应用更新").font(.caption2).foregroundStyle(.secondary)
-                        } else if let start = context.state.startDate, let end = context.state.endDate, start < end {
-                            ProgressView(timerInterval: start...end, countsDown: false)
-                                .tint(.cyan)
+                        }
+                        if !context.isStale, let progress = context.state.progress, progress.isFinite {
+                            if let start = context.state.startDate, let end = context.state.endDate, start < end {
+                                ProgressView(timerInterval: start...end, countsDown: false)
+                                    .tint(activityAccent(context.state.accent))
+                            } else {
+                                ProgressView(value: min(max(progress, 0), 1))
+                                    .tint(activityAccent(context.state.accent))
+                            }
                         }
                     }
                 }
             } compactLeading: {
-                Image(systemName: context.state.symbol).foregroundStyle(.cyan)
+                Image(systemName: context.state.symbol).foregroundStyle(activityAccent(context.state.accent))
             } compactTrailing: {
                 if context.isStale {
                     Image(systemName: "arrow.clockwise").accessibilityLabel("内容待更新")
@@ -60,10 +66,10 @@ struct NEULumenLiveActivity: Widget {
                         .frame(maxWidth: 64)
                 }
             } minimal: {
-                Image(systemName: context.state.symbol).foregroundStyle(.cyan)
+                Image(systemName: context.state.symbol).foregroundStyle(activityAccent(context.state.accent))
             }
             .widgetURL(context.state.destination)
-            .keylineTint(.cyan)
+            .keylineTint(activityAccent(context.state.accent))
         }
     }
 }
@@ -75,6 +81,9 @@ private struct ActivityDetails: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(state.title).font(.headline).lineLimit(2)
             Text(state.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            if let secondary = state.secondaryValue, !secondary.isEmpty {
+                Text(secondary).font(.caption.weight(.medium)).foregroundStyle(activityAccent(state.accent)).lineLimit(2)
+            }
             if let start = state.startDate, let end = state.endDate {
                 HStack(spacing: 3) {
                     Text(start, style: .time)
@@ -92,21 +101,39 @@ private struct ActivityValue: View {
     let state: NEULumenActivityAttributes.ContentState
     let isStale: Bool
 
+    private var target: Date? {
+        if state.countdownTitle == "距上课" || state.countdownTitle == "距开始" { return state.startDate }
+        return state.endDate
+    }
+
     var body: some View {
-        if let end = state.endDate, !isStale {
+        if let target, !isStale, target > Date() {
             VStack(alignment: .trailing, spacing: 3) {
-                Text("距下课").font(.caption2).foregroundStyle(.secondary)
-                Text(timerInterval: end.addingTimeInterval(-24 * 3600)...end, countsDown: true)
+                Text(state.countdownTitle ?? "倒计时").font(.caption2).foregroundStyle(.secondary)
+                Text(timerInterval: Date()...target, countsDown: true)
                     .font(.headline.monospacedDigit())
                     .multilineTextAlignment(.trailing)
-                    .frame(width: 84)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: 96)
             }
         } else if !state.value.isEmpty {
             Text(state.value)
                 .font(.headline.monospacedDigit())
+                .foregroundStyle(activityAccent(state.accent))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
+    }
+}
+
+private func activityAccent(_ token: String?) -> Color {
+    switch token {
+    case "blue": return .blue
+    case "green": return .green
+    case "orange": return .orange
+    case "pink": return .pink
+    case "purple": return .purple
+    default: return .cyan
     }
 }
 

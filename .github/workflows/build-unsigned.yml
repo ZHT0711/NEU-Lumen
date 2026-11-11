@@ -109,6 +109,7 @@ jobs:
           node Tests/Learning/cg-login.mjs
           node Tests/OffCampusLogin/document.mjs
           python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 Tests/Performance/check.py
 
       - name: Test holidays, favorites and card form parser
         shell: bash
@@ -147,6 +148,26 @@ jobs:
             -o "${RUNNER_TEMP}/off-campus-tests"
           "${RUNNER_TEMP}/off-campus-tests"
 
+      - name: Test live activity data and configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/live-activity-data-tests.log") 2>&1
+          swiftc \
+            NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Models/*.swift \
+            NEU-Lumen/Core/Networking/*.swift \
+            NEU-Lumen/Core/Persistence/CredentialStore.swift \
+            NEU-Lumen/Core/Persistence/WebSessionStore.swift \
+            NEU-Lumen/Core/Persistence/AssignmentCacheStore.swift \
+            NEU-Lumen/Core/Services/SessionStore.swift \
+            NEU-Lumen/Core/Services/DemoData.swift \
+            NEU-Lumen/Core/Services/Semester.swift \
+            NEU-Lumen/Core/Services/DynamicIslandStore.swift \
+            Tests/LiveActivity/main.swift \
+            -o "${RUNNER_TEMP}/live-activity-data-tests"
+          "${RUNNER_TEMP}/live-activity-data-tests"
+
       - name: Build unsigned IPA
         shell: bash
         run: |
@@ -166,7 +187,7 @@ jobs:
         run: bash scripts/validate_ui.sh
 
       - name: Require warning-free compiler logs
-        run: python3 scripts/check_build_diagnostics.py "${RUNNER_TEMP}/catalog-tests.log" "${RUNNER_TEMP}/planner-tests.log" "${RUNNER_TEMP}/login-tests.log" build/ios-build.log build/ui-preview/simulator-build.log
+        run: python3 scripts/check_build_diagnostics.py "${RUNNER_TEMP}/catalog-tests.log" "${RUNNER_TEMP}/planner-tests.log" "${RUNNER_TEMP}/login-tests.log" "${RUNNER_TEMP}/live-activity-data-tests.log" build/ios-build.log build/ui-preview/simulator-build.log
 
       - name: Upload UI screenshots and checks
         if: always() && hashFiles('build/ui-preview/**') != ''

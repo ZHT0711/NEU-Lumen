@@ -24,6 +24,12 @@ struct MainTabView: View {
                 showActivityCard = url.host == "activity" && url.path == "/card"
                 showActivitySettings = url.host == "dynamic-island" || url.path == "/settings"
                 if url.host == "activity", url.path == "/course" { selection = .schedule }
+                if url.host == "activity", url.path == "/profile" { selection = .profile }
+                if url.host == "activity", url.path == "/learning" {
+                    let section = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "section" }?.value
+                    environment.pendingLearningSection = section == "grades" ? "成绩" : "作业"
+                    selection = .grades
+                }
                 environment.pendingActivityURL = nil
             }
             .sheet(isPresented: $showActivitySettings) {
