@@ -29,6 +29,11 @@ struct AppRootView: View {
         }
         .background(Color(.systemGroupedBackground))
         .background { LiveActivityCoordinator() }
+        .onOpenURL { url in
+            guard url.scheme == "neulumen", let host = url.host,
+                  ["activity", "dynamic-island"].contains(host) else { return }
+            environment.pendingActivityURL = url
+        }
         .task {
             networkMonitor.start { environment.session.networkDidChange() }
             await environment.session.restoreSession()

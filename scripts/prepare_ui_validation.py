@@ -532,6 +532,13 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
     func require(_ condition: Bool, _ message: String) throws {
         if !condition { throw NetworkError(message: message) }
     }
+    func waitFor(_ condition: () -> Bool, _ message: String) async throws {
+        for _ in 0..<200 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw NetworkError(message: message)
+    }
     func active() -> [Activity<NEULumenActivityAttributes>] {
         Activity<NEULumenActivityAttributes>.activities.filter {
             $0.activityState == .active || $0.activityState == .stale
@@ -553,22 +560,23 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
 
         var request = DynamicIslandActivityManager.Request(enabled: true, accountID: "fixture-a",
             campus: "浑南校区", state: .init(title: "原生实时活动", subtitle: "ActivityKit 生命周期验证",
-            value: "", kind: "custom", updatedAt: .distantPast), isForeground: true, refreshDate: Date())
+            value: "", kind: "custom", updatedAt: .distantPast), isForeground: true,
+            refreshDate: Date(), contentKind: "custom")
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(manager.isRunning && active().count == 1,
+        try await waitFor({ manager.isRunning && active().count == 1 },
             "Native start failed: \(manager.status) \(manager.lastError ?? "")")
         let firstID = active()[0].id
         request.state?.title = "已更新的原生实时活动"
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(active().first?.id == firstID && active().first?.content.state.title == request.state?.title,
-            "Native update did not reuse the existing activity")
+        try await waitFor({ active().first?.id == firstID && active().first?.content.state.title == request.state?.title },
+            "Native update did not propagate: id=\(active().first?.id ?? "none"), title=\(active().first?.content.state.title ?? "none")")
 
         request.enabled = false
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(!manager.isRunning && active().isEmpty, "Disabling left an activity running")
+        try await waitFor({ !manager.isRunning && active().isEmpty }, "Disabling left an activity running")
         request.enabled = true
         request.isForeground = false
         manager.synchronize(request)
@@ -577,13 +585,13 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
         request.isForeground = true
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(active().count == 1, "Foreground resume did not start an activity")
+        try await waitFor({ active().count == 1 }, "Foreground resume did not start an activity")
 
         request.accountID = "fixture-b"
         request.state?.title = "另一个账号的实时活动"
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(active().count == 1 && active().first?.attributes.accountID == "fixture-b",
+        try await waitFor({ active().count == 1 && active().first?.attributes.accountID == "fixture-b" },
             "Account switch kept the previous account's activity")
         let dismissed = active()[0]
         await dismissed.end(nil, dismissalPolicy: .immediate)
@@ -597,17 +605,24 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
         try require(active().isEmpty, "A dismissed activity was automatically recreated")
         manager.restart()
         try await manager.settleForValidation()
-        try require(active().count == 1, "Explicit restart failed")
+        try await waitFor({ active().count == 1 }, "Explicit restart failed")
 
         let restored = DynamicIslandActivityManager()
         let restoredID = active()[0].id
+        var loading = request
+        loading.state = nil
+        loading.contentReady = false
+        restored.synchronize(loading)
+        try await restored.settleForValidation()
+        try require(active().count == 1 && active()[0].id == restoredID,
+            "Loading account data discarded or duplicated the restored activity")
         restored.synchronize(request)
         try await restored.settleForValidation()
-        try require(active().count == 1 && active()[0].id == restoredID, "Restore created a duplicate")
+        try require(active().first?.id == restoredID, "Restore created a duplicate")
         request.accountID = nil
         restored.synchronize(request)
         try await restored.settleForValidation()
-        try require(active().isEmpty, "Logout left account content visible")
+        try await waitFor({ active().isEmpty }, "Logout left account content visible")
 
         // Leave a real course activity visible for a system screenshot.
         request.accountID = "fixture-preview"
@@ -616,7 +631,7 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
             startDate: Date().addingTimeInterval(-600), endDate: Date().addingTimeInterval(2400))
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(active().count == 1, "Preview activity failed to start")
+        try await waitFor({ active().count == 1 }, "Preview activity failed to start")
         try "PASS: native ActivityKit start, update, disable, foreground, account isolation, dismissal, restart, restore, logout; id=\(active()[0].id)"
             .write(to: output, atomically: true, encoding: .utf8)
     } catch {

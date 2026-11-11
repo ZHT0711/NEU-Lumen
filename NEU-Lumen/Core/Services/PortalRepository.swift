@@ -792,6 +792,7 @@ final class AppEnvironment {
     let repository: PortalRepository
     let dynamicIslandStore: DynamicIslandStore
     let liveActivityManager = DynamicIslandActivityManager()
+    var pendingActivityURL: URL?
 
     init() {
         let store = SessionStore()

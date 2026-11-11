@@ -10,6 +10,7 @@ enum AppTab: Hashable {
 
 /// 主界面：首页 / 课表 / 服务大厅 / 学习 / 我的。
 struct MainTabView: View {
+    @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .home
     @State private var scrollActivity = TabBarScrollActivity()
@@ -18,17 +19,32 @@ struct MainTabView: View {
 
     var body: some View {
         tabs
-            .onOpenURL { url in
-                guard url.scheme == "neulumen" else { return }
+            .onChange(of: environment.pendingActivityURL, initial: true) { _, pending in
+                guard let url = pending else { return }
                 showActivityCard = url.host == "activity" && url.path == "/card"
                 showActivitySettings = url.host == "dynamic-island" || url.path == "/settings"
                 if url.host == "activity", url.path == "/course" { selection = .schedule }
+                environment.pendingActivityURL = nil
             }
             .sheet(isPresented: $showActivitySettings) {
-                NavigationStack { LiveActivitySettingsView() }
+                NavigationStack {
+                    LiveActivitySettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("完成") { showActivitySettings = false }
+                            }
+                        }
+                }
             }
             .sheet(isPresented: $showActivityCard) {
-                NavigationStack { CardView() }
+                NavigationStack {
+                    CardView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("完成") { showActivityCard = false }
+                            }
+                        }
+                }
             }
             .environment(\.tabBarScrollActivity, scrollActivity)
             .modifier(ScrollingTabBarStyle(activity: scrollActivity))

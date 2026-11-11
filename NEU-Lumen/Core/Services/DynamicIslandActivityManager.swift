@@ -145,8 +145,8 @@ final class DynamicIslandActivityManager {
                     self.automaticStartBlocked = true
                     self.status = "已结束，可手动重新开启"
                     return
-                @unknown default:
-                    break
+                default:
+                    self.status = "等待系统显示"
                 }
             }
         }

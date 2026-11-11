@@ -23,6 +23,9 @@ struct LiveActivityCoordinator: View {
                     guard session.phase != .booting else { return }
                     environment.liveActivityManager.synchronize(value)
                 }
+                .onChange(of: session.phase) { _, phase in
+                    if phase != .booting { environment.liveActivityManager.synchronize(request) }
+                }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
