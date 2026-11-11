@@ -7,6 +7,13 @@
 <p align="center">东北大学一号通 · iOS 17+</p>
 
 <p align="center">
+  <a href="https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml"><img src="https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml/badge.svg" alt="Build" /></a>
+  <a href="https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly"><img src="https://img.shields.io/badge/nightly-unsigned%20IPA-1769aa" alt="Nightly IPA" /></a>
+  <img src="https://img.shields.io/badge/iOS-17%2B-111111" alt="iOS 17+" />
+  <img src="https://img.shields.io/badge/SwiftUI-native-0d7c66" alt="SwiftUI" />
+</p>
+
+<p align="center">
   <a href="https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly">下载 Nightly</a> ·
   <a href="https://github.com/ZHT0711/NEU-Lumen/actions/workflows/build-unsigned.yml">构建记录</a>
 </p>
