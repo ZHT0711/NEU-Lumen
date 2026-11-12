@@ -111,7 +111,7 @@ precondition(LiveActivityAcademic(semesters: [emptyCurrent, known]).gpa == acade
 print("Live activity academic: current/nonempty fallback, GPA, weighted mean and unknown versus real zero passed")
 
 @MainActor
-func testConfigurationMigration() throws {
+func testConfigurationMigration() async throws {
     let suite = "NEU-Lumen.LiveActivityTests." + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
