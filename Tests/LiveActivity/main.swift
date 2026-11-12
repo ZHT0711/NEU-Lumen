@@ -142,3 +142,35 @@ func testConfigurationMigration() async throws {
 }
 try await testConfigurationMigration()
 print("Live activity configuration: old four-field migration, limits, symbol/palette validation, countdown and reset passed")
+
+precondition(LiveActivityTemplate.dependencies(in: ["{course} {room} {unknown}", "{card} {card}"]) == Set(["course", "room", "card"]))
+precondition(LiveActivityTemplate.dependencies(in: ["普通文字", "{{TIME}}", "{date}"]) == Set(["date"]))
+func verifySemesterCalibration() {
+    let suite = "NEU-Lumen.SemesterTests." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let settings = SemesterSettings(defaults: defaults)
+    settings.activate(account: "fixture-a")
+    let firstDay = calendar.date(from: DateComponents(year: 2027, month: 3, day: 1))!
+    let spring = SemesterConfiguration.calibrated(name: "测试春季", firstWeekDay: firstDay,
+        teachingWeeks: 18, examWeeks: 2, calendar: calendar)
+    precondition(spring.firstWeekSunday == "2027-02-28" && spring.isValid && spring.totalWeeks == 20)
+    precondition(settings.save(spring) && settings.configuration == spring)
+    settings.activate(account: "fixture-b")
+    precondition(settings.configuration == .bundled && !settings.isCustomized)
+    settings.activate(account: "fixture-a")
+    precondition(settings.configuration == spring)
+    let restarted = SemesterSettings(defaults: defaults)
+    restarted.activate(account: "fixture-a")
+    precondition(restarted.configuration == spring)
+    var invalid = spring
+    invalid.firstWeekSunday = "2027-02-31"
+    precondition(!invalid.isValid && !settings.save(invalid))
+    invalid = spring
+    invalid.teachingWeeks = 0
+    precondition(!settings.save(invalid))
+    settings.reset()
+    precondition(settings.configuration == .bundled)
+    print("Semester calibration: Sunday normalization, account isolation, restart, invalid dates and reset passed")
+}
+verifySemesterCalibration()

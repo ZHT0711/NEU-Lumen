@@ -45,6 +45,11 @@ xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
 APP_PATH="$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
 python3 "$ROOT/scripts/check_live_activity_bundle.py" "$APP_PATH"
 xcrun simctl install "$SIM_ID" "$APP_PATH"
+CONTAINER="$(xcrun simctl get_app_container "$SIM_ID" edu.neu.lumen data)"
+# Per-run markers must not survive from a previous simulator launch/run.
+for CHECK in browser-checks download-checks download-save download-restore download-screenshot session-save session-restore live-activity-checks live-activity-data-checks; do
+  rm -f "$CONTAINER/Documents/$CHECK.txt"
+done
 python3 "$ROOT/scripts/ui_fixture_server.py" "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
@@ -55,6 +60,17 @@ for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profil
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done
+
+# The twentieth allowlisted screenshot is a real running download list, not a static mock.
+xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=downloads
+for _ in $(seq 1 60); do
+  if [[ -f "$CONTAINER/Documents/download-screenshot.txt" ]]; then break; fi
+  sleep 0.25
+done
+cp "$CONTAINER/Documents/download-screenshot.txt" "$OUTPUT/download-screenshot.txt"
+python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("PASS:")' "$OUTPUT/download-screenshot.txt"
+sleep 1
+xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/downloads-light.png"
 
 xcrun simctl ui "$SIM_ID" appearance dark
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=home
@@ -79,6 +95,34 @@ xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/browser-dark.png"
 cp "$CONTAINER/Documents/browser-checks.txt" "$OUTPUT/browser-checks.txt"
 cat "$OUTPUT/browser-checks.txt"
 grep -q "^PASS:" "$OUTPUT/browser-checks.txt"
+
+xcrun simctl ui "$SIM_ID" appearance light
+xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --download-checks
+for _ in $(seq 1 120); do
+  if [[ -f "$CONTAINER/Documents/download-checks.txt" ]]; then break; fi
+  sleep 1
+done
+cp "$CONTAINER/Documents/download-checks.txt" "$OUTPUT/download-checks.txt"
+cat "$OUTPUT/download-checks.txt"
+python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("PASS:")' "$OUTPUT/download-checks.txt"
+
+# Real process termination between a completed WKDownload and an unfinished one.
+xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --download-save-check
+for _ in $(seq 1 200); do
+  if [[ -f "$CONTAINER/Documents/download-save.txt" ]]; then break; fi
+  sleep 0.1
+done
+cp "$CONTAINER/Documents/download-save.txt" "$OUTPUT/download-save.txt"
+python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("READY:")' "$OUTPUT/download-save.txt"
+xcrun simctl terminate "$SIM_ID" edu.neu.lumen
+xcrun simctl launch "$SIM_ID" edu.neu.lumen --download-restore-check
+for _ in $(seq 1 60); do
+  if [[ -f "$CONTAINER/Documents/download-restore.txt" ]]; then break; fi
+  sleep 0.25
+done
+cp "$CONTAINER/Documents/download-restore.txt" "$OUTPUT/download-restore.txt"
+cat "$OUTPUT/download-restore.txt"
+python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("PASS:")' "$OUTPUT/download-restore.txt"
 
 xcrun simctl ui "$SIM_ID" appearance light
 xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --live-activity-data-checks

@@ -57,6 +57,8 @@ extension PortalRepository {
 
     func seedUIValidation() {
         loadedForSID = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
+        loadedForEpoch = session.requestEpoch
+        // Synthetic screenshot-only source values; never uploaded or used by the Release IPA.
         user = DemoData.user
         dataCards = DemoData.dataCards
         apps = DemoData.apps
@@ -123,6 +125,7 @@ extension PortalRepository {
         weekCache[start] = items
         weekCache[Calendar.current.date(byAdding: .day, value: 7, to: start)!] = []
         weekCache[Calendar.current.date(byAdding: .day, value: -7, to: start)!] = []
+        for key in weekCache.keys { weekStates[key] = .loaded }
         weekState = .loaded
         gradesUpdatedAt = Date()
         netUpdatedAt = Date()
@@ -130,6 +133,7 @@ extension PortalRepository {
     }
 
     func verifyLiveActivityPublication() throws {
+        try verifyActivityBoundaries()
         func require(_ condition: Bool, _ message: String) throws {
             if !condition { throw NetworkError(message: message) }
         }
@@ -181,13 +185,19 @@ extension PortalRepository {
     }
 }
 ''')
+# Parent-supplied reliability checks are private-access extensions in this disposable file only.
+with repository.open("a", encoding="utf-8") as stream:
+    stream.write("\n" + (root / "scripts/repository_validation.swift").read_text(encoding="utf-8") + "\n")
 # Screenshot-only fixture routing: never replace real app networking in the IPA,
 # and leave browser/session/ActivityKit integration checks on their real code paths.
 fixture_source = repository.read_text(encoding="utf-8")
 for signature in [
-    'func loadCardOverview() async {',
+    'func loadCardOverview(force: Bool = false) async {',
     'func loadDisplayWeek(starting sunday: Date, force: Bool = false) async {',
-    'func refreshHome() async {',
+    'func refreshHome(force: Bool = false) async {',
+    'func loadCardBalance(force: Bool = false) async {',
+    'func loadNetInfo(force: Bool = false) async {',
+    'func loadElectric(force: Bool = false) async {',
 ]:
     if fixture_source.count(signature) != 1:
         raise RuntimeError(f"Screenshot fixture hook changed: {signature}")
@@ -239,6 +249,12 @@ struct UIValidationRoot: View {
                 case "grades", "mooc", "chaoxing": GradesView()
                 case "card": NavigationStack { CardView() }
                 case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
+                case "downloads":
+                    BrowserDownloadsView(store: BrowserDownloadStore.shared)
+                        .safeAreaInset(edge: .top) {
+                            Text("模拟器演示下载 · 非真实账号数据")
+                                .font(.caption).foregroundStyle(.secondary).padding(6)
+                        }
                 case "browser":
                     TabView {
                         NavigationStack { PortalWebViewScreen(url: URL(string: "http://127.0.0.1:8787/index.html")!) }
@@ -248,13 +264,39 @@ struct UIValidationRoot: View {
                 }
             } else { ProgressView() }
         }
-        .background { if ready { LiveActivityCoordinator() } }
+        .background {
+            if ready {
+                LiveActivityCoordinator()
+                BrowserDownloadCoordinator()
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
-            if ProcessInfo.processInfo.arguments.contains("--browser-checks") {
+            if ProcessInfo.processInfo.arguments.contains("--browser-checks") ||
+                ProcessInfo.processInfo.arguments.contains("--download-checks") || screen == "downloads" {
                 PortalWebView(browser: testBrowser).frame(width: 1, height: 1).opacity(0.01)
             }
         }
         .task {
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let downloadBase = URL(string: "http://127.0.0.1:8787")!
+            if ProcessInfo.processInfo.arguments.contains("--download-checks") {
+                let output = documents.appendingPathComponent("download-checks.txt")
+                do {
+                    try await verifyBrowserDownloads(browser: testBrowser, client: environment.session.client, base: downloadBase)
+                    try "PASS: real WKDownload original PDF bytes, cookies/Referer, POST safety, blob/data, duplicate names, progress, cancel/failure, browser close, account isolation and manifest recovery".write(to: output, atomically: true, encoding: .utf8)
+                } catch {
+                    try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
+                }
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--download-save-check") ||
+                ProcessInfo.processInfo.arguments.contains("--download-restore-check") {
+                let save = ProcessInfo.processInfo.arguments.contains("--download-save-check")
+                let output = documents.appendingPathComponent(save ? "download-save.txt" : "download-restore.txt")
+                do { try await verifyBrowserDownloadProcessRestart(save: save, base: downloadBase, marker: output) }
+                catch { try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8) }
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--session-save-check") {
                 runSessionPersistenceCheck(save: true)
                 return
@@ -270,7 +312,7 @@ struct UIValidationRoot: View {
                     .appendingPathComponent("live-activity-data-checks.txt")
                 do {
                     try environment.repository.verifyLiveActivityPublication()
-                    try "PASS: nine real repository payloads, 4KB budget, account isolation, zero balance, future manual without portal cache and custom target/templates".write(to: output, atomically: true, encoding: .utf8)
+                    try "PASS: activity boundary checks, nine real repository payloads, 4KB budget, account isolation, zero balance, future manual without portal cache and custom target/templates".write(to: output, atomically: true, encoding: .utf8)
                 } catch {
                     try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
                 }
@@ -278,6 +320,9 @@ struct UIValidationRoot: View {
             }
             if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) {
                 environment.session.seedScreenshotSession()
+                let user = DemoData.user
+                BrowserDownloadStore.shared.activate(account: user.sid.isEmpty ? user.uid : user.sid,
+                                                     epoch: environment.session.requestEpoch)
                 environment.dynamicIslandStore.kind = screen == "live-activity-custom" ? .custom : .nextCourse
             }
             environment.repository.seedUIValidation()
@@ -291,6 +336,18 @@ struct UIValidationRoot: View {
                 environment.dynamicIslandStore.customDeadline = Date().addingTimeInterval(3600)
             }
             if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }
+            if screen == "downloads" {
+                // Only synthetic localhost responses enter this disposable simulator container.
+                let user = DemoData.user
+                BrowserDownloadStore.shared.activate(account: user.sid.isEmpty ? user.uid : user.sid)
+                let output = documents.appendingPathComponent("download-screenshot.txt")
+                do {
+                    try await seedBrowserDownloadScreenshot(browser: testBrowser, client: environment.session.client, base: downloadBase)
+                    ready = true
+                    try "PASS: real WKDownload synthetic screenshot has active, complete, cancelled and failed rows; no campus account data".write(to: output, atomically: true, encoding: .utf8)
+                } catch { try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8) }
+                return
+            }
             ready = true
             if ProcessInfo.processInfo.arguments.contains("--live-activity-checks") {
                 await runLiveActivityChecks(environment.liveActivityManager)
@@ -364,6 +421,7 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         }
         let requestRepository = PortalRepository(session: SessionStore(client: client))
         try await requestRepository.verifyRequestRecovery()
+        try await requestRepository.verifyDataReliability()
         let scrollActivity = TabBarScrollActivity()
         scrollActivity.moved(by: 20)
         guard scrollActivity.direction == .down else { throw NetworkError(message: "Downward tab minimization failed") }
@@ -389,6 +447,9 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
                 throw NetworkError(message: "Missing web permission purpose: \(key)")
             }
         }
+        let downloads = BrowserDownloadStore.shared
+        let fixtureUser = DemoData.user
+        downloads.activate(account: fixtureUser.sid.isEmpty ? fixtureUser.uid : fixtureUser.sid)
         await browser.start(URL(string: "http://127.0.0.1:8787/index.html")!, client: client)
         try await waitFor { browser.title == "校园网页功能验证" && !browser.isLoading }
         guard browser.webView.findInteraction != nil else { throw NetworkError(message: "Find unavailable") }
@@ -406,18 +467,24 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
         try await waitFor { !browser.isLoading && browser.title == "第二页" }
         browser.webView.pageZoom = 1.3
         guard abs(browser.webView.pageZoom - 1.3) < 0.01 else { throw NetworkError(message: "Zoom failed") }
+        let priorExports = Set(downloads.records.map(\.id))
         await browser.exportPDF()
-        guard let pdf = browser.sharedFile?.url, (try Data(contentsOf: pdf)).starts(with: Data("%PDF".utf8)) else {
-            throw NetworkError(message: "PDF export failed")
+        guard let exported = downloads.records.first(where: {
+            !priorExports.contains($0.id) && $0.kind == .webpagePDF && $0.state == .completed
+        }), let pdf = downloads.previewURL(for: exported.id),
+            (try Data(contentsOf: pdf)).starts(with: Data("%PDF-".utf8)) else {
+            throw NetworkError(message: "Persisted webpage PDF export failed")
         }
-        browser.sharedFile = nil
+        browser.showsDownloads = false
         browser.goToEntry()
         try await waitFor { browser.title == "校园网页功能验证" && !browser.isLoading }
+        let priorFiles = Set(downloads.records.map(\.id))
         _ = try await browser.webView.evaluateJavaScript("document.getElementById('download').click()")
-        try await waitFor { browser.sharedFile != nil }
-        guard let download = browser.sharedFile?.url,
+        try await waitFor { downloads.records.contains { !priorFiles.contains($0.id) && $0.state == .completed } }
+        guard let item = downloads.records.first(where: { !priorFiles.contains($0.id) && $0.state == .completed }),
+              let download = downloads.previewURL(for: item.id),
               try String(contentsOf: download, encoding: .utf8) == "NEU-Lumen download fixture" else {
-            throw NetworkError(message: "Download contents failed")
+            throw NetworkError(message: "Persisted original download contents failed")
         }
         browser.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:8787/balance-labels.html")!))
         try await waitFor { browser.title == "Visible wallet" && !browser.isLoading }
@@ -520,6 +587,9 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
     }
 }
 ''', encoding="utf-8")
+# Real WebKit download checks live outside the Release source tree.
+shutil.copyfile(root / "Tests/BrowserDownloads/WebKitValidation.swift",
+                destination / "NEU-Lumen/App/BrowserDownloadValidation.swift")
 fixtures = destination / "fixtures"
 fixtures.mkdir(exist_ok=True)
 (fixtures / "index.html").write_text('''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园网页功能验证</title><style>body{font:17px -apple-system;padding:24px;color:#213060;background:#f3f5fb}h1{font-size:28px}a{display:block;background:white;border-radius:16px;padding:18px;margin:14px 0;color:#3553a2;text-decoration:none}small{color:#6d7487}</style><small>NEU · 校园浏览器</small><h1>更顺手的校园网页</h1><p>查找、缩放、分享和下载，都在手边。</p><a id="popup" target="_blank" href="second.html">打开新窗口链接 ↗</a><a id="download" download="campus-guide.txt" href="download.txt">下载校园指南 ↓</a><p>下方工具栏提供前进、后退、刷新与分享。</p></html>''', encoding="utf-8")

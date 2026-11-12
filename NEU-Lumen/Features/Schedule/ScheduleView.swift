@@ -63,7 +63,7 @@ struct ScheduleView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        Button("节假日与调课", systemImage: "sun.max") { showHolidaySettings = true }
+                        Button("学期、节假日与调课", systemImage: "sun.max") { showHolidaySettings = true }
                         Button("日历与提醒事项", systemImage: "calendar.badge.clock") { showSystemCalendar = true }
                     } label: { Image(systemName: "slider.horizontal.3") }
                     .accessibilityLabel("课表设置")
@@ -288,7 +288,7 @@ struct ScheduleView: View {
 
     @ViewBuilder
     private var loadStateFooter: some View {
-        switch repo.weekState {
+        switch repo.displayWeekState(starting: weekStartSunday) {
         case .loading:
             HStack(spacing: 8) {
                 ProgressView()
@@ -352,12 +352,25 @@ struct TimetableDayColumn: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("\(block.occurrence.slot.name)，第 \(block.firstPeriod) 至 \(block.lastPeriod) 节，\(block.occurrence.slot.room)")
+                    .accessibilityLabel(accessibilityLabel(for: block))
+                    .accessibilityHint("打开课程详情")
                     .offset(x: CGFloat(block.lane) * width, y: CGFloat(block.firstPeriod - 1) * periodHeight)
                 }
             }
         }
         .frame(height: periodHeight * 10)
+    }
+
+    private func accessibilityLabel(for block: TimetablePlacement) -> String {
+        let occurrence = block.occurrence
+        let date = occurrence.date.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).year().month().day().weekday(.wide))
+        let time: String
+        if let interval = LiveActivitySchedule.interval(for: occurrence) {
+            let start = interval.start.formatted(date: .omitted, time: .shortened)
+            let end = interval.end.formatted(date: Calendar.current.isDate(interval.start, inSameDayAs: interval.end) ? .omitted : .abbreviated, time: .shortened)
+            time = "\(start) 至 \(end)"
+        } else { time = "\(Semester.hm(occurrence.slot.startMinutes)) 至 \(Semester.hm(occurrence.slot.endMinutes))" }
+        return "\(date)，\(occurrence.slot.name)，\(time)，第 \(block.firstPeriod) 至 \(block.lastPeriod) 节，\(occurrence.slot.room)"
     }
 }
 

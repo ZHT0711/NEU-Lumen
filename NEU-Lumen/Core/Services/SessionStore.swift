@@ -20,30 +20,49 @@ final class SessionStore {
     private(set) var profileSyncError: String?
     private(set) var usesWebSession = false
     private(set) var sessionSaveError: String?
+    private(set) var credentialSaveError: String?
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
     private var sessionEpoch = UUID()
+    var requestEpoch: UUID { sessionEpoch }
     private var keepSession = false
     private var learningSessionGeneration: UUID?
     private var learningSessionAccount: String?
     private var recoveryTask: Task<Bool, Never>?
     private var lastNetworkRecovery = Date.distantPast
+    private var lastForegroundValidation = Date.distantPast
+    private var lastIdentityAttempt = Date.distantPast
     private var pendingUsername: String?
     private var pendingPassword: String?
 
     let client: PortalClient
     private let webSessions: any WebSessionPersisting
+    private let defaults: UserDefaults
 
-    init(client: PortalClient = PortalClient(), webSessions: any WebSessionPersisting = KeychainWebSessionStore()) {
+    init(client: PortalClient = PortalClient(), webSessions: any WebSessionPersisting = KeychainWebSessionStore(), defaults: UserDefaults = .standard) {
         self.client = client
         self.webSessions = webSessions
+        self.defaults = defaults
     }
 
     private static let rememberedKey = "lumen.remembered.username"
+    private static let suppressRestoreKey = "lumen.session.suppressAutomaticRestore"
+
+    private func saveCredentials(username: String, password: String) {
+        credentialSaveError = CredentialStore.save(username: username, password: password) ? nil : "凭据未能完整保存到本机钥匙串，重启后可能需要重新登录"
+    }
+
+    private func clearCredentials() {
+        if !CredentialStore.clear() { credentialSaveError = "旧凭据未能从钥匙串完全清除，已禁止自动恢复" }
+    }
+
+    private func clearWebSession(_ store: any WebSessionPersisting) {
+        if !store.clearAndReport() { sessionSaveError = "登录会话未能完全清除，已禁止自动恢复" }
+    }
 
     var rememberedUsername: String {
-        UserDefaults.standard.string(forKey: Self.rememberedKey) ?? ""
+        defaults.string(forKey: Self.rememberedKey) ?? ""
     }
 
     var hasSavedCredentials: Bool {
@@ -53,6 +72,7 @@ final class SessionStore {
     /// 启动恢复：有保存凭据则静默续登，否则进登录页。
     func restoreSession() async {
         guard phase == .booting else { return }
+        guard !defaults.bool(forKey: Self.suppressRestoreKey) else { phase = .loggedOut; return }
         if await restoreWebSession() { return }
         if let cred = CredentialStore.load() {
             let ok = await performLogin(username: cred.username, password: cred.password, keep: true)
@@ -67,6 +87,8 @@ final class SessionStore {
     @discardableResult
     func performLogin(username: String, password: String, keep: Bool) async -> Bool {
         sessionEpoch = UUID()
+        let epoch = sessionEpoch
+        refreshingProfile = false
         recoveryTask?.cancel()
         recoveryTask = nil
         let previous = webSessions.load()
@@ -79,35 +101,42 @@ final class SessionStore {
         pendingPassword = password
         do {
             let info = try await client.login(username: username, password: password)
+            guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             if keep {
-                CredentialStore.save(username: username, password: password)
+                saveCredentials(username: username, password: password)
             } else {
-                CredentialStore.clear()
+                clearCredentials()
             }
-            UserDefaults.standard.set(username, forKey: Self.rememberedKey)
+            defaults.set(username, forKey: Self.rememberedKey)
             if previousUser?.isSameAccount(as: info) == true { client.retainMissingCookies(retained) }
             user = info
             usesWebSession = false
             keepSession = keep
-            if !keep { webSessions.clear() }
+            if !keep { clearWebSession(webSessions) }
+            defaults.set(!keep, forKey: Self.suppressRestoreKey)
+            lastForegroundValidation = Date()
+            lastIdentityAttempt = .distantPast
             phase = .loggedIn
             persistWebSession()
             return true
         } catch let e as NetworkError where e.needsSecondAuth {
+            guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             // 新设备二次认证：凭据先本机记住，图形码+短信完成后回填
             needsSecondAuth = true
             lastError = nil
             if keep {
-                CredentialStore.save(username: username, password: password)
-                UserDefaults.standard.set(username, forKey: Self.rememberedKey)
+                saveCredentials(username: username, password: password)
+                defaults.set(username, forKey: Self.rememberedKey)
             }
             phase = .loggedOut
             return false
         } catch let e as NetworkError {
+            guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             lastError = e.message
             phase = .loggedOut
             return false
         } catch {
+            guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             lastError = error.localizedDescription
             phase = .loggedOut
             return false
@@ -120,10 +149,10 @@ final class SessionStore {
         let finalUsername = username.isEmpty ? (pendingUsername ?? "") : username
         let finalPassword = password.isEmpty ? (pendingPassword ?? "") : password
         if keep, !finalUsername.isEmpty, !finalPassword.isEmpty {
-            CredentialStore.save(username: finalUsername, password: finalPassword)
-            UserDefaults.standard.set(finalUsername, forKey: Self.rememberedKey)
+            saveCredentials(username: finalUsername, password: finalPassword)
+            defaults.set(finalUsername, forKey: Self.rememberedKey)
         } else if !keep {
-            CredentialStore.clear()
+            clearCredentials()
         }
         pendingUsername = nil
         pendingPassword = nil
@@ -133,7 +162,10 @@ final class SessionStore {
         self.user = user
         usesWebSession = false
         keepSession = keep
-        if !keep { webSessions.clear() }
+        if !keep { clearWebSession(webSessions) }
+        defaults.set(!keep, forKey: Self.suppressRestoreKey)
+        lastForegroundValidation = Date()
+        lastIdentityAttempt = .distantPast
         needsSecondAuth = false
         lastError = nil
         phase = .loggedIn
@@ -152,6 +184,8 @@ final class SessionStore {
         let wasLoggedIn = phase == .loggedIn
         let previousAgent = client.browserUserAgent
         sessionEpoch = UUID()
+        let epoch = sessionEpoch
+        refreshingProfile = false
         recoveryTask?.cancel()
         recoveryTask = nil
         let previous = webSessions.load()
@@ -183,6 +217,7 @@ final class SessionStore {
                 info = info?.merging(fetched) ?? fetched
             }
         }
+        guard epoch == sessionEpoch else { return false }
         guard !Task.isCancelled else {
             if wasLoggedIn {
                 client.clearSession()
@@ -205,11 +240,14 @@ final class SessionStore {
         if let info, previousUser?.isSameAccount(as: info) == true { client.retainMissingCookies(retained) }
         user = info ?? .pending
         if let sid = info?.sid, !sid.isEmpty {
-            if let saved = CredentialStore.load(), saved.username != sid { CredentialStore.clear() }
-            UserDefaults.standard.set(sid, forKey: Self.rememberedKey)
+            if let saved = CredentialStore.load(), saved.username != sid { clearCredentials() }
+            defaults.set(sid, forKey: Self.rememberedKey)
         }
         usesWebSession = true
         keepSession = true
+        defaults.set(false, forKey: Self.suppressRestoreKey)
+        lastForegroundValidation = Date()
+        lastIdentityAttempt = .distantPast
         phase = .loggedIn
         persistWebSession()
         return true
@@ -238,6 +276,9 @@ final class SessionStore {
         user = restoredUser
         usesWebSession = true
         keepSession = true
+        defaults.set(false, forKey: Self.suppressRestoreKey)
+        lastForegroundValidation = Date()
+        lastIdentityAttempt = .distantPast
         phase = .loggedIn
         persistWebSession()
         return true
@@ -282,17 +323,38 @@ final class SessionStore {
         } catch { sessionSaveError = NetworkError.from(error).message }
     }
 
+    var hasConfirmedIdentity: Bool { !(user?.sid.isEmpty ?? true) || !(user?.uid.isEmpty ?? true) }
+
+    /// Only the existing, unchanged cookie session may bind an initially unknown
+    /// identity. An unknown identity never authorizes falling back to old passwords.
+    func ensureIdentity() async -> Bool {
+        guard phase == .loggedIn else { return false }
+        if hasConfirmedIdentity { return true }
+        if let task = recoveryTask { return await task.value }
+        guard Date().timeIntervalSince(lastIdentityAttempt) > 20 else { return false }
+        lastIdentityAttempt = Date()
+        return await silentRelogin()
+    }
+
+    private func canBind(_ fresh: PortalUser) -> Bool {
+        guard !fresh.sid.isEmpty || !fresh.uid.isEmpty else { return false }
+        return !hasConfirmedIdentity || user?.isSameAccount(as: fresh) == true
+    }
+
     /// 手动刷新可补齐网页登录时尚未提供的学院、身份和邮箱。
     func refreshUserProfile() async {
         guard phase == .loggedIn, !refreshingProfile else { return }
+        let epoch = sessionEpoch
         refreshingProfile = true
-        defer { refreshingProfile = false }
+        defer { if epoch == sessionEpoch { refreshingProfile = false } }
         do {
             let fetched = try await client.fetchUserInfo()
+            guard epoch == sessionEpoch, phase == .loggedIn, !Task.isCancelled, canBind(fetched) else { return }
             user = user?.merging(fetched) ?? fetched
             profileSyncError = user?.hasCoreProfile == true ? nil : "门户尚未提供完整个人资料"
             persistWebSession()
         } catch {
+            guard epoch == sessionEpoch, !Task.isCancelled else { return }
             profileSyncError = "个人资料同步失败，请稍后重试"
         }
     }
@@ -325,14 +387,14 @@ final class SessionStore {
             self.client.invalidateAccessRoute()
             await self.client.prepareAccess()
             if let fresh = try? await self.client.fetchUserInfo(), epoch == self.sessionEpoch, !Task.isCancelled,
-               self.user?.isSameAccount(as: fresh) != false {
+               self.canBind(fresh) {
                 self.user = self.user?.merging(fresh) ?? fresh
                 self.profileSyncError = nil
                 return true
             }
             guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             // Native credentials are a last resort, without changing the app's root navigation.
-            if let cred = CredentialStore.load(), self.user?.sid.isEmpty != false || self.user?.sid == cred.username {
+            if let cred = CredentialStore.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
                 do {
                     let fresh = try await self.client.login(username: cred.username, password: cred.password)
                     guard epoch == self.sessionEpoch, !Task.isCancelled, self.user?.isSameAccount(as: fresh) != false else { return false }
@@ -351,6 +413,19 @@ final class SessionStore {
         return result
     }
 
+    /// Returning from a sheet or another app is not a network-path change.
+    /// Preserve the route cache; revalidate only occasionally or for unknown identity.
+    func applicationDidBecomeActive() {
+        guard phase == .loggedIn else { return }
+        if !hasConfirmedIdentity {
+            Task { _ = await ensureIdentity() }
+            return
+        }
+        guard Date().timeIntervalSince(lastForegroundValidation) > 10 * 60 else { return }
+        lastForegroundValidation = Date()
+        Task { _ = await silentRelogin() }
+    }
+
     func networkDidChange() {
         client.invalidateAccessRoute()
         guard phase == .loggedIn, Date().timeIntervalSince(lastNetworkRecovery) > 10 else { return }
@@ -359,15 +434,22 @@ final class SessionStore {
     }
 
     func logout() {
-        learningSessions?.clear()
+        // Persist the user's intent first: deletion can fail or the app can stop
+        // between Keychain operations. Nothing may resurrect this session on launch.
+        defaults.set(true, forKey: Self.suppressRestoreKey)
+        sessionSaveError = nil
+        credentialSaveError = nil
+        if let learning = learningSessions { clearWebSession(learning) }
         sessionEpoch = UUID()
         recoveryTask?.cancel()
         recoveryTask = nil
+        lastIdentityAttempt = .distantPast
+        lastForegroundValidation = .distantPast
+        refreshingProfile = false
         keepSession = false
-        webSessions.clear()
+        clearWebSession(webSessions)
         usesWebSession = false
-        sessionSaveError = nil
-        CredentialStore.clear()
+        clearCredentials()
         client.clearSession()
         user = nil
         profileSyncError = nil

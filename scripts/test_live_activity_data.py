@@ -37,8 +37,14 @@ class LiveActivityDataContracts(unittest.TestCase):
         for field, kind in [('accent', 'String'), ('symbolName', 'String'), ('secondaryValue', 'String'), ('progress', 'Double'), ('countdownTitle', 'String'), ('destinationPath', 'String')]:
             self.assertIn(f'var {field}: {kind}? = nil', attributes)
         widget = (ROOT / 'NEU-LumenLiveActivity/NEULumenLiveActivity.swift').read_text()
-        self.assertIn('state.countdownTitle == "距开始"', widget)
-        self.assertIn('state.countdownTitle == "距上课"', widget)
+        self.assertIn('countdownTitle == "距开始"', attributes)
+        self.assertIn('countdownTitle == "距上课"', attributes)
+        self.assertIn('state.countdownDate', widget)
+        compact = widget.split('} compactTrailing: {', 1)[1].split('} minimal:', 1)[0]
+        self.assertIn('Text(timerInterval:', compact)
+        self.assertIn('func boundedText()', attributes)
+        self.assertIn('encoder.encode(copy).count', attributes)
+        self.assertIn('var staleAfter: Date? = nil', attributes)
         self.assertIn('activityAccent(context.state.accent)', widget)
         self.assertNotIn('Text("距下课")', widget)
         self.assertIn('let query = kind == "academicOverview"', attributes)
@@ -67,7 +73,7 @@ class LiveActivityDataContracts(unittest.TestCase):
         shell = (ROOT / 'scripts/validate_ui.sh').read_text()
         self.assertIn('--live-activity-data-checks', shell)
         self.assertIn('live-activity-custom', shell)
-        self.assertEqual(len(preview.SCREENSHOTS), 19)
+        self.assertEqual(len(preview.SCREENSHOTS), 20)
         self.assertIn('PBXFileSystemSynchronizedRootGroup', (ROOT / 'NEU-Lumen.xcodeproj/project.pbxproj').read_text())
 
 

@@ -8,6 +8,7 @@ struct HomeView: View {
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 72
     @State private var showFavorites = false
     @State private var path: [AppDestination] = []
+    @State private var refreshTask: Task<Void, Never>?
 
     private var campusInk: Color {
         colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
@@ -68,7 +69,8 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await repo.refreshHome() }
+                        refreshTask?.cancel()
+                        refreshTask = Task { await refreshHomeData(force: true) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -76,17 +78,12 @@ struct HomeView: View {
                     .disabled(repo.homeState == .loading)
                 }
             }
-            .refreshable {
-                await repo.refreshHome()
-            }
+            .refreshable { await refreshHomeData(force: true) }
+            .onDisappear { refreshTask?.cancel(); refreshTask = nil }
             .task(id: accountID) {
+                refreshTask?.cancel()
                 await repo.ensureLoadedForCurrentUser()
-                if repo.homeState == .idle {
-                    await repo.refreshHome()
-                }
-                async let card: Void = repo.loadCardOverview()
-                async let week: Void = repo.loadDisplayWeek(starting: Semester.weekStart(forDay: Date()))
-                _ = await (card, week)
+                await refreshHomeData(force: false)
             }
             .navigationDestination(for: AppDestination.self) { dest in
                 switch dest {
@@ -99,6 +96,17 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showFavorites) { FavoritesEditor() }
         .tint(campusInk)
+    }
+
+    private func refreshHomeData(force: Bool) async {
+        async let home: Void = refreshPortalHome(force: force)
+        async let wallet: Void = repo.loadCardOverview(force: force)
+        async let week: Void = repo.loadDisplayWeek(starting: Semester.weekStart(forDay: Date()), force: force)
+        _ = await (home, wallet, week)
+    }
+
+    private func refreshPortalHome(force: Bool) async {
+        if force || repo.homeState == .idle { await repo.refreshHome(force: force) }
     }
 
     // MARK: - 区块
@@ -296,6 +304,7 @@ struct HomeView: View {
     private var todaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             let timeline = repo.todayTimeline()
+            let status = repo.todayScheduleStatus()
             HStack {
                 sectionHeader("今日课程", icon: "clock")
                 Spacer()
@@ -304,7 +313,14 @@ struct HomeView: View {
             }
             GlassCard {
                 VStack(spacing: 0) {
-                    if timeline.isEmpty {
+                    if status != .loaded {
+                        todayStatusLabel(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
+                    if timeline.isEmpty && status == .loaded {
                         HStack {
                             Image(systemName: "cup.and.saucer.fill")
                                 .foregroundStyle(.secondary)
@@ -325,6 +341,17 @@ struct HomeView: View {
                 }
                 .padding(.vertical, 6)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func todayStatusLabel(_ status: ScheduleReadStatus) -> some View {
+        switch status {
+        case .unread: Label("今日课表尚未读取，请刷新后查看", systemImage: "calendar.badge.questionmark")
+        case .loading: HStack { ProgressView(); Text("正在读取今日课表…") }
+        case .failed(let message): Label("今日课表读取失败：" + message, systemImage: "exclamationmark.triangle")
+        case .partial(let message): Label("课表未完整同步，以下可能为部分或上次结果：" + message, systemImage: "exclamationmark.triangle")
+        case .loaded: EmptyView()
         }
     }
 

@@ -46,6 +46,12 @@
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/profile-dark.png" width="245" alt="深色个人页与学院徽章" />
 </p>
 
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/downloads-light.png" width="245" alt="浏览器下载管理" />
+</p>
+
+网页工具 → **下载管理**：下载原始 PDF 和网页附件，查看进度、预览、分享或存储到“文件”。“导出网页为 PDF”与原文件下载分开；下载按账号保存在本机，系统挂起后不保证继续。
+
 ## 安装
 
 下载 [未签名 IPA](https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/NEU-Lumen-iOS-unsigned.ipa)，使用 Sideloadly、AltStore 或开发者证书签名后安装。

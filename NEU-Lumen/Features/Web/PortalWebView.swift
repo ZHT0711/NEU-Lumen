@@ -25,7 +25,12 @@ struct PortalWebViewScreen: View {
                 Text(browser.currentURL?.host ?? url.host ?? "校园网页")
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
-                if browser.downloadCount > 0 { Text("正在下载…") }
+                if browser.downloadCount > 0 {
+                    Button { browser.showsDownloads = true } label: {
+                        Label("\(browser.downloadCount) 个下载", systemImage: "arrow.down.circle")
+                    }
+                    .accessibilityLabel("正在下载，打开下载管理")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -74,8 +79,14 @@ struct PortalWebViewScreen: View {
                     Button("复制当前链接", systemImage: "link") { UIPasteboard.general.url = browser.currentURL ?? url }
                     Button("在 Safari 中打开", systemImage: "safari") { openURL(browser.currentURL ?? url) }
                     Button("定位与网页权限", systemImage: "hand.raised") { showPermissionsHelp = true }
-                    Button("导出当前页为 PDF", systemImage: "doc.richtext") {
-                        Task { await browser.exportPDF() }
+                    Button("下载管理", systemImage: "arrow.down.circle") { browser.showsDownloads = true }
+                    Button(browser.isCurrentPDF ? "下载原始PDF" : "下载当前文件", systemImage: "arrow.down.doc") {
+                        browser.downloadCurrentFile()
+                    }.disabled(browser.isLoading)
+                    if !browser.isCurrentPDF {
+                        Button("导出网页为 PDF", systemImage: "doc.richtext") {
+                            Task { await browser.exportPDF() }
+                        }
                     }
                     Button("回到应用入口", systemImage: "house") { browser.goToEntry() }
                 } label: { Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.primary) }
@@ -93,10 +104,12 @@ struct PortalWebViewScreen: View {
                 browser.webView.scrollView.verticalScrollIndicatorInsets.bottom = height + 12
             }
         }
-        .sheet(item: $browser.sharedFile) { file in
-            BrowserShareSheet(url: file.url)
-                .presentationDetents([.medium, .large])
+        .sheet(isPresented: $browser.showsDownloads) {
+            BrowserDownloadsView(store: BrowserDownloadStore.shared)
         }
+        .alert("下载提示", isPresented: $browser.showsDownloadNotice) {
+            Button("好", role: .cancel) {}
+        } message: { Text(browser.downloadNotice) }
         .alert("定位与网页权限", isPresented: $showPermissionsHelp) {
             Button("打开系统设置") {
                 if let settings = URL(string: UIApplication.openSettingsURLString) { openURL(settings) }
@@ -113,7 +126,7 @@ struct PortalWebViewScreen: View {
             }
         }
         .onDisappear {
-            browser.webView.stopLoading()
+            browser.close()
             Task { await browser.saveSession() }
         }
     }
@@ -311,17 +324,9 @@ struct BrowserSharedFile: Identifiable {
     var id: String { url.absoluteString }
 }
 
-private struct BrowserShareSheet: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    }
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
-
 @MainActor
 @Observable
-final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKHTTPCookieStoreObserver {
+final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
     let webView: WKWebView
     var currentURL: URL?
     var title = ""
@@ -333,8 +338,12 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     var desktopMode = false
     var zoom = 1.0
     var isSyncing = false
-    var sharedFile: BrowserSharedFile?
-    var downloadCount = 0
+    var showsDownloads = false
+    var showsDownloadNotice = false
+    var downloadNotice = ""
+    var documentMIMEType: String?
+    var isCurrentPDF: Bool { BrowserDownloadNames.isPDF(documentMIMEType) }
+    var downloadCount: Int { BrowserDownloadStore.shared.activeCount }
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private weak var client: PortalClient?
     @ObservationIgnored private weak var session: SessionStore?
@@ -344,7 +353,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     @ObservationIgnored private var entryURL: URL?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var attemptedCGLogin = false
-    @ObservationIgnored private var downloads: [ObjectIdentifier: URL] = [:]
+    @ObservationIgnored private var downloadScope: UUID?
+    @ObservationIgnored private var downloadSessionEpoch: UUID?
+    @ObservationIgnored private var pendingDocumentRequest: URLRequest?
+    @ObservationIgnored private var documentRequest: URLRequest?
+    @ObservationIgnored private var documentResponseURL: URL?
+    @ObservationIgnored private var provisionalUnsafeMethod = false
+    @ObservationIgnored private var documentUnsafeMethod = false
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -381,10 +396,19 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func start(_ url: URL, client: PortalClient, session: SessionStore? = nil) async {
-        guard !started else { return }
+        guard !started else {
+            webView.configuration.websiteDataStore.httpCookieStore.add(self)
+            return
+        }
         started = true
         self.client = client
         self.session = session
+        if let session {
+            guard session.phase == .loggedIn, let user = session.user else { return }
+            BrowserDownloadStore.shared.activate(account: user.sid.isEmpty ? user.uid : user.sid, epoch: session.requestEpoch)
+            downloadSessionEpoch = session.requestEpoch
+        }
+        downloadScope = BrowserDownloadStore.shared.scope
         learningPlatform = LearningPlatform.allCases.first { $0.accepts(WebVPN.unwrap(url) ?? url) }
         session?.restoreLearningSession()
         clientEpoch = client.sessionGeneration
@@ -445,6 +469,16 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         }
         let scheme = url.scheme?.lowercased() ?? ""
         if ["http", "https", "about", "blob", "data"].contains(scheme) {
+            if navigationAction.targetFrame?.isMainFrame == true, !navigationAction.shouldPerformDownload {
+                if pendingDocumentRequest == nil { provisionalUnsafeMethod = false }
+                var request = navigationAction.request
+                provisionalUnsafeMethod = provisionalUnsafeMethod || (request.httpMethod ?? "GET").uppercased() != "GET"
+                if request.value(forHTTPHeaderField: "Referer") == nil,
+                   let source = navigationAction.sourceFrame.request.url {
+                    request.setValue(Self.downloadReferer(from: source, to: url), forHTTPHeaderField: "Referer")
+                }
+                pendingDocumentRequest = request
+            }
             decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow, preferences)
         } else {
             if ["tel", "mailto", "sms", "weixin", "alipay", "alipays"].contains(scheme) {
@@ -456,11 +490,21 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
 
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        return !response.canShowMIMEType || disposition.lowercased().contains("attachment") ? .download : .allow
+        let attachment = disposition.split(separator: ";", maxSplits: 1).first?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "attachment"
+        if !response.canShowMIMEType || attachment { return .download }
+        if response.isForMainFrame {
+            documentMIMEType = BrowserDownloadNames.mime(response.response.mimeType)
+            documentResponseURL = response.response.url
+            documentRequest = pendingDocumentRequest
+            documentUnsafeMethod = provisionalUnsafeMethod || pendingDocumentRequest == nil
+        }
+        return .allow
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        pendingDocumentRequest = nil
         updateState()
         Task {
             await syncCookies()
@@ -472,7 +516,10 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { error = "网页进程已停止，请重新加载" }
 
     private func show(_ failure: Error) {
-        if (failure as NSError).code == NSURLErrorCancelled { return }
+        let nsError = failure as NSError
+        // Attachment conversion is a navigation policy interruption, not a page-load failure.
+        if nsError.code == NSURLErrorCancelled || (nsError.domain == "WebKitErrorDomain" && nsError.code == 102) { return }
+        pendingDocumentRequest = nil
         error = NetworkError.from(failure).message
         isLoading = false
     }
@@ -502,6 +549,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
             catch { return }
             await self?.syncCookies()
         }
+    }
+
+    func close() {
+        webView.stopLoading()
+        cookieSaveTask?.cancel()
+        webView.configuration.websiteDataStore.httpCookieStore.remove(self)
+        // BrowserDownloadStore, not this screen, owns ongoing WKDownload instances.
     }
 
     func saveSession() async {
@@ -626,12 +680,68 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
     }
 
     func exportPDF() async {
+        guard let token = validDownloadScope() else { notifyDownload("登录状态已改变，请关闭并重新打开网页。"); return }
+        guard !isCurrentPDF else { downloadCurrentFile(); return }
         do {
             let data = try await webView.pdf(configuration: WKPDFConfiguration())
-            let destination = FileManager.default.temporaryDirectory.appendingPathComponent("NEU-Lumen-\(UUID().uuidString).pdf")
-            try data.write(to: destination)
-            sharedFile = BrowserSharedFile(url: destination)
-        } catch { self.error = "PDF 导出失败，请等待网页加载完成后重试" }
+            guard validDownloadScope() == token else { return }
+            if BrowserDownloadStore.shared.saveWebpagePDF(data, title: title.isEmpty ? "网页导出" : title, scope: token) {
+                showsDownloads = true
+            } else { notifyDownload("PDF 保存失败，请在下载管理中查看存储提示。") }
+        } catch { notifyDownload("PDF 导出失败，请等待网页加载完成后重试。") }
+    }
+
+    func downloadCurrentFile() {
+        guard let token = validDownloadScope() else { notifyDownload("登录状态已改变，请关闭并重新打开网页。"); return }
+        guard !webView.isLoading, let mime = documentMIMEType, !BrowserDownloadNames.isHTML(mime),
+              let target = documentResponseURL, ["http", "https", "blob", "data"].contains(target.scheme?.lowercased() ?? "") else {
+            notifyDownload("当前是普通网页或尚未识别到文件。网页请使用“导出网页为 PDF”，嵌入文档请先用网页中的原文件链接打开。"); return
+        }
+        guard !documentUnsafeMethod, let original = documentRequest,
+              (original.httpMethod ?? "GET").uppercased() == "GET" else {
+            notifyDownload("此文档来自 POST 提交或无法确认的请求，不能安全地改为 GET 重放。请返回原网页使用下载按钮；原网页的附件响应可直接保存，不会重新提交表单。"); return
+        }
+        // Keep the actual WebKit/gateway URL. Credentials stay in this WKWebsiteDataStore.
+        // Do not copy Authorization, Cookie, Range or signed headers across redirects.
+        var request = URLRequest(url: target)
+        if let value = original.value(forHTTPHeaderField: "Referer"), let source = URL(string: value) {
+            request.setValue(Self.downloadReferer(from: source, to: target), forHTTPHeaderField: "Referer")
+        }
+        BrowserDownloadStore.shared.start(request, in: webView, scope: token, requirePDF: isCurrentPDF)
+        showsDownloads = true
+    }
+
+    private func validDownloadScope() -> UUID? {
+        guard let downloadScope, BrowserDownloadStore.shared.accepts(downloadScope),
+              client?.sessionGeneration == clientEpoch else { return nil }
+        if let session {
+            guard session.phase == .loggedIn, session.requestEpoch == downloadSessionEpoch,
+                  let user = session.user else { return nil }
+            let identity = user.sid.isEmpty ? user.uid : user.sid
+            guard BrowserDownloadFiles.accountKey(identity.trimmingCharacters(in: .whitespacesAndNewlines)) == BrowserDownloadStore.shared.accountKey else { return nil }
+        }
+        return downloadScope
+    }
+
+    private func notifyDownload(_ text: String) {
+        downloadNotice = text
+        showsDownloadNotice = true
+    }
+
+    /// Same-origin Referer is preserved; cross-origin is origin-only, downgrade sends none.
+    private static func downloadReferer(from source: URL, to target: URL) -> String? {
+        guard ["http", "https"].contains(source.scheme?.lowercased() ?? ""),
+              ["http", "https"].contains(target.scheme?.lowercased() ?? ""),
+              !(source.scheme == "https" && target.scheme == "http"),
+              var parts = URLComponents(url: source, resolvingAgainstBaseURL: false) else { return nil }
+        parts.user = nil
+        parts.password = nil
+        parts.fragment = nil
+        if source.scheme != target.scheme || source.host != target.host || source.port != target.port {
+            parts.path = "/"
+            parts.query = nil
+        }
+        return parts.url?.absoluteString
     }
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
@@ -640,28 +750,16 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownl
         return nil
     }
 
-    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
-    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
-    func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,
-                  completionHandler: @escaping (URL?) -> Void) {
-        do {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let name = URL(fileURLWithPath: suggestedFilename).lastPathComponent
-            let destination = directory.appendingPathComponent(name.isEmpty ? "download" : name)
-            downloads[ObjectIdentifier(download)] = destination
-            downloadCount = downloads.count
-            completionHandler(destination)
-        } catch { self.error = "无法创建下载文件"; completionHandler(nil) }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        guard let token = validDownloadScope() else { download.cancel(nil); return }
+        BrowserDownloadStore.shared.adopt(download, from: webView, scope: token)
+        pendingDocumentRequest = nil
     }
-    func downloadDidFinish(_ download: WKDownload) {
-        if let url = downloads.removeValue(forKey: ObjectIdentifier(download)) { sharedFile = BrowserSharedFile(url: url) }
-        downloadCount = downloads.count
-    }
-    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        downloads[ObjectIdentifier(download)] = nil
-        downloadCount = downloads.count
-        self.error = "下载失败：" + error.localizedDescription
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        guard let token = validDownloadScope() else { download.cancel(nil); return }
+        BrowserDownloadStore.shared.adopt(download, from: webView, scope: token,
+            requirePDF: BrowserDownloadNames.isPDF(navigationResponse.response.mimeType))
+        pendingDocumentRequest = nil
     }
 
     private func present(_ alert: UIAlertController, fallback: () -> Void) {

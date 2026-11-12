@@ -142,6 +142,9 @@ struct ProfileView: View {
                     if let error = environment.session.sessionSaveError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
+                    if let error = environment.session.credentialSaveError {
+                        Text(error).font(.caption).foregroundStyle(.orange)
+                    }
                     Button("更新网页登录（保留账号和收藏）") { showWebLogin = true }
                     LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
                     Button(role: .destructive) {

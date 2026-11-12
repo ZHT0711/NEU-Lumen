@@ -1,4 +1,8 @@
 import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -21,8 +25,30 @@ class NightlyPublishTests(unittest.TestCase):
 
     def test_warning_detection(self):
         self.assertEqual(check_build_diagnostics.warnings('Build succeeded\n0 warnings'), [])
-        for text in ['file.swift:1: warning: example', 'DeprecationWarning: example', '::warning::example']:
+        for text in ['file.swift:1: warning: example', 'DeprecationWarning: example', '::warning::example',
+                     'clang: WARNING : example', 'ResourceWarning: example', '::warning file=a.swift,line=1::example']:
             self.assertEqual(check_build_diagnostics.warnings(text), [text])
+
+    def test_diagnostics_cli_exit_codes_and_varied_valid_formats(self):
+        script = str(Path(check_build_diagnostics.__file__).resolve())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second = root / 'native.log', root / 'device.log'
+            first.write_text('PASS: 14 native assertions\n')
+            second.write_text('** BUILD SUCCEEDED **\n0 warnings\n')
+            def invoke(*args):
+                return subprocess.run([sys.executable, script, *map(str, args)], capture_output=True, text=True)
+            self.assertEqual(invoke('--required-count', 2, first, second).returncode, 0)
+            for args in [(), (first,), ('--required-count', 0, first), ('--required-count', 2, first),
+                         ('--required-count', 1, first, second), ('--required-count', 2, first, first)]:
+                self.assertEqual(invoke(*args).returncode, 2)
+            for text in ['', '\n \t\n', 'file.swift:1: warning: incorrect', 'DeprecationWarning: bad']:
+                first.write_text(text)
+                self.assertEqual(invoke('--required-count', 2, first, second).returncode, 1)
+            first.unlink()
+            self.assertEqual(invoke('--required-count', 2, first, second).returncode, 1)
+            first.mkdir()
+            self.assertEqual(invoke('--required-count', 2, first, second).returncode, 1)
 
 
 if __name__ == '__main__':

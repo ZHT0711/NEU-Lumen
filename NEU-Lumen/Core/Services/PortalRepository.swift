@@ -33,8 +33,12 @@ final class PortalRepository {
     private(set) var usedOfflineFallback = false
 
     private var weekCache: [Date: [CourseOccurrence]] = [:]
-    private var loadingWeeks: Set<Date> = []
+    private(set) var weekStates: [Date: LoadState] = [:]
+    private var weekTasks: [Date: Task<Void, Never>] = [:]
+    private var weekRequests: [Date: UUID] = [:]
+    // Compatibility for fixture callers; views use displayWeekState(starting:).
     private(set) var weekState: LoadState = .idle
+    private var homeRequestID = UUID()
 
     private var gradesCache: [GradeSemester]?
     private(set) var gradesUpdatedAt: Date?
@@ -84,6 +88,22 @@ final class PortalRepository {
     private(set) var electricInfo: ElectricInfo?
     private(set) var electricState: LoadState = .idle
     private(set) var electricUpdatedAt: Date?
+    private(set) var netWarning: String?
+    private(set) var electricWarning: String?
+    private var cardTask: Task<Void, Never>?
+    private var netTask: Task<Void, Never>?
+    private var electricTask: Task<Void, Never>?
+    private var cardRequestID = UUID()
+    private var netRequestID = UUID()
+    private var electricRequestID = UUID()
+    private var walletAccessTask: Task<Void, Never>?
+    private var walletAccessID = UUID()
+    private var electricRoom = ""
+    private struct ElectricSnapshot {
+        let info: ElectricInfo
+        let updatedAt: Date
+    }
+    private var electricCache: [ElectricRoomKey: ElectricSnapshot] = [:]
 
     private static let monthFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -92,27 +112,55 @@ final class PortalRepository {
         return f
     }()
 
-    /// 电费房间码（宿舍 3 位 + 寝室 4 位，本机保存）。
+    /// 房间码只属于已确认账号；不迁移无法确认归属的旧设备共享值。
     var electricRoomCode: String {
-        get { UserDefaults.standard.string(forKey: "lumen.electric.room") ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: "lumen.electric.room") }
+        get { electricRoom }
+        set {
+            guard let context = requestContext else { return }
+            let room = ElectricRoomKey.normalize(newValue)
+            guard room != electricRoom else { return }
+            electricTask?.cancel()
+            electricTask = nil
+            electricRequestID = UUID()
+            electricRoom = room
+            UserDefaults.standard.set(room, forKey: "lumen.electric.room." + context.account)
+            let cached = electricCache[ElectricRoomKey(account: context.account, room: room)]
+            electricInfo = cached?.info
+            electricUpdatedAt = cached?.updatedAt
+            electricWarning = nil
+            electricState = cached == nil ? .idle : .loaded
+        }
     }
 
     private var monthKey: String { Self.monthFormatter.string(from: Calendar.current.date(from: DateComponents(year: billsYear, month: billsMonth))!) }
 
     private var accountGeneration = UUID()
     private var loadedForSID: String?
+    private var loadedForEpoch: UUID?
+    private var requestContext: RepositoryRequestContext? {
+        guard hasCurrentLiveActivityAccount, let account = loadedForSID,
+              loadedForEpoch == session.requestEpoch else { return nil }
+        return RepositoryRequestContext(account: account, epoch: session.requestEpoch, generation: accountGeneration)
+    }
+    private func isCurrent(_ context: RepositoryRequestContext) -> Bool {
+        session.phase == .loggedIn && loadedForSID == context.account && loadedForEpoch == context.epoch
+            && context.matches(account: currentAccountKey, epoch: session.requestEpoch, generation: accountGeneration)
+    }
     private var currentAccountKey: String? {
         guard let user = session.user else { return nil }
         let key = user.sid.isEmpty ? user.uid : user.sid
         return key.isEmpty ? nil : key
     }
     private var hasCurrentLiveActivityAccount: Bool {
-        LiveActivityDataPolicy.accountMatches(current: currentAccountKey, loaded: loadedForSID,
-                                             authenticated: session.phase == .loggedIn)
+        loadedForEpoch == session.requestEpoch
+            && LiveActivityDataPolicy.accountMatches(current: currentAccountKey, loaded: loadedForSID,
+                                                      authenticated: session.phase == .loggedIn)
     }
     private var appsLoaded = false
     private var appsLoading = false
+    private var appsTask: Task<Bool, Never>?
+    private var appsRequestID = UUID()
+    private var appsUpdatedAt: Date?
 
     init(session: SessionStore) {
         self.session = session
@@ -124,22 +172,45 @@ final class PortalRepository {
 
     /// 登录用户变化时清空缓存，避免串号。
     func ensureLoadedForCurrentUser() async {
+        if session.phase == .loggedIn { _ = await session.ensureIdentity() }
+        // Identity loading may suspend: capture the account only after it returns.
         let sid = currentAccountKey ?? ""
-        guard loadedForSID != sid else { return }
+        let epoch = session.requestEpoch
+        guard loadedForSID != sid || loadedForEpoch != epoch else { return }
         accountGeneration = UUID()
+        homeRequestID = UUID()
+        appsTask?.cancel()
+        appsTask = nil
+        appsRequestID = UUID()
+        appsLoading = false
+        appsUpdatedAt = nil
+        cardTask?.cancel(); cardTask = nil
+        netTask?.cancel(); netTask = nil
+        electricTask?.cancel(); electricTask = nil
+        walletAccessTask?.cancel(); walletAccessTask = nil
+        cardRequestID = UUID(); netRequestID = UUID(); electricRequestID = UUID()
+        walletAccessID = UUID()
+        cardBalanceRevision = UUID()
+        electricRoom = sid.isEmpty ? "" : ElectricRoomKey.normalize(UserDefaults.standard.string(forKey: "lumen.electric.room." + sid) ?? "")
+        electricCache.removeAll()
+        netWarning = nil
+        electricWarning = nil
         campusOverride = UserDefaults.standard.string(forKey: "lumen.campus." + sid).flatMap(Campus.init(rawValue:))
         cardWebBridge.reset()
         cardUsesWebKit = false
         newsThumbnails = [:]
         loadingNewsThumbnails = []
         dataCards = []
-        apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
+        apps = ServiceCatalog.merging([DemoData.apps, cachedApps(account: sid)])
         appsLoaded = false
         news = []
         todos = []
         hotSearch = []
         weekCache.removeAll()
-        loadingWeeks.removeAll()
+        for task in weekTasks.values { task.cancel() }
+        weekTasks.removeAll()
+        weekRequests.removeAll()
+        weekStates.removeAll()
         gradesCache = nil
         gradesUpdatedAt = nil
         gradeRequestID += 1
@@ -180,7 +251,9 @@ final class PortalRepository {
         favorites.activate(account: sid, apps: apps)
         holidays.activate(account: sid)
         systemCalendar.activate(account: sid)
+        SemesterSettings.shared.activate(account: sid)
         loadedForSID = sid
+        loadedForEpoch = epoch
         if !sid.isEmpty, let cached = AssignmentCacheStore(account: sid).load() {
             cgReport = cached.cg
             cgUpdatedAt = cached.cgUpdatedAt
@@ -195,31 +268,39 @@ final class PortalRepository {
     }
 
     /// 会话过期 → 静默重登 → 重试一次。
-    private func withRecovery<T>(_ operation: () async throws -> T) async throws -> T {
+    private func withRecovery<T>(retryInterruptedRequest: Bool = true, _ operation: () async throws -> T) async throws -> T {
         let generation = accountGeneration
-        let account = session.user
+        let epoch = session.requestEpoch
+        let account = currentAccountKey
         func checkRequest() throws {
             try Task.checkCancellation()
-            let sameAccount = account.map { previous in
-                session.user.map { previous.isSameAccount(as: $0) } ?? false
-            } ?? (session.user == nil)
-            guard generation == accountGeneration, sameAccount else { throw CancellationError() }
+            // A pending identity may bind once inside the same session epoch.
+            // Confirmed identities may never change, including A → B → A.
+            guard generation == accountGeneration, epoch == session.requestEpoch,
+                  account == nil || account == currentAccountKey else {
+                throw CancellationError()
+            }
         }
         await session.waitForRecovery()
         do {
             try checkRequest()
-            return try await operation()
+            let value = try await operation()
+            try checkRequest()
+            return value
         } catch {
             try checkRequest()
             if NetworkError.isCancellation(error) {
+                guard retryInterruptedRequest else { throw error }
                 await session.waitForRecovery()
                 try checkRequest()
                 let value = try await operation()
                 try checkRequest()
                 return value
             }
-            if let e = error as? NetworkError, e.isSessionExpired {
-                guard await session.silentRelogin() else { throw e }
+            let authenticationRequired = (error as? PortalAPIError)?.requiresAuthentication == true
+                || (error as? NetworkError)?.isSessionExpired == true
+            if authenticationRequired {
+                guard await session.silentRelogin() else { throw error }
                 try checkRequest()
                 user = session.user
                 let value = try await operation()
@@ -241,52 +322,40 @@ final class PortalRepository {
 
     // MARK: - 首页
 
-    func refreshHome() async {
-        if homeState == .loading { return }
+    func refreshHome(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
+        if !force, homeState == .loading { return }
+        let request = UUID()
+        homeRequestID = request
+        let previousState = homeState == .loading ? LoadState.idle : homeState
         homeState = .loading
-        usedOfflineFallback = false
         let client = session.client
 
         async let cards = run { try await client.fetchDataCards() }
-        async let appList = run { try await client.fetchApps() }
+        async let appList = loadAppsIfNeeded(force: force)
         async let newsList = run { try await client.fetchNews() }
         async let todoList = run { try await client.fetchTodos() }
         async let hot = run { try await client.fetchHotSearch() }
 
         let (cardsValue, appsValue, newsValue, todoValue, hotValue) =
             await (cards, appList, newsList, todoList, hot)
+        // A child may have completed BEFORE an account switch. Recheck the
+        // aggregate before touching any visible state or account-owned cache.
+        guard isCurrent(context), request == homeRequestID else { return }
+        guard !Task.isCancelled else { homeState = previousState; return }
 
-        var anySuccess = false
-        if let v = cardsValue {
-            dataCards = v
-            anySuccess = true
-        } else if dataCards.isEmpty {
-            dataCards = []
-        }
-        if let v = appsValue, !v.isEmpty {
-            apps = ServiceCatalog.merging([DemoData.apps, cachedApps(), apps, v])
-            saveAppsCache()
-            appsLoaded = true
-            anySuccess = true
-        } else if apps.isEmpty {
-            apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
-        }
-        if let v = newsValue, !v.isEmpty {
-            news = v
+        var anySuccess = cardsValue != nil || todoValue != nil || hotValue != nil || appsValue
+        if let value = cardsValue { dataCards = value }
+        if let value = newsValue {
+            news = value
             newsRevision += 1
             newsThumbnails = newsThumbnails.filter { !$0.value.isEmpty }
             anySuccess = true
-        } else if news.isEmpty {
-            news = DemoData.news
-        }
-        if let v = todoValue {
-            todos = v
-        }
-        if let v = hotValue, !v.isEmpty {
-            hotSearch = v
-        } else if hotSearch.isEmpty {
-            hotSearch = DemoData.hotSearch
-        }
+        } else if news.isEmpty { news = DemoData.news }
+        if let value = todoValue { todos = value }
+        if let value = hotValue { hotSearch = value }
+        else if hotSearch.isEmpty { hotSearch = DemoData.hotSearch }
 
         user = session.user
         usedOfflineFallback = !anySuccess
@@ -317,6 +386,10 @@ final class PortalRepository {
     }
 
     func applyCardBalance(_ balance: CardBalance) {
+        guard requestContext != nil else { return }
+        cardTask?.cancel()
+        cardTask = nil
+        cardRequestID = UUID()
         cardBalanceRevision = UUID()
         cardUsesWebKit = true
         cardBalance = balance
@@ -327,54 +400,67 @@ final class PortalRepository {
     }
 
     private func cardBalanceWithWebRecovery() async throws -> CardBalance {
+        guard let context = requestContext else { throw CancellationError() }
         if cardUsesWebKit { return try await cardWebBridge.balance(client: session.client) }
         do { return try await session.client.fetchCardBalance() }
         catch {
-            if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
+            if NetworkError.isCancellation(error) || Task.isCancelled || !isCurrent(context) { throw CancellationError() }
             let balance = try await cardWebBridge.balance(client: session.client)
+            try Task.checkCancellation()
+            guard isCurrent(context) else { throw CancellationError() }
             cardUsesWebKit = true
             return balance
         }
     }
 
-    /// 服务大厅按需加载应用列表（避免冷启动时重复请求）。
-    func loadAppsIfNeeded() async {
-        guard !appsLoaded, !appsLoading else { return }
+    /// 首页和服务页共享同一目录任务；单个等待者取消不取消其它页面的读取。
+    @discardableResult
+    func loadAppsIfNeeded(force: Bool = false) async -> Bool {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return false }
+        if let task = appsTask { return await task.value }
+        if !force, appsLoaded, DataFreshness.isFresh(appsUpdatedAt, for: DataFreshness.apps) { return true }
+        let request = UUID()
+        appsRequestID = request
         appsLoading = true
-        defer { appsLoading = false }
-        if let v = await run({ try await session.client.fetchApps() }), !v.isEmpty {
-            apps = ServiceCatalog.merging([DemoData.apps, cachedApps(), v])
-            saveAppsCache()
-            appsLoaded = true
-        } else {
-            apps = ServiceCatalog.merging([DemoData.apps, cachedApps()])
+        let task = Task { @MainActor in
+            defer {
+                if self.isCurrent(context), request == self.appsRequestID {
+                    self.appsLoading = false
+                    self.appsTask = nil
+                }
+            }
+            let value = await self.run { try await self.session.client.fetchApps() }
+            guard self.isCurrent(context), request == self.appsRequestID, !Task.isCancelled else { return false }
+            guard let value else { return false }
+            self.apps = ServiceCatalog.merging([DemoData.apps, self.cachedApps(account: context.account), self.apps, value])
+            self.saveAppsCache(account: context.account)
+            self.appsLoaded = true
+            self.appsUpdatedAt = Date()
+            return true
         }
+        appsTask = task
+        return await task.value
     }
 
-    /// 服务入口按账号缓存；短公开列表、网络错误不能抹掉完整目录。
-    private var appsCacheKey: String? {
-        guard let user = session.user else { return nil }
-        let account = user.sid.isEmpty ? user.uid : user.sid
-        return account.isEmpty ? nil : "lumen.apps." + account
-    }
-
-    private func cachedApps() -> [PortalApp] {
-        guard let key = appsCacheKey, let data = UserDefaults.standard.data(forKey: key) else { return [] }
+    /// Explicit ownership prevents a late result from saving under the new user.
+    private func cachedApps(account: String) -> [PortalApp] {
+        guard !account.isEmpty, let data = UserDefaults.standard.data(forKey: "lumen.apps." + account) else { return [] }
         return (try? JSONDecoder().decode([PortalApp].self, from: data)) ?? []
     }
 
-    private func saveAppsCache() {
-        guard let key = appsCacheKey, let data = try? JSONEncoder().encode(apps) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+    private func saveAppsCache(account: String) {
+        guard !account.isEmpty, let data = try? JSONEncoder().encode(apps) else { return }
+        UserDefaults.standard.set(data, forKey: "lumen.apps." + account)
     }
 
     func loadHotSearchIfNeeded() async {
-        guard hotSearch.isEmpty else { return }
-        if let v = await run({ try await session.client.fetchHotSearch() }), !v.isEmpty {
-            hotSearch = v
-        } else {
-            hotSearch = DemoData.hotSearch
-        }
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, hotSearch.isEmpty, !Task.isCancelled else { return }
+        let value = await run { try await self.session.client.fetchHotSearch() }
+        guard isCurrent(context), !Task.isCancelled else { return }
+        if let value { hotSearch = value }
+        else if hotSearch.isEmpty { hotSearch = DemoData.hotSearch }
     }
 
     // MARK: - 课表
@@ -383,47 +469,37 @@ final class PortalRepository {
     /// 同一周已有在途加载时等待其完成，避免快速翻周时请求被吞掉。
     func loadWeek(containing date: Date, force: Bool = false) async {
         await ensureLoadedForCurrentUser()
-        guard hasCurrentLiveActivityAccount else { return }
-        let generation = accountGeneration
+        guard let context = requestContext, !Task.isCancelled else { return }
         let weekStart = LiveActivityDataPolicy.portalWeekStart(for: date)
-        if !force, weekCache[weekStart] != nil {
-            weekState = .loaded
-            return
-        }
-        if !force, loadingWeeks.contains(weekStart) {
-            while loadingWeeks.contains(weekStart) {
-                guard generation == accountGeneration, !Task.isCancelled else { return }
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                if weekCache[weekStart] != nil { break }
+        if !force, let task = weekTasks[weekStart] { await task.value; return }
+        if !force, weekCache[weekStart] != nil { return }
+        weekTasks[weekStart]?.cancel()
+        let request = UUID()
+        weekRequests[weekStart] = request
+        let previousState = weekStates[weekStart] ?? .idle
+        weekStates[weekStart] = .loading
+        let task = Task { @MainActor in
+            defer {
+                if self.isCurrent(context), self.weekRequests[weekStart] == request { self.weekTasks[weekStart] = nil }
             }
-            if weekCache[weekStart] != nil {
-                weekState = .loaded
-                return
-            }
-        }
-        if !force, weekCache[weekStart] != nil {
-            weekState = .loaded
-            return
-        }
-        loadingWeeks.insert(weekStart)
-        weekState = .loading
-        defer { if generation == accountGeneration { loadingWeeks.remove(weekStart) } }
-        do {
-            let list = try await withRecovery {
-                try await self.session.client.fetchWeek(anyDayInWeek: date)
-            }
-            guard generation == accountGeneration else { return }
-            weekCache[weekStart] = list
-            weekState = .loaded
-        } catch {
-            guard generation == accountGeneration else { return }
-            // 有缓存就继续用缓存，无缓存才报错
-            if weekCache[weekStart] == nil {
-                weekState = .failed(NetworkError.from(error).message)
-            } else {
-                weekState = .loaded
+            do {
+                let list = try await self.withRecovery { try await self.session.client.fetchWeek(anyDayInWeek: date) }
+                try Task.checkCancellation()
+                guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
+                self.weekCache[weekStart] = list
+                self.weekStates[weekStart] = .loaded
+            } catch {
+                guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
+                if NetworkError.isCancellation(error) || Task.isCancelled {
+                    self.weekStates[weekStart] = previousState == .loading ? .idle : previousState
+                } else {
+                    // Keep cached events but never disguise a failed refresh as success.
+                    self.weekStates[weekStart] = .failed(NetworkError.from(error).message)
+                }
             }
         }
+        weekTasks[weekStart] = task
+        await task.value
     }
 
     /// 某教学周（周日开始）的门户事件；无缓存返回 nil。
@@ -433,25 +509,52 @@ final class PortalRepository {
 
     func loadDisplayWeek(starting sunday: Date, force: Bool = false) async {
         await ensureLoadedForCurrentUser()
-        let generation = accountGeneration
-        await loadWeek(containing: sunday, force: force)
-        guard generation == accountGeneration, !Task.isCancelled else { return }
-        let nextSunday = Calendar.current.date(byAdding: .day, value: 7, to: sunday)!
-        await loadWeek(containing: nextSunday, force: force)
-        guard generation == accountGeneration, !Task.isCancelled else { return }
+        guard let context = requestContext, !Task.isCancelled else { return }
         let first = Calendar.current.date(byAdding: .day, value: 1, to: sunday)!
         let end = Calendar.current.date(byAdding: .day, value: 8, to: sunday)!
-        for (target, source) in holidays.replacementDates {
-            guard let targetDate = PortalDate.day(target), targetDate >= first, targetDate < end,
-                  let sourceDate = PortalDate.day(source) else { continue }
-            let sourceWeek = LiveActivityDataPolicy.portalWeekStart(for: sourceDate)
-            if sourceWeek != sunday && sourceWeek != nextSunday {
-                await loadWeek(containing: sourceDate, force: force)
-            }
+        for week in requiredPortalWeeks(from: first, to: end).sorted() {
+            await loadWeek(containing: week, force: force)
+            guard isCurrent(context), !Task.isCancelled else { return }
         }
+        let nextSunday = Calendar.current.date(byAdding: .day, value: 7, to: sunday)!
         for year in Set([sunday, nextSunday].map { Calendar.current.component(.year, from: $0) }) {
             await holidays.refresh(year: year)
+            guard isCurrent(context), !Task.isCancelled else { return }
         }
+        weekState = displayWeekState(starting: sunday)
+    }
+
+    private func requiredPortalWeeks(from first: Date, to end: Date) -> Set<Date> {
+        var result = Set<Date>()
+        var day = Calendar.current.startOfDay(for: first)
+        while day < end {
+            result.insert(LiveActivityDataPolicy.portalWeekStart(for: day))
+            if let source = holidays.replacementDates[PortalDate.isoDay(day)], let date = PortalDate.day(source) {
+                result.insert(LiveActivityDataPolicy.portalWeekStart(for: date))
+            }
+            day = Calendar.current.date(byAdding: .day, value: 1, to: day)!
+        }
+        return result
+    }
+
+    private func states(for weeks: Set<Date>) -> [LoadState] {
+        weeks.sorted().map { weekStates[$0] ?? (weekCache[$0] == nil ? .idle : .loaded) }
+    }
+
+    func displayWeekState(starting sunday: Date) -> LoadState {
+        let first = Calendar.current.date(byAdding: .day, value: 1, to: sunday)!
+        let end = Calendar.current.date(byAdding: .day, value: 8, to: sunday)!
+        return ScheduleReadStatus.loadState(states(for: requiredPortalWeeks(from: first, to: end)))
+    }
+
+    func todayScheduleStatus(now: Date = Date()) -> ScheduleReadStatus {
+        guard hasCurrentLiveActivityAccount else { return .unread }
+        let range = activityRange(now: now, dayOnly: true)
+        let first = Calendar.current.date(byAdding: .day, value: -1, to: range.first)!
+        let weeks = requiredPortalWeeks(from: first, to: range.end)
+        let snapshot = activitySchedule(now: now, dayOnly: true)
+        return ScheduleReadStatus.summarize(states(for: weeks),
+            hasData: weeks.contains { weekCache[$0] != nil } || !snapshot.items.isEmpty)
     }
 
     func displayWeekOccurrences(starting sunday: Date) -> [CourseOccurrence] {
@@ -556,11 +659,11 @@ final class PortalRepository {
                 guard generation == accountGeneration, hasCurrentLiveActivityAccount, !Task.isCancelled else { return }
             }
         case .cardBalance:
-            if force || cardBalance == nil { await loadCardOverview() }
+            await loadCardBalance(force: force)
         case .netBalance:
-            if force || netInfo == nil { await loadCardOverview() }
+            await loadNetInfo(force: force)
         case .electricBalance:
-            if force || electricInfo == nil { await loadCardOverview() }
+            await loadElectric(force: force)
         case .academicOverview:
             await loadGrades(force: force)
         case .planner, .assignments, .custom:
@@ -667,17 +770,24 @@ final class PortalRepository {
             return
         }
         if gradesState == .loading { return }
+        guard let context = requestContext, !Task.isCancelled else { return }
         gradesState = .loading
+        gradeRequestID += 1
         let requestID = gradeRequestID
         do {
-            let list = try await withRecovery {
+            let list = try await withRecovery(retryInterruptedRequest: false) {
                 try await self.session.client.fetchJwxtGrades()
             }
-            guard requestID == gradeRequestID else { return }
+            try Task.checkCancellation()
+            guard isCurrent(context), requestID == gradeRequestID else { return }
             applyGradeReport(list)
         } catch {
-            guard requestID == gradeRequestID else { return }
-            if gradesCache?.isEmpty == false {
+            guard isCurrent(context), requestID == gradeRequestID else { return }
+            if NetworkError.isCancellation(error) || Task.isCancelled {
+                gradesState = gradesCache == nil ? .idle : .loaded
+                return
+            }
+            if gradesCache != nil {
                 gradesWarning = "本次同步失败，保留上次结果：" + NetworkError.from(error).message
                 gradesState = .loaded
             } else {
@@ -702,51 +812,164 @@ final class PortalRepository {
         catch { return .failure(error) }
     }
 
-    func loadCardOverview() async {
+    /// Independent resource loaders share route preparation, not one loading flag.
+    func loadCardOverview(force: Bool = false) async {
+        async let card: Void = loadCardBalance(force: force)
+        async let net: Void = loadNetInfo(force: force)
+        async let electric: Void = loadElectric(force: force)
+        _ = await (card, net, electric)
+    }
+
+    private func prepareWalletAccess(_ context: RepositoryRequestContext) async throws {
+        if let task = walletAccessTask { await task.value }
+        else {
+            let request = UUID()
+            walletAccessID = request
+            let task = Task { @MainActor in
+                await self.session.client.prepareAccess()
+                if self.isCurrent(context), self.walletAccessID == request { self.walletAccessTask = nil }
+            }
+            walletAccessTask = task
+            await task.value
+        }
+        try Task.checkCancellation()
+        guard isCurrent(context) else { throw CancellationError() }
+    }
+
+    func loadCardBalance(force: Bool = false) async {
         await ensureLoadedForCurrentUser()
-        if cardState == .loading { return }
+        guard let context = requestContext, !Task.isCancelled else { return }
+        if !force, let task = cardTask { await task.value; return }
+        if !force, cardBalance != nil, DataFreshness.isFresh(cardUpdatedAt, for: DataFreshness.wallet) { return }
+        cardTask?.cancel()
+        let request = UUID()
+        cardRequestID = request
+        let revision = cardBalanceRevision
         cardState = .loading
-        cardWarning = nil
-        netState = .loading
-        electricState = .loading
-        let client = session.client
-        let generation = accountGeneration
-        let balanceRevision = cardBalanceRevision
-        // 与泥洞一致，先固定这一轮的校内/校外路由，再并发取业务数据。
-        await client.prepareAccess()
-        async let fetchedCard = cardResult { try await self.cardBalanceWithWebRecovery() }
-        async let fetchedNet = cardResult { try await client.fetchNetInfo(sid: session.user?.sid ?? "") }
-        async let fetchedElectric = cardResult { try await client.fetchElectric(room: electricRoomCode) }
-        let (card, net, elec) = await (fetchedCard, fetchedNet, fetchedElectric)
-        guard generation == accountGeneration else { return }
-        session.persistWebSession()
-        if balanceRevision == cardBalanceRevision {
-            switch card {
+        let task = Task { @MainActor in
+            defer { if self.isCurrent(context), self.cardRequestID == request { self.cardTask = nil } }
+            let result = await self.cardResult {
+                try await self.prepareWalletAccess(context)
+                return try await self.cardBalanceWithWebRecovery()
+            }
+            guard self.isCurrent(context), self.cardRequestID == request, revision == self.cardBalanceRevision else { return }
+            if Task.isCancelled { self.cardState = self.cardBalance == nil ? .idle : .loaded; return }
+            switch result {
             case .success(let value):
-                cardBalance = value
-                cardUpdatedAt = Date()
-                cardState = .loaded
+                self.cardBalance = value
+                self.cardUpdatedAt = Date()
+                self.cardWarning = nil
+                self.cardState = .loaded
+                self.session.persistWebSession()
             case .failure(let error):
-                if NetworkError.isCancellation(error) {
-                    cardState = cardBalance == nil ? .idle : .loaded
-                } else if cardBalance != nil {
-                    cardWarning = "本次同步失败，显示上次真实结果：" + NetworkError.from(error).message
-                    cardState = .loaded
-                } else { cardState = .failed(NetworkError.from(error).message) }
+                if NetworkError.isCancellation(error) { self.cardState = self.cardBalance == nil ? .idle : .loaded }
+                else if self.cardBalance != nil {
+                    self.cardWarning = "本次同步失败，显示上次真实结果：" + NetworkError.from(error).message
+                    self.cardState = .loaded
+                } else { self.cardState = .failed(NetworkError.from(error).message) }
             }
         }
-        switch net {
-        case .success(let value): netInfo = value; netUpdatedAt = Date(); netState = .loaded
-        case .failure(let error):
-            if NetworkError.isCancellation(error) { netState = netInfo == nil ? .idle : .loaded }
-            else { netState = netInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
+        cardTask = task
+        await task.value
+    }
+
+    func loadNetInfo(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
+        if !force, let task = netTask { await task.value; return }
+        if !force, netInfo != nil, DataFreshness.isFresh(netUpdatedAt, for: DataFreshness.wallet) { return }
+        netTask?.cancel()
+        let request = UUID()
+        netRequestID = request
+        let sid = session.user?.sid ?? ""
+        netState = .loading
+        let task = Task { @MainActor in
+            defer { if self.isCurrent(context), self.netRequestID == request { self.netTask = nil } }
+            let result = await self.cardResult {
+                try await self.prepareWalletAccess(context)
+                return try await self.session.client.fetchNetInfo(sid: sid)
+            }
+            guard self.isCurrent(context), self.netRequestID == request else { return }
+            if Task.isCancelled { self.netState = self.netInfo == nil ? .idle : .loaded; return }
+            switch result {
+            case .success(let value):
+                self.netInfo = value
+                self.netUpdatedAt = Date()
+                self.netWarning = nil
+                self.netState = .loaded
+                self.session.persistWebSession()
+            case .failure(let error):
+                if NetworkError.isCancellation(error) { self.netState = self.netInfo == nil ? .idle : .loaded }
+                else if self.netInfo != nil {
+                    self.netWarning = "本次同步失败，显示上次结果：" + NetworkError.from(error).message
+                    self.netState = .loaded
+                } else { self.netState = .failed(NetworkError.from(error).message) }
+            }
         }
-        switch elec {
-        case .success(let value): electricInfo = value; electricUpdatedAt = Date(); electricState = .loaded
-        case .failure(let error):
-            if NetworkError.isCancellation(error) { electricState = electricInfo == nil ? .idle : .loaded }
-            else { electricState = electricInfo == nil ? .failed(NetworkError.from(error).message) : .loaded }
+        netTask = task
+        await task.value
+    }
+
+    /// A room switch invalidates the old selection immediately, even while card
+    /// balance is loading. Only the selected account + normalized room may write.
+    func loadElectric(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
+        let key = ElectricRoomKey(account: context.account, room: electricRoom)
+        if !force, let task = electricTask { await task.value; return }
+        if !force, electricInfo != nil, DataFreshness.isFresh(electricUpdatedAt, for: DataFreshness.electric) { return }
+        electricTask?.cancel()
+        electricTask = nil
+        let request = UUID()
+        electricRequestID = request
+        if key.room.isEmpty {
+            electricInfo = ElectricInfo(unbound: true, remainKwh: nil, roomNo: nil, roomLabel: nil, lastReadAt: nil)
+            electricState = .loaded
+            electricUpdatedAt = nil
+            electricWarning = nil
+            return
         }
+        guard ElectricRoomKey.isValid(key.room) else {
+            electricInfo = nil
+            electricUpdatedAt = nil
+            electricState = .failed("房间码应为 3 位宿舍加 4 位寝室数字")
+            return
+        }
+        electricState = .loading
+        let task = Task { @MainActor in
+            defer { if self.isCurrent(context), self.electricRequestID == request { self.electricTask = nil } }
+            let result = await self.cardResult {
+                try await self.prepareWalletAccess(context)
+                return try await self.session.client.fetchElectric(room: key.room)
+            }
+            guard self.isCurrent(context), self.electricRequestID == request,
+                  key.room == self.electricRoom else { return }
+            if Task.isCancelled { self.electricState = self.electricInfo == nil ? .idle : .loaded; return }
+            switch result {
+            case .success(let value):
+                guard !value.unbound, ElectricRoomKey.normalize(value.roomNo ?? "") == key.room else {
+                    let message = "电费响应房间与当前选择不一致，请重试"
+                    self.electricWarning = message
+                    self.electricState = self.electricInfo == nil ? .failed(message) : .loaded
+                    return
+                }
+                let updated = Date()
+                self.electricCache[key] = ElectricSnapshot(info: value, updatedAt: updated)
+                self.electricInfo = value
+                self.electricUpdatedAt = updated
+                self.electricWarning = nil
+                self.electricState = .loaded
+                self.session.persistWebSession()
+            case .failure(let error):
+                if NetworkError.isCancellation(error) { self.electricState = self.electricInfo == nil ? .idle : .loaded }
+                else if self.electricInfo != nil {
+                    self.electricWarning = "本次同步失败，显示同一房间上次结果：" + NetworkError.from(error).message
+                    self.electricState = .loaded
+                } else { self.electricState = .failed(NetworkError.from(error).message) }
+            }
+        }
+        electricTask = task
+        await task.value
     }
 
     /// 拉取某自然月流水（历史月落缓存，不再自动刷新）。
@@ -905,31 +1128,59 @@ final class PortalRepository {
         LiveActivityAssignments(cg: cgReport, reports: assignmentReports)
     }
 
-    private func activityTemplateValues(now: Date) -> [String: String] {
-        var values = ["date": LiveActivityDataPolicy.dateText(now, format: "yyyy-MM-dd"),
-                      "time": LiveActivityDataPolicy.dateText(now, format: "HH:mm")]
-        let week = Semester.weekNumberOf(now)
-        values["week"] = (1...Semester.totalWeeks).contains(week) ? "第\(week)周" : "非教学周"
-        let schedule = activitySchedule(now: now)
-        if let next = schedule.next {
-            values["course"] = next.occurrence.slot.name
-            values["room"] = next.occurrence.slot.room
-            values["start"] = LiveActivityDataPolicy.dateText(next.start, format: "MM-dd HH:mm")
-            values["end"] = LiveActivityDataPolicy.dateText(next.end, format: "MM-dd HH:mm")
-        } else if schedule.isReady {
-            values["course"] = schedule.availability == .empty ? "无课程或日程" : "全部已结束"
+    private func activityTemplateSnapshot(now: Date, keys: Set<String>) -> (values: [String: String], expiration: Date?) {
+        var values: [String: String] = [:]
+        var expirations: [Date] = []
+        let cal = Calendar.current
+        if keys.contains("date") { values["date"] = LiveActivityDataPolicy.dateText(now, format: "yyyy-MM-dd") }
+        if keys.contains("time") {
+            values["time"] = LiveActivityDataPolicy.dateText(now, format: "HH:mm")
+            expirations.append(cal.dateInterval(of: .minute, for: now)?.end ?? now.addingTimeInterval(60))
         }
-        values["card"] = LiveActivityDataPolicy.money(cardBalance?.balance)
-        values["net"] = LiveActivityDataPolicy.money(netInfo?.balance)
-        if let electric = electricInfo {
+        if keys.contains("week") {
+            let week = Semester.weekNumberOf(now)
+            values["week"] = (1...Semester.totalWeeks).contains(week) ? "第\(week)周" : "非教学周"
+        }
+        if !keys.isDisjoint(with: ["date", "week"]) {
+            expirations.append(cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!)
+        }
+        if !keys.isDisjoint(with: ["course", "room", "start", "end"]) {
+            let schedule = activitySchedule(now: now)
+            if let next = schedule.next {
+                values["course"] = next.occurrence.slot.name
+                values["room"] = next.occurrence.slot.room
+                values["start"] = LiveActivityDataPolicy.dateText(next.start, format: "MM-dd HH:mm")
+                values["end"] = LiveActivityDataPolicy.dateText(next.end, format: "MM-dd HH:mm")
+                expirations.append(next.isOngoing(at: now) ? next.end : next.start)
+            } else if schedule.isReady {
+                values["course"] = schedule.availability == .empty ? "无课程或日程" : "全部已结束"
+                expirations.append(cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!)
+            }
+        }
+        if keys.contains("card") {
+            values["card"] = LiveActivityDataPolicy.money(cardBalance?.balance)
+            if let timestamp = cardUpdatedAt { expirations.append(timestamp.addingTimeInterval(1800)) }
+        }
+        if keys.contains("net") {
+            values["net"] = LiveActivityDataPolicy.money(netInfo?.balance)
+            if let timestamp = netUpdatedAt { expirations.append(timestamp.addingTimeInterval(1800)) }
+        }
+        if keys.contains("electric"), let electric = electricInfo {
             if electric.unbound { values["electric"] = "未绑定" }
             else if let kwh = electric.remainKwh, kwh.isFinite { values["electric"] = String(format: "%.1f kWh", kwh) }
+            if let timestamp = electricUpdatedAt { expirations.append(timestamp.addingTimeInterval(1800)) }
         }
-        values["pending"] = activityAssignments.pendingText
-        if gradesCache != nil, let gpa = LiveActivityAcademic(semesters: grades).gpa {
+        if keys.contains("pending") {
+            values["pending"] = activityAssignments.pendingText
+            if let timestamp = ([cgUpdatedAt].compactMap { $0 } + Array(assignmentUpdatedAt.values)).min() {
+                expirations.append(timestamp.addingTimeInterval(1800))
+            }
+        }
+        if keys.contains("gpa"), gradesCache != nil, let gpa = LiveActivityAcademic(semesters: grades).gpa {
             values["gpa"] = String(format: "%.2f", gpa)
+            if let timestamp = gradesUpdatedAt { expirations.append(timestamp.addingTimeInterval(1800)) }
         }
-        return values
+        return (values, expirations.min())
     }
 
     /// Pure publication from current-account caches. nil is reserved for unread sources.
@@ -939,14 +1190,15 @@ final class PortalRepository {
                      updatedAt: Date = .distantPast, start: Date? = nil, end: Date? = nil,
                      symbol: String? = nil, secondary: String? = nil, progress: Double? = nil,
                      countdown: String? = nil, destination: String = "settings") -> NEULumenActivityAttributes.ContentState {
-            .init(title: String(title.prefix(80)), subtitle: String(subtitle.prefix(160)),
+            NEULumenActivityAttributes.ContentState(title: String(title.prefix(80)), subtitle: String(subtitle.prefix(160)),
                   value: String(value.prefix(32)), kind: store.kind.rawValue, updatedAt: updatedAt,
                   startDate: start, endDate: end, accent: LiveActivityDataPolicy.accent(store.accent),
                   symbolName: LiveActivityDataPolicy.symbol(symbol ?? store.kind.icon),
                   secondaryValue: secondary.map { String($0.prefix(64)) },
                   progress: store.showProgress ? LiveActivityDataPolicy.progress(progress) : nil,
                   countdownTitle: countdown,
-                  destinationPath: LiveActivityDataPolicy.destinations.contains(destination) ? destination : "settings")
+                  destinationPath: LiveActivityDataPolicy.destinations.contains(destination) ? destination : "settings",
+                  countdownTarget: countdown == "距上课" || countdown == "距开始" ? "start" : end != nil ? "end" : nil).boundedText()
         }
         switch store.kind {
         case .nextCourse, .planner:
@@ -974,7 +1226,9 @@ final class PortalRepository {
             return content("校园卡余额", subtitle: cardWarning == nil ? "最近同步的真实可用余额" : "本次同步失败，保留上次真实余额",
                 value: balance, updatedAt: updatedAt, secondary: cardBalance?.status, destination: "card")
         case .custom:
-            let values = activityTemplateValues(now: now)
+            let keys = LiveActivityTemplate.dependencies(in: [store.customTitle, store.customSubtitle, store.customValue])
+            let snapshot = activityTemplateSnapshot(now: now, keys: keys)
+            let values = snapshot.values
             let rawTitle = store.customTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             let title = LiveActivityTemplate.render(rawTitle.isEmpty ? "东大提醒" : rawTitle, values: values, limit: 80)
             let subtitle = LiveActivityTemplate.render(store.customSubtitle, values: values, limit: 160)
@@ -983,8 +1237,10 @@ final class PortalRepository {
             if let deadline, value.isEmpty {
                 value = deadline > now ? LiveActivityDataPolicy.countdown(to: deadline, at: now) : "已到期"
             }
-            return content(title, subtitle: subtitle, value: value, end: deadline, symbol: store.customIcon,
+            var state = content(title, subtitle: subtitle, value: value, end: deadline, symbol: store.customIcon,
                 countdown: deadline.map { $0 > now ? "距截止" : "已到期" }, destination: "settings")
+            state.staleAfter = snapshot.expiration
+            return state.boundedText()
         case .netBalance:
             guard let net = netInfo, let balance = LiveActivityDataPolicy.money(net.balance) else { return nil }
             return content("校园网余额", subtitle: "最近成功同步的余额与用量", value: balance,

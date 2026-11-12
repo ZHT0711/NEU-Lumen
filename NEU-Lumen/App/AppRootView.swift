@@ -29,6 +29,7 @@ struct AppRootView: View {
         }
         .background(Color(.systemGroupedBackground))
         .background { LiveActivityCoordinator() }
+        .background { BrowserDownloadCoordinator() }
         .onOpenURL { url in
             guard url.scheme == "neulumen", let host = url.host,
                   ["activity", "dynamic-island"].contains(host) else { return }
@@ -40,7 +41,7 @@ struct AppRootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .inactive || phase == .background { environment.session.persistWebSession() }
-            if phase == .active { environment.session.networkDidChange() }
+            if phase == .active { environment.session.applicationDidBecomeActive() }
         }
         .animation(.easeInOut(duration: 0.25), value: environment.session.phase)
     }

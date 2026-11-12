@@ -49,6 +49,11 @@ protocol WebSessionPersisting {
     func load() -> SavedWebSession?
     func save(_ session: SavedWebSession) throws
     func clear()
+    func clearAndReport() -> Bool
+}
+
+extension WebSessionPersisting {
+    func clearAndReport() -> Bool { clear(); return true }
 }
 
 /// Cookie、UA、个人资料只进本机 Keychain，不写 UserDefaults 或项目文件。
@@ -84,5 +89,10 @@ struct KeychainWebSessionStore: WebSessionPersisting {
         }
     }
 
-    func clear() { SecItemDelete(query as CFDictionary) }
+    func clear() { _ = clearAndReport() }
+
+    func clearAndReport() -> Bool {
+        let status = SecItemDelete(query as CFDictionary)
+        return status == errSecSuccess || status == errSecItemNotFound
+    }
 }

@@ -94,12 +94,85 @@ class UIPreviewTests(unittest.TestCase):
         self.assertNotIn('seedScreenshotSession', (root / session).read_text())
         self.assertNotIn('hasPrefix("--screen=")', (root / repository).read_text())
         generated = (destination / repository).read_text()
-        self.assertEqual(generated.count('hasPrefix("--screen=")'), 3)
+        self.assertEqual(generated.count('hasPrefix("--screen=")'), 6)
+        self.assertIn('loadedForEpoch = session.requestEpoch', generated)
+        self.assertIn('for key in weekCache.keys { weekStates[key] = .loaded }', generated)
         self.assertIn('cardBalance = CardBalance(balance: 66.50', generated)
         self.assertIn('billsCache["\\(billsYear)-\\(billsMonth)"] = cardBills', generated)
         self.assertIn('func seedScreenshotSession()', (destination / session).read_text())
         app = (destination / 'NEU-Lumen/App/NEULumenApp.swift').read_text()
         self.assertLess(app.index('environment.session.seedScreenshotSession()'), app.index('environment.repository.seedUIValidation()'))
+        self.assertNotIn('browser.sharedFile', app)
+        self.assertIn('BrowserDownloadCoordinator()', app)
+        self.assertIn('case "downloads":', app)
+        self.assertIn('--download-restore-check', app)
+        injected = destination / 'NEU-Lumen/App/BrowserDownloadValidation.swift'
+        self.assertTrue(injected.is_file())
+        self.assertFalse((root / 'NEU-Lumen/App/BrowserDownloadValidation.swift').exists())
+        checks = injected.read_text()
+        self.assertIn('try bytes(original) == pdf', checks)
+        self.assertIn('seedBrowserDownloadScreenshot', checks)
+        self.assertIn('verifyBrowserDownloadProcessRestart', checks)
+
+    def test_download_fixture_real_http_routes(self):
+        # Real localhost server exercises the integrated GET/POST dispatch, not string matching.
+        import http.cookiejar
+        from http.server import ThreadingHTTPServer
+        import threading
+        import urllib.error
+        import urllib.request
+        import ui_fixture_server
+        from browser_download_fixture import PDF
+
+        class QuietHandler(ui_fixture_server.Handler):
+            def log_message(self, *args):
+                pass
+
+        (self.path / 'plain.txt').write_text('ordinary fixture still works')
+        with patch.object(sys, 'argv', ['fixture-server', str(self.path)]):
+            server = ThreadingHTTPServer(('127.0.0.1', 0), QuietHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                base = 'http://127.0.0.1:' + str(server.server_port)
+                opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+                def fetch(path, referer=False, body=None):
+                    headers = {'Referer': base + '/dl/index'} if referer else {}
+                    request = urllib.request.Request(base + path, data=body, headers=headers)
+                    with opener.open(request, timeout=5) as response:
+                        return response.read(), response.headers.get_content_type()
+                self.assertEqual(fetch('/plain.txt')[0], b'ordinary fixture still works')
+                self.assertIn(b'Login required', fetch('/dl/document')[0])
+                fetch('/dl/index')
+                self.assertIn(b'Login required', fetch('/dl/document')[0])  # cookie alone is insufficient
+                self.assertEqual(fetch('/dl/document', True), (PDF, 'application/pdf'))
+                self.assertEqual(fetch('/dl/reference')[0], PDF)
+                self.assertEqual(fetch('/dl/post', True, b'document=fixture')[0], PDF)
+                self.assertEqual(fetch('/dl/post-attachment', True, b'document=fixture')[0], PDF)
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    fetch('/dl/post', True)
+                self.assertEqual(denied.exception.code, 405)
+                self.assertEqual(fetch('/dl/same?v=1')[0], b'same-1')
+                self.assertEqual(fetch('/dl/same?v=2')[0], b'same-2')
+                self.assertEqual(fetch('/dl/attachment')[0], b'NEU-Lumen original attachment')
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+    def test_download_checks_and_twentieth_screenshot_are_required(self):
+        self.assertEqual(len(preview.SCREENSHOTS), 20)
+        self.assertIn('downloads-light.png', preview.SCREENSHOTS)
+        for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt']:
+            self.assertIn(name, preview.CHECKS)
+            path = self.path / name
+            path.write_text('FAIL: download regression\n')
+            with self.assertRaises(ValueError):
+                preview.package(self.path, self.env)
+            path.write_text('PASS: synthetic download fixture\n')
+        (self.path / 'downloads-light.png').unlink()
+        with self.assertRaises(FileNotFoundError):
+            preview.package(self.path, self.env)
 
     def test_readme_and_workflow_contract(self):
         root = Path(__file__).resolve().parents[1]

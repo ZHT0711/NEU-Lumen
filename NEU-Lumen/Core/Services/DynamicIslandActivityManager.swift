@@ -95,6 +95,17 @@ final class DynamicIslandActivityManager {
             return
         }
 
+        state = state.boundedText()
+        let payloadAttributes = NEULumenActivityAttributes(campus: request.campus, accountID: request.accountID)
+        let encoder = JSONEncoder()
+        guard let stateBytes = try? encoder.encode(state).count,
+              let attributeBytes = try? encoder.encode(payloadAttributes).count,
+              stateBytes + attributeBytes < 4000 else {
+            await endAll()
+            status = "内容过长"
+            lastError = "内容超过系统实时活动大小限制，请缩短自定义文字。"
+            return
+        }
         if let activity {
             var previous = activity.content.state
             if state.updatedAt == .distantPast { previous.updatedAt = .distantPast }
@@ -146,7 +157,8 @@ final class DynamicIslandActivityManager {
         } else if let end = state.endDate { staleDate = end }
         else if state.kind == "custom" { staleDate = nil }
         else { staleDate = state.updatedAt.addingTimeInterval(30 * 60) }
-        return ActivityContent(state: state, staleDate: staleDate, relevanceScore: 50)
+        let expiration = [staleDate, state.staleAfter].compactMap { $0 }.min()
+        return ActivityContent(state: state, staleDate: expiration, relevanceScore: 50)
     }
 
     private func observe(_ activity: Activity<NEULumenActivityAttributes>) {

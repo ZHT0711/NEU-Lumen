@@ -185,9 +185,17 @@ struct LiveActivityContentPreview: View {
                 HStack {
                     Image(systemName: state.symbol).foregroundStyle(LiveActivityAppearance.color(state.accent))
                     Spacer(minLength: 40)
-                    Text(state.value.isEmpty ? String(state.title.prefix(2)) : state.value)
-                        .foregroundStyle(.white).font(.caption.monospacedDigit())
-                        .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 80)
+                    if state.staleAfter.map({ $0 <= Date() }) == true {
+                        Image(systemName: "arrow.clockwise").foregroundStyle(.white).accessibilityLabel("内容待更新")
+                    } else if let target = state.countdownDate, target > Date() {
+                        Text(timerInterval: Date()...target, countsDown: true)
+                            .foregroundStyle(.white).font(.caption.monospacedDigit())
+                            .multilineTextAlignment(.trailing).frame(width: 80)
+                    } else {
+                        Text(state.countdownDate != nil ? "待更新" : state.value.isEmpty ? String(state.title.prefix(2)) : state.value)
+                            .foregroundStyle(.white).font(.caption.monospacedDigit())
+                            .lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: 80)
+                    }
                 }
                 .padding(.horizontal, 18).frame(width: 220, height: 42)
                 .background(.black, in: Capsule())
@@ -203,8 +211,5 @@ struct LiveActivityContentPreview: View {
         }
     }
 
-    private func countdownTarget(_ state: NEULumenActivityAttributes.ContentState) -> Date? {
-        if state.countdownTitle == "距上课" || state.countdownTitle == "距开始" { return state.startDate }
-        return state.endDate
-    }
+    private func countdownTarget(_ state: NEULumenActivityAttributes.ContentState) -> Date? { state.countdownDate }
 }

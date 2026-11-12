@@ -8,14 +8,15 @@ private func activityRequest(environment: AppEnvironment, foreground: Bool, now:
     let user = session.user
     let identity = user?.sid.isEmpty == false ? user?.sid : user?.uid
     let account = session.phase == .loggedIn && identity?.isEmpty == false ? identity : nil
+    let state = account != nil && store.enabled ? environment.repository.liveActivityState(store: store, now: now) : nil
     return .init(enabled: store.enabled, accountID: account, campus: environment.repository.campus.title,
-        state: account == nil ? nil : environment.repository.liveActivityState(store: store, now: now),
-        isForeground: foreground, refreshDate: now,
-        contentReady: environment.repository.liveActivityDataIsReady(for: store.kind, now: now),
+        state: state, isForeground: foreground, refreshDate: now,
+        contentReady: !store.enabled || state != nil || environment.repository.liveActivityDataIsReady(for: store.kind, now: now),
         contentKind: store.kind.rawValue)
 }
 
 private struct ActivityLoadKey: Hashable {
+    let epoch: UUID
     let account: String?
     let source: String
     let enabled: Bool
@@ -32,7 +33,7 @@ struct LiveActivityCoordinator: View {
             let session = environment.session
             let store = environment.dynamicIslandStore
             let request = activityRequest(environment: environment, foreground: scenePhase == .active, now: context.date)
-            let loadKey = ActivityLoadKey(account: request.accountID, source: store.kind.rawValue,
+            let loadKey = ActivityLoadKey(epoch: session.requestEpoch, account: request.accountID, source: store.kind.rawValue,
                 enabled: store.enabled, foreground: scenePhase == .active, day: PortalDate.isoDay(context.date))
             Color.clear
                 .task(id: loadKey) {

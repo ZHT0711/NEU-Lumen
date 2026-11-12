@@ -563,18 +563,23 @@ print("Gateway-only CAS: native academic SSO, rewritten redirects and cookie pat
 
 final class MemoryWebSessionStore: WebSessionPersisting {
     var data: Data?
+    var refuseDeletion = false
     func load() -> SavedWebSession? { data.flatMap { try? JSONDecoder().decode(SavedWebSession.self, from: $0) } }
     func save(_ session: SavedWebSession) throws { data = try JSONEncoder().encode(session) }
-    func clear() { data = nil }
+    func clear() { if !refuseDeletion { data = nil } }
+    func clearAndReport() -> Bool { clear(); return !refuseDeletion }
 }
 
 @MainActor
 func verifySessionRestart() async throws {
     let vault = MemoryWebSessionStore()
+    let suite = "NEU-Lumen.SessionRestart." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
     func makeSession() -> SessionStore {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockPortalProtocol.self]
-        return SessionStore(client: PortalClient(http: HTTPClient(configuration: config)), webSessions: vault)
+        return SessionStore(client: PortalClient(http: HTTPClient(configuration: config)), webSessions: vault, defaults: defaults)
     }
     let cas = HTTPCookie(properties: [.name:"CASTGC", .value:"fixture-cas", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
     let scoped = HTTPCookie(properties: [.name:"SESS_ID", .value:"scoped-session", .domain:"webvpn.neu.edu.cn", .path:wrapped.path,
@@ -618,6 +623,8 @@ func verifySessionRestart() async throws {
     await loggedOut.restoreSession()
     precondition(loggedOut.phase == .loggedOut)
 
+    // Start a separate fixture scenario, not a user-logged-out session.
+    defaults.removeObject(forKey: "lumen.session.suppressAutomaticRestore")
     // 学校已给出的到期时间不能因保存而延长。
     let expired = HTTPCookie(properties: [.name:"CASTGC", .value:"old", .domain:"pass.neu.edu.cn", .path:"/tpass", .expires:Date(timeIntervalSinceNow: -60)])!
     try vault.save(SavedWebSession(user: user, userAgent: "Saved WebKit UA", cookies: [expired]))
@@ -634,7 +641,28 @@ func verifySessionRestart() async throws {
     let expiredAtServer = makeSession()
     await expiredAtServer.restoreSession()
     precondition(expiredAtServer.phase == .loggedIn && vault.data != nil, "单一路线返回认证页不能丢掉另一个网络的会话")
-    print("Web session restart: serialization, session-only/HttpOnly/path cookies, UA, offline/403 recovery, expiry and logout passed")
+    // A failed persistent deletion must not log the user back in after restart.
+    vault.refuseDeletion = true
+    expiredAtServer.logout()
+    precondition(vault.data != nil && expiredAtServer.sessionSaveError != nil)
+    let residual = makeSession()
+    await residual.restoreSession()
+    precondition(residual.phase == .loggedOut && residual.user == nil)
+    vault.refuseDeletion = false
+    vault.clear()
+
+    // A current cookie session can bind an initially unknown identity once the
+    // profile endpoint recovers, without borrowing another account's password.
+    let pending = makeSession()
+    MockPortalProtocol.failure = URLError(.notConnectedToInternet)
+    let pendingLogin = await pending.completeWebLogin(WebLoginSession(cookies: [cas, ticket, scoped, root], user: nil, userAgent: "Fixture UA"))
+    precondition(pendingLogin && pending.phase == .loggedIn && !pending.hasConfirmedIdentity)
+    let identityEpoch = pending.requestEpoch
+    MockPortalProtocol.failure = nil
+    MockPortalProtocol.handle = { _ in (200, [:], "<script>const userInfoDSL = \(raw);</script>") }
+    let bound = await pending.ensureIdentity()
+    precondition(bound && pending.user?.isSameAccount(as: user) == true && pending.requestEpoch == identityEpoch)
+    print("Web session restart: cookies, UA, offline/403 recovery, expiry, logout barrier and pending identity binding passed")
 }
 try await verifySessionRestart()
 

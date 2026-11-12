@@ -2,6 +2,7 @@
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 import sys
+from browser_download_fixture import handle_download_fixture
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -20,6 +21,8 @@ class Handler(SimpleHTTPRequestHandler):
         return 'card-fixture=ready' in self.headers.get('Cookie', '')
 
     def do_GET(self):
+        if handle_download_fixture(self, 'GET'):
+            return
         path = urlsplit(self.path).path
         if path.startswith('/mooc/learn/'):
             return self.html('<title>MOOC course</title>')
@@ -75,6 +78,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self):
+        if handle_download_fixture(self, 'POST'):
+            return
         fields = parse_qs(self.rfile.read(int(self.headers.get('Content-Length', '0'))).decode('utf-8'))
         path = urlsplit(self.path).path
         if path.endswith('SSOLogin.aspx'):

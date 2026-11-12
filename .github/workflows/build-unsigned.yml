@@ -33,9 +33,10 @@ jobs:
     steps:
       - name: Checkout branch push
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Select build run
         id: decision
@@ -60,17 +61,38 @@ jobs:
     if: needs.select_run.outputs.should_build == 'true'
     runs-on: macos-26
     timeout-minutes: 60
+    outputs:
+      # needs.build outputs retain the successful BUILD attempt on release-only retries.
+      attempt: ${{ steps.identity.outputs.attempt }}
+      ipa_name: ${{ steps.identity.outputs.ipa_name }}
+      ui_name: ${{ steps.identity.outputs.ui_name }}
+      ipa_id: ${{ steps.ipa.outputs.artifact-id }}
+      ui_id: ${{ steps.ui.outputs.artifact-id }}
 
     steps:
+      - name: Identify immutable build artifacts
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+          echo "ipa_name=NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+          echo "ui_name=NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Select Xcode
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p build
+          exec > >(tee build/toolchain-provenance.txt) 2>&1
+          printf 'Runner image: %s %s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          sw_vers
 
           XCODE_APP="$(
             ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1
@@ -85,6 +107,8 @@ jobs:
           sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
           xcodebuild -version
           xcodebuild -showsdks
+          swift --version
+          xcrun simctl list runtimes --json
 
       - name: Test categories, timetable, grades and cookies
         shell: bash
@@ -136,6 +160,7 @@ jobs:
           exec > >(tee "${RUNNER_TEMP}/login-tests.log") 2>&1
           swiftc \
             NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Support/LoadState.swift \
             NEU-Lumen/Core/Models/*.swift \
             NEU-Lumen/Core/Networking/*.swift \
             NEU-Lumen/Core/Persistence/CredentialStore.swift \
@@ -155,6 +180,7 @@ jobs:
           exec > >(tee "${RUNNER_TEMP}/live-activity-data-tests.log") 2>&1
           swiftc \
             NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Support/LoadState.swift \
             NEU-Lumen/Core/Models/*.swift \
             NEU-Lumen/Core/Networking/*.swift \
             NEU-Lumen/Core/Persistence/CredentialStore.swift \
@@ -168,6 +194,25 @@ jobs:
             -o "${RUNNER_TEMP}/live-activity-data-tests"
           "${RUNNER_TEMP}/live-activity-data-tests"
 
+      - name: Test native browser download storage and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/browser-download-tests.log") 2>&1
+          python3 scripts/test_browser_downloads.py --require-swift -v
+
+      - name: Test native data reliability policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/data-reliability-tests.log") 2>&1
+          swiftc \
+            NEU-Lumen/Core/Support/LoadState.swift \
+            NEU-Lumen/Core/Models/DataReliability.swift \
+            Tests/DataReliability/main.swift \
+            -o "${RUNNER_TEMP}/data-reliability-tests"
+          "${RUNNER_TEMP}/data-reliability-tests"
+
       - name: Build unsigned IPA
         shell: bash
         run: |
@@ -175,25 +220,41 @@ jobs:
           mkdir -p build
           bash build_ios_unsigned.sh 2>&1 | tee build/ios-build.log
 
-      - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: NEU-Lumen-iOS-unsigned-${{ github.run_number }}
-          path: build/NEU-Lumen-iOS-unsigned.ipa
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Validate simulator UI and browser behavior
         run: bash scripts/validate_ui.sh
 
       - name: Require warning-free compiler logs
-        run: python3 scripts/check_build_diagnostics.py "${RUNNER_TEMP}/catalog-tests.log" "${RUNNER_TEMP}/planner-tests.log" "${RUNNER_TEMP}/login-tests.log" "${RUNNER_TEMP}/live-activity-data-tests.log" build/ios-build.log build/ui-preview/simulator-build.log
+        # Add each new native test log here and increment --required-count together.
+        run: >-
+          python3 scripts/check_build_diagnostics.py --required-count 8
+          "${RUNNER_TEMP}/catalog-tests.log"
+          "${RUNNER_TEMP}/planner-tests.log"
+          "${RUNNER_TEMP}/login-tests.log"
+          "${RUNNER_TEMP}/live-activity-data-tests.log"
+          "${RUNNER_TEMP}/browser-download-tests.log"
+          "${RUNNER_TEMP}/data-reliability-tests.log"
+          build/ios-build.log build/ui-preview/simulator-build.log
+
+      - name: Bind IPA and UI provenance to this successful build attempt
+        run: python3 scripts/build_provenance.py record
+
+      - name: Upload unsigned IPA
+        id: ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.identity.outputs.ipa_name }}
+          path: |
+            build/NEU-Lumen-iOS-unsigned.ipa
+            build/build-provenance.json
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload UI screenshots and checks
+        id: ui
         if: always() && hashFiles('build/ui-preview/**') != ''
-        uses: actions/upload-artifact@v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: NEU-Lumen-ui-preview-${{ github.run_number }}
+          name: ${{ steps.identity.outputs.ui_name }}
           path: build/ui-preview/
           if-no-files-found: error
           retention-days: 14
@@ -208,19 +269,29 @@ jobs:
     permissions:
       contents: write
       actions: read
+    env:
+      BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
+      IPA_ARTIFACT_ID: ${{ needs.build.outputs.ipa_id }}
+      IPA_ARTIFACT_NAME: ${{ needs.build.outputs.ipa_name }}
+      UI_ARTIFACT_ID: ${{ needs.build.outputs.ui_id }}
+      UI_ARTIFACT_NAME: ${{ needs.build.outputs.ui_name }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Download unsigned IPA
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
+        run: python3 scripts/build_provenance.py download ipa --dir release-assets
+
+      - name: Verify IPA build provenance
+        run: python3 scripts/build_provenance.py validate --ipa-only
 
       - name: Generate release body
         shell: bash
@@ -276,7 +347,7 @@ jobs:
           echo "由 GitHub Actions 自动发布。" >> release_body.md
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: NEU-Lumen ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
@@ -294,19 +365,35 @@ jobs:
     permissions:
       contents: write
       actions: read
+    env:
+      BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
+      IPA_ARTIFACT_ID: ${{ needs.build.outputs.ipa_id }}
+      IPA_ARTIFACT_NAME: ${{ needs.build.outputs.ipa_name }}
+      UI_ARTIFACT_ID: ${{ needs.build.outputs.ui_id }}
+      UI_ARTIFACT_NAME: ${{ needs.build.outputs.ui_name }}
+    concurrency:
+      group: publish-manual-nightly-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Recover interrupted dated prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/publish_manual_nightly.py --recover-only
       - name: Download verified unsigned IPA
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
+        run: python3 scripts/build_provenance.py download ipa --dir release-assets
       - name: Download screenshots from the same build
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}" --dir release-assets/ui-preview
+        run: python3 scripts/build_provenance.py download ui --dir release-assets/ui-preview
       - name: Publish dated prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -321,12 +408,25 @@ jobs:
     permissions:
       contents: write
       actions: read
+    env:
+      BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
+      IPA_ARTIFACT_ID: ${{ needs.build.outputs.ipa_id }}
+      IPA_ARTIFACT_NAME: ${{ needs.build.outputs.ipa_name }}
+      UI_ARTIFACT_ID: ${{ needs.build.outputs.ui_id }}
+      UI_ARTIFACT_NAME: ${{ needs.build.outputs.ui_name }}
     concurrency:
       group: publish-nightly
       cancel-in-progress: false
     steps:
       - name: Checkout publishing scripts
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Recover interrupted rolling release before checking main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/publish_nightly.py --recover-only
       - name: Check current main commit
         id: current
         env:
@@ -347,14 +447,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}" --dir release-assets
+        run: python3 scripts/build_provenance.py download ipa --dir release-assets
 
       - name: Download screenshots from the same build
         if: steps.current.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh run download "${GITHUB_RUN_ID}" --name "NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}" --dir release-assets/ui-preview
+        run: python3 scripts/build_provenance.py download ui --dir release-assets/ui-preview
 
       - name: Publish nightly prerelease
         if: steps.current.outputs.publish == 'true'

@@ -69,6 +69,19 @@ enum LiveActivityTemplate {
     ]
     private static let pattern = try! NSRegularExpression(pattern: #"\{([a-z]+)\}"#)
 
+    static func dependencies(in texts: [String]) -> Set<String> {
+        let allowed = Set(variables.map(\.key))
+        var result = Set<String>()
+        for text in texts {
+            for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let range = Range(match.range(at: 1), in: text) else { continue }
+                let key = String(text[range])
+                if allowed.contains(key) { result.insert(key) }
+            }
+        }
+        return result
+    }
+
     /// Single pass: replacement data is never interpreted as another template.
     /// Unknown tokens remain literal; known but missing data is explicitly unread.
     static func render(_ text: String, values: [String: String], limit: Int) -> String {

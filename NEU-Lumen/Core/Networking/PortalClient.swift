@@ -407,22 +407,14 @@ final class PortalClient {
         if !query.isEmpty { comps.queryItems = query }
         let requestURL = URL(string: maybeWrap(comps.url!.absoluteString))!
         let resp = try await http.get(requestURL, xhr: true)
+        // Status is checked before parsing: JSON gateway errors are not empty data.
+        if resp.status == 401 { throw PortalAPIError.authenticationRequired }
+        guard (200..<300).contains(resp.status) else { throw PortalAPIError.httpStatus(resp.status) }
         if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
             || resp.finalURL.path.contains("/tpass/login") {
-            throw NetworkError.sessionExpired()
+            throw PortalAPIError.authenticationRequired
         }
-        if resp.body.isEmpty {
-            throw NetworkError(message: "接口返回为空")
-        }
-        let json = try http.json(resp)
-        guard let j = json as? [String: Any] else {
-            throw NetworkError(message: "接口返回格式异常")
-        }
-        if let code = j["e"] as? Int, code != 0 {
-            let m = j.str("m")
-            throw NetworkError(message: "\(m.isEmpty ? "接口错误" : m)（代码 \(code)）")
-        }
-        return j.obj("d")
+        return try PortalEnvelope.data(status: resp.status, body: resp.body)
     }
 
     /// 某一周（周日起 7 天）的课表/考试/活动事件。传该周任意一天即可。
@@ -446,11 +438,13 @@ final class PortalClient {
             URLQueryItem(name: "end", value: "\(endMs)"),
         ])
 
-        let dayMap = d.obj("data").obj("day")
+        let dayMap = try PortalEnvelope.days(d)
         var out: [CourseOccurrence] = []
         out.reserveCapacity(32)
         for (dateStr, slotValue) in dayMap {
-            guard let date = PortalDate.day(dateStr) else { continue }
+            guard let date = PortalDate.day(dateStr), slotValue is [String: Any] || slotValue is [Any] else {
+                throw PortalAPIError.invalidPayload("课表")
+            }
             // day 的值可能是：事件 / {节次: 事件} / [事件] / {节次: [事件]} 任意嵌套，统一展平
             var events: [[String: Any]] = []
             events.reserveCapacity(12)
@@ -506,7 +500,7 @@ final class PortalClient {
             URLQueryItem(name: "type", value: "all"),
             URLQueryItem(name: "cate_id", value: ""),
         ])
-        let list = (d["list"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        let list = try PortalEnvelope.list(d).compactMap { $0 as? [String: Any] }
         return list.compactMap { a -> PortalApp? in
             let name = a.str("name")
             guard !name.isEmpty else { return nil }
@@ -531,7 +525,7 @@ final class PortalClient {
         ])
         var cid = "1244bca0563f72ea134e4d78973c6911"
         var cname = "东大要闻"
-        let tabList = (tabs["list"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        let tabList = try PortalEnvelope.list(tabs).compactMap { $0 as? [String: Any] }
         if let first = tabList.first(where: { $0.str("name") == "东大要闻" }) ?? tabList.first {
             cid = first.str("id")
             cname = first.str("name")
@@ -547,7 +541,7 @@ final class PortalClient {
             URLQueryItem(name: "month", value: ""),
             URLQueryItem(name: "publisher", value: ""),
         ])
-        let list = (d["list"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        let list = try PortalEnvelope.list(d).compactMap { $0 as? [String: Any] }
         return list.compactMap { n -> NewsItem? in
             let title = n.str("title")
             guard !title.isEmpty else { return nil }
@@ -597,7 +591,7 @@ final class PortalClient {
             URLQueryItem(name: "page", value: "1"),
             URLQueryItem(name: "pageSize", value: "10"),
         ])
-        let list = (d["list"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        let list = try PortalEnvelope.list(d).compactMap { $0 as? [String: Any] }
         return list.map { t in
             let nodes = (t["node_name"] as? [Any])?.compactMap { $0 as? String } ?? []
             let destination = PortalLink.from([t]) ?? PortalLink.appURL(id: t.str("third_app_id")) ?? URL(string: Self.portalBase)!
@@ -617,7 +611,7 @@ final class PortalClient {
         let d = try await api("personal/frontend/data/items", query: [
             URLQueryItem(name: "type", value: "personal_data"),
         ])
-        let list = (d["data"] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []
+        let list = try PortalEnvelope.list(d, key: "data").compactMap { $0 as? [String: Any] }
         var out: [DataCard] = []
         out.reserveCapacity(list.count)
         for it in list {
@@ -656,10 +650,8 @@ final class PortalClient {
 
     /// 门户智慧搜索热词。
     func fetchHotSearch(pageSize: Int = 8) async throws -> [String] {
-        let resp = try await http.get(URL(string: "\(Self.portalBase)/frontend/search/hot?pageSize=\(pageSize)")!)
-        let json = try http.json(resp)
-        guard let j = json as? [String: Any], (j["e"] as? Int) == 0 else { return [] }
-        let list = j.obj("d")["list"] as? [Any] ?? []
+        let data = try await api("frontend/search/hot", query: [URLQueryItem(name: "pageSize", value: "\(pageSize)")])
+        let list = try PortalEnvelope.list(data)
         return list.compactMap { v -> String? in
             if let s = v as? String, !s.isEmpty { return s }
             if let n = v as? NSNumber { return n.stringValue }
@@ -714,8 +706,10 @@ final class PortalClient {
         do {
             return try await fetchGradeReport()
         } catch {
+            if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
             // 可访问登录页不代表可访问校内成绩接口；直连失败后仅尝试一次网关。
             guard !webvpnOn, await ensureWebVPN() else { throw error }
+            try Task.checkCancellation()
             return try await fetchGradeReport()
         }
     }
@@ -727,15 +721,19 @@ final class PortalClient {
         var semesters: [GradeSemester] = []
         var failed: [String] = []
         for term in terms {
+            try Task.checkCancellation()
             do {
                 let raw = try await jwxtGet("api/home/student/scores.do?termCode=\(term.code.urlFormEncoded)")
+                try Task.checkCancellation()
                 let courses = try AcademicResponse.courses(raw)
                 semesters.append(GradeSemester(name: term.name, termCode: term.code, current: term.current, courses: courses))
             } catch {
+                if NetworkError.isCancellation(error) || Task.isCancelled { throw CancellationError() }
                 if NetworkError.from(error).isSessionExpired { throw error }
                 failed.append(term.name)
             }
         }
+        try Task.checkCancellation()
         guard !semesters.isEmpty else { throw NetworkError(message: "未获取到成绩数据，请打开教务网页后同步") }
         return GradeReport(semesters: semesters, failedTerms: failed)
     }
@@ -933,12 +931,12 @@ final class PortalClient {
 
     /// 电费：缴费大厅 queryRommInfo，房间码为宿舍 3 位 + 寝室 4 位。
     func fetchElectric(room rawRoom: String) async throws -> ElectricInfo {
-        let room = rawRoom.trimmingCharacters(in: .whitespaces)
-            .replacingOccurrences(of: "-", with: "")
-            .replacingOccurrences(of: " ", with: "")
+        let room = ElectricRoomKey.normalize(rawRoom)
         if room.isEmpty {
             return ElectricInfo(unbound: true, remainKwh: nil, roomNo: nil, roomLabel: nil, lastReadAt: nil)
         }
+        guard ElectricRoomKey.isValid(room) else { throw NetworkError(message: "房间码应为 7 位数字") }
+        try Task.checkCancellation()
         do {
             _ = try await casLand(Self.servicePay)
         } catch let e as NetworkError where e.isSessionExpired {
@@ -954,6 +952,9 @@ final class PortalClient {
             "elecroomno": room,
             "factorycode": "E039",
         ])
+        try Task.checkCancellation()
+        if resp.status == 401 { throw PortalAPIError.authenticationRequired }
+        guard (200..<300).contains(resp.status) else { throw PortalAPIError.httpStatus(resp.status) }
         let text = resp.text
         guard let json = try? http.json(resp) as? [String: Any] else {
             if text.contains("维护") { throw NetworkError(message: "电费系统维护中，请稍后再试") }

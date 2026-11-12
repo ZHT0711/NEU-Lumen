@@ -58,7 +58,7 @@ struct ServicesView: View {
                     self.selectedCategory = nil
                 }
             }
-            .task {
+            .task(id: environment.session.user?.sid.isEmpty == false ? environment.session.user?.sid : environment.session.user?.uid) {
                 await repo.ensureLoadedForCurrentUser()
                 await repo.loadAppsIfNeeded()
                 await repo.loadHotSearchIfNeeded()

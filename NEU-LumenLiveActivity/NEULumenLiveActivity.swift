@@ -58,6 +58,16 @@ struct NEULumenLiveActivity: Widget {
             } compactTrailing: {
                 if context.isStale {
                     Image(systemName: "arrow.clockwise").accessibilityLabel("内容待更新")
+                } else if let target = context.state.countdownDate {
+                    if target > Date() {
+                        Text(timerInterval: Date()...target, countsDown: true)
+                            .font(.caption2.monospacedDigit())
+                            .multilineTextAlignment(.trailing)
+                            .minimumScaleFactor(0.65)
+                            .frame(width: 64)
+                    } else {
+                        Text("待更新").font(.caption2)
+                    }
                 } else {
                     Text(context.state.value.isEmpty ? String(context.state.title.prefix(2)) : context.state.value)
                         .font(.caption2.monospacedDigit())
@@ -101,10 +111,7 @@ private struct ActivityValue: View {
     let state: NEULumenActivityAttributes.ContentState
     let isStale: Bool
 
-    private var target: Date? {
-        if state.countdownTitle == "距上课" || state.countdownTitle == "距开始" { return state.startDate }
-        return state.endDate
-    }
+    private var target: Date? { state.countdownDate }
 
     var body: some View {
         if let target, !isStale, target > Date() {
@@ -116,6 +123,10 @@ private struct ActivityValue: View {
                     .minimumScaleFactor(0.7)
                     .frame(width: 96)
             }
+        } else if target != nil {
+            Text(isStale ? "待更新" : "已到时间")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
         } else if !state.value.isEmpty {
             Text(state.value)
                 .font(.headline.monospacedDigit())

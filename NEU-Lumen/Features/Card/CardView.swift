@@ -46,7 +46,7 @@ struct CardView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task {
-                        await repo.loadCardOverview()
+                        await repo.loadCardOverview(force: true)
                         await repo.loadBills(year: repo.billsYear, month: repo.billsMonth, force: true)
                     }
                 } label: {
@@ -55,11 +55,13 @@ struct CardView: View {
             }
         }
         .refreshable {
-            await repo.loadCardOverview()
+            await repo.loadCardOverview(force: true)
             await repo.loadBills(year: repo.billsYear, month: repo.billsMonth, force: true)
         }
-        .task {
+        .task(id: environment.session.user?.sid.isEmpty == false ? environment.session.user?.sid : environment.session.user?.uid) {
+            await repo.ensureLoadedForCurrentUser()
             roomDraft = repo.electricRoomCode
+            editingRoom = false
             await repo.loadCardOverview()
             await repo.loadBills(year: repo.billsYear, month: repo.billsMonth)
         }
@@ -84,7 +86,7 @@ struct CardView: View {
             case .failed(let message):
                 GlassCard {
                     ErrorStateView(message: message) {
-                        Task { await repo.loadCardOverview() }
+                        Task { await repo.loadCardBalance(force: true) }
                     }
                 }
             case .loaded:
@@ -93,7 +95,7 @@ struct CardView: View {
                     Text("校园卡余额（元）")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
-                    Text(String(format: "%.2f", balance?.balance ?? 0))
+                    Text(balance.map { String(format: "%.2f", $0.balance) } ?? "—")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .monospacedDigit()
@@ -240,12 +242,12 @@ struct CardView: View {
                         .padding(.vertical, 18)
                     case .failed(let message):
                         ErrorStateView(message: message) {
-                            Task { await repo.loadCardOverview() }
+                            Task { await repo.loadNetInfo(force: true) }
                         }
                     case .loaded:
                         let net = repo.netInfo
                         HStack(alignment: .firstTextBaseline, spacing: 14) {
-                            statBlock("余额（元）", String(format: "%.2f", net?.balance ?? 0))
+                            statBlock("余额（元）", net.map { String(format: "%.2f", $0.balance) } ?? "—")
                             if net?.flowFromPortal == true {
                                 statBlock("本月已用", net?.usedFlowText ?? "—")
                             }
@@ -257,6 +259,13 @@ struct CardView: View {
                         .padding(14)
                     }
                 }
+            }
+            if let warning = repo.netWarning {
+                Text(warning).font(.caption).foregroundStyle(.orange)
+            }
+            if let updated = repo.netUpdatedAt {
+                Text("上次成功同步：\(updated.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -276,10 +285,11 @@ struct CardView: View {
                                 .autocorrectionDisabled()
                             Button("保存") {
                                 repo.electricRoomCode = roomDraft
+                                roomDraft = repo.electricRoomCode
                                 editingRoom = false
-                                Task { await repo.loadCardOverview() }
+                                Task { await repo.loadElectric(force: true) }
                             }
-                            .disabled(roomDraft.trimmingCharacters(in: .whitespaces).count < 7)
+                            .disabled(!ElectricRoomKey.isValid(roomDraft))
                         }
                         .font(.subheadline)
                     } else {
@@ -306,7 +316,7 @@ struct CardView: View {
                         .padding(.vertical, 14)
                     case .failed(let message):
                         ErrorStateView(message: message) {
-                            Task { await repo.loadCardOverview() }
+                            Task { await repo.loadElectric(force: true) }
                         }
                     default:
                         if let info = repo.electricInfo {
@@ -316,7 +326,7 @@ struct CardView: View {
                                     .foregroundStyle(.secondary)
                             } else {
                                 HStack(alignment: .firstTextBaseline, spacing: 14) {
-                                    statBlock("剩余电量（度）", String(format: "%.1f", info.remainKwh ?? 0))
+                                    statBlock("剩余电量（度）", info.remainKwh.map { String(format: "%.1f", $0) } ?? "未读取")
                                     if let label = info.roomLabel, !label.isEmpty {
                                         statBlock("房间", label)
                                     }
@@ -331,6 +341,13 @@ struct CardView: View {
                     }
                 }
                 .padding(14)
+            }
+            if let warning = repo.electricWarning {
+                Text(warning).font(.caption).foregroundStyle(.orange)
+            }
+            if let updated = repo.electricUpdatedAt {
+                Text("上次成功同步：\(updated.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
