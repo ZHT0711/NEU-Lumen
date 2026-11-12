@@ -151,7 +151,9 @@ class UIPreviewTests(unittest.TestCase):
                 self.assertEqual(fetch('/dl/post-attachment', True, b'document=fixture')[0], PDF)
                 with self.assertRaises(urllib.error.HTTPError) as denied:
                     fetch('/dl/post', True)
-                self.assertEqual(denied.exception.code, 405)
+                with denied.exception as response:
+                    self.assertEqual(response.code, 405)
+                    self.assertEqual(response.read(), b'GET replay forbidden')
                 self.assertEqual(fetch('/dl/same?v=1')[0], b'same-1')
                 self.assertEqual(fetch('/dl/same?v=2')[0], b'same-2')
                 self.assertEqual(fetch('/dl/attachment')[0], b'NEU-Lumen original attachment')
