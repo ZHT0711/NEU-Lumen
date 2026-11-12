@@ -69,7 +69,8 @@ def handle_download_fixture(handler, method):
         <form id="post" action="/dl/post" method="post"><input name="document" value="fixture"><button>POST PDF</button></form>
         <form id="postAttachment" action="/dl/post-attachment" method="post"><input name="document" value="fixture"><button>POST attachment</button></form>
         <a id="dataPDF" download="data.pdf" href="data:application/pdf;base64,{encoded}">data PDF</a>
-        <button id="blobPDF" onclick="let a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([Uint8Array.from(atob('{encoded}'),c=>c.charCodeAt(0))],{{type:'application/pdf'}}));a.download='blob.pdf';document.body.append(a);a.click();">blob PDF</button>'''
+        <a id="blobPDF" download="blob.pdf">blob PDF</a>
+        <script>document.getElementById('blobPDF').href=URL.createObjectURL(new Blob([Uint8Array.from(atob('{encoded}'),c=>c.charCodeAt(0))],{{type:'application/pdf'}}));</script>'''
         return send(html, headers=[('Set-Cookie', 'dl-fixture=ready; Path=/dl/; HttpOnly; SameSite=Lax')])
     if path == '/dl/reference':
         return send(PDF, 'application/pdf')

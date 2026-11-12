@@ -10,6 +10,7 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
     for record in store.records { store.delete(record.id) }
     defer { browser.close() }
     let index = base.appendingPathComponent("dl/index")
+    var stage = "initial page"
     func require(_ ok: Bool, _ message: String) throws {
         if !ok { throw NetworkError(message: "Download validation: " + message) }
     }
@@ -18,7 +19,8 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
             if predicate() { return }
             try await Task.sleep(for: .milliseconds(50))
         }
-        throw NetworkError(message: "Download fixture timed out")
+        let states = store.records.map { "\($0.filename):\($0.state.rawValue):\($0.failure?.rawValue ?? "none")" }.joined(separator: ", ")
+        throw NetworkError(message: "Download fixture timed out at \(stage); page=\(browser.webView.url?.scheme ?? "nil"); loading=\(browser.isLoading); pdf=\(browser.isCurrentPDF); records=[\(states)]; notice=\(browser.downloadNotice)")
     }
     func loadIndex() async throws {
         browser.webView.load(URLRequest(url: index))
@@ -28,8 +30,12 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
         _ = try await browser.webView.evaluateJavaScript("document.getElementById('\(id)').click()")
     }
     func newRecord(after old: Set<UUID>, state: BrowserDownloadRecord.State) async throws -> BrowserDownloadRecord {
-        try await wait { store.records.contains { !old.contains($0.id) && $0.state == state } }
-        return store.records.first { !old.contains($0.id) && $0.state == state }!
+        try await wait { store.records.contains { !old.contains($0.id) && ($0.state == state || $0.state == .failed) } }
+        guard let record = store.records.first(where: { !old.contains($0.id) && $0.state == state }) else {
+            let failure = store.records.first { !old.contains($0.id) }?.failure?.rawValue ?? "unknown"
+            throw NetworkError(message: "Download validation failed at \(stage): \(failure)")
+        }
+        return record
     }
     func bytes(_ record: BrowserDownloadRecord) throws -> Data {
         guard let url = store.previewURL(for: record.id) else { throw NetworkError(message: "Missing completed fixture") }
@@ -64,11 +70,25 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
     try require(same1.filename == same2.filename && store.previewURL(for: same1.id) != store.previewURL(for: same2.id), "same name UUID isolation")
     try require(try bytes(same1) == Data("same-1".utf8) && bytes(same2) == Data("same-2".utf8), "both same-name files retained")
     for id in ["blobPDF", "dataPDF"] {
+        // Exercise the user-facing "download current original file" path.
+        // A nested element.click() from injected JS is not a trusted user gesture
+        // in every WebKit version and can suppress automatic download navigation.
+        stage = id + " inline document"
+        try await loadIndex()
+        guard let text = try await browser.webView.evaluateJavaScript("document.getElementById('\(id)').href") as? String,
+              let url = URL(string: text), ["blob", "data"].contains(url.scheme ?? "") else {
+            throw NetworkError(message: "Invalid synthetic \(id) link")
+        }
+        browser.webView.load(URLRequest(url: url))
+        try await wait { browser.isCurrentPDF && !browser.isLoading && browser.webView.url?.scheme == url.scheme }
+        stage = id + " original download"
         before = Set(store.records.map(\.id))
-        try await click(id)
+        browser.downloadCurrentFile()
         let result = try await newRecord(after: before, state: .completed)
-        try require(try bytes(result) == pdf, "\(id) stays inside WebKit")
+        try require(try bytes(result) == pdf, "\(id) original bytes stay inside WebKit")
     }
+    stage = "slow transfer and cancellation"
+    try await loadIndex()
 
     before = Set(store.records.map(\.id))
     try await click("slow")

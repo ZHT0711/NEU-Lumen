@@ -251,9 +251,10 @@ struct UIValidationRoot: View {
                 case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
                 case "downloads":
                     BrowserDownloadsView(store: BrowserDownloadStore.shared)
-                        .safeAreaInset(edge: .top) {
+                        .safeAreaInset(edge: .bottom) {
                             Text("模拟器演示下载 · 非真实账号数据")
                                 .font(.caption).foregroundStyle(.secondary).padding(6)
+                                .frame(maxWidth: .infinity).background(.regularMaterial)
                         }
                 case "browser":
                     TabView {
