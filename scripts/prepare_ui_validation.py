@@ -803,7 +803,7 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
         request.state?.countdownTitle = "距截止"
         manager.synchronize(request)
         try await manager.settleForValidation()
-        try require(active().first?.content.state.accent == "pink" && active().first?.content.state.symbol == "heart.fill",
+        try await waitFor({ active().first?.content.state.accent == "pink" && active().first?.content.state.symbol == "heart.fill" },
             "Native theme/icon update did not reach ActivityKit")
         try require(abs((active().first?.content.staleDate ?? .distantPast).timeIntervalSince(customTarget)) < 1,
             "Custom countdown did not expire at its target")
