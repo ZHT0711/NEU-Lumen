@@ -379,6 +379,8 @@ struct CourseDetailSheet: View {
     let occurrence: CourseOccurrence
     let onDelete: (String) -> Void
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppEnvironment.self) private var environment
+    @State private var deleting = false
 
     var body: some View {
         NavigationStack {
@@ -388,6 +390,10 @@ struct CourseDetailSheet: View {
                 LabeledContent("时间", value: "\(Semester.hm(occurrence.slot.startMinutes)) – \(Semester.hm(occurrence.slot.endMinutes))")
                 LabeledContent("地点", value: occurrence.slot.room)
                 LabeledContent("类型", value: occurrence.slot.kind == "custom" ? "本机日程" : "门户事件")
+                if let eventID = occurrence.slot.eventID,
+                   let event = environment.repository.planner.events.first(where: { $0.id == eventID }), !event.note.isEmpty {
+                    LabeledContent("备注", value: event.note)
+                }
             }
             .navigationTitle("详情")
             .navigationBarTitleDisplayMode(.inline)
@@ -399,14 +405,17 @@ struct CourseDetailSheet: View {
             .safeAreaInset(edge: .bottom) {
                 if let eventID = occurrence.slot.eventID {
                     Button(role: .destructive) {
-                        onDelete(eventID)
-                        dismiss()
+                        deleting = true
                     } label: {
                         Text("删除此日程")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
                     .padding()
+                    .confirmationDialog("删除此本机日程？", isPresented: $deleting, titleVisibility: .visible) {
+                        Button("删除日程", role: .destructive) { onDelete(eventID); dismiss() }
+                        Button("取消", role: .cancel) {}
+                    } message: { Text(occurrence.slot.name) }
                 }
             }
         }

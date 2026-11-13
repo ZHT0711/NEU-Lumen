@@ -253,6 +253,7 @@ private struct AcademicProgramCourses: View {
     @State private var error: String?
     @State private var query = ""
     @State private var selected: AcademicPageCourse?
+    @State private var request = UUID()
     var body: some View {
         NavigationStack {
             List {
@@ -286,14 +287,16 @@ private struct AcademicProgramCourses: View {
     }
     private func load() async {
         let epoch = environment.session.requestEpoch
+        let token = UUID()
+        request = token
         courses = []; selected = nil; loading = true; error = nil
         guard let account = environment.session.user?.sid, !account.isEmpty else { loading = false; return }
         do {
             let result = try await environment.session.client.fetchPersonalProgramCourses(tree, node: node, expectedAccount: account)
-            guard epoch == environment.session.requestEpoch, !Task.isCancelled else { return }
+            guard epoch == environment.session.requestEpoch, request == token, !Task.isCancelled else { return }
             courses = result; loading = false
         } catch {
-            guard epoch == environment.session.requestEpoch, !NetworkError.isCancellation(error) else { return }
+            guard epoch == environment.session.requestEpoch, request == token, !NetworkError.isCancellation(error) else { return }
             self.error = NetworkError.from(error).message; loading = false
         }
     }
