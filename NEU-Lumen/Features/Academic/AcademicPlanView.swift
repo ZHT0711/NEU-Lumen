@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct AcademicPlanView: View {
+struct AcademicSyncedCoursesView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var selectedPlanID: String?
     @State private var showPageSync = false
@@ -217,7 +217,7 @@ struct AcademicPlanView: View {
     }
 }
 
-private struct AcademicCourseDetail: View {
+struct AcademicCourseDetail: View {
     let course: AcademicPageCourse
     @Environment(\.dismiss) private var dismiss
     var body: some View {

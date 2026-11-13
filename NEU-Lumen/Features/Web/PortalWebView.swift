@@ -20,6 +20,12 @@ struct PortalWebViewScreen: View {
     @State private var isSyncingCard = false
     @State private var showPermissionsHelp = false
     @State private var showNativeDocument = true
+    private var presentsNativeDocument: Bool {
+        guard let nativeService, showNativeDocument, let current = browser.currentURL else { return false }
+        let source = WebVPN.unwrap(current) ?? current
+        return nativeService.owns(host: source.host?.lowercased() ?? "") &&
+            !["/tologin.html", "/drCasLogin"].contains(source.path)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,10 +52,10 @@ struct PortalWebViewScreen: View {
             ZStack {
                 PortalWebView(browser: browser)
                 .id(ObjectIdentifier(browser.webView))
-                .opacity(nativeService != nil && showNativeDocument ? 0 : 1)
-                .allowsHitTesting(nativeService == nil || !showNativeDocument)
-                .accessibilityHidden(nativeService != nil && showNativeDocument)
-                if let nativeService, showNativeDocument {
+                .opacity(presentsNativeDocument ? 0 : 1)
+                .allowsHitTesting(!presentsNativeDocument)
+                .accessibilityHidden(presentsNativeDocument)
+                if let nativeService, presentsNativeDocument {
                     NativeServiceDocumentView(browser: browser, service: nativeService) { showNativeDocument = false }
                 }
             }
@@ -380,6 +386,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var documentResponseURL: URL?
     @ObservationIgnored private var provisionalUnsafeMethod = false
     @ObservationIgnored private var documentUnsafeMethod = false
+    @ObservationIgnored private var service: NativeCampusService?
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -441,6 +448,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         started = true
         self.client = client
         self.session = session
+        let source = WebVPN.unwrap(url) ?? url
+        let service = service ?? (source.host?.lowercased() == "pay.neu.edu.cn" ? NativeCampusService.payment : nil)
+        self.service = service
         if let session {
             guard session.phase == .loggedIn, let user = session.user else { return }
             BrowserDownloadStore.shared.activate(account: user.sid.isEmpty ? user.uid : user.sid, epoch: session.requestEpoch)
@@ -459,7 +469,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         clientEpoch = client.sessionGeneration
         webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
-        let destination = await client.prepareBrowserURL(url)
+        let destination = service == .payment ? source : await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
         if let learningPlatform, webView.configuration.websiteDataStore.isPersistent {
             let existing = await store.allCookies()
@@ -524,7 +534,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         // Never replay a POST: WebKit may not expose its body, and reloading it could lose a login form.
         if navigationAction.targetFrame?.isMainFrame != false,
            (navigationAction.request.httpMethod ?? "GET") == "GET",
-           let destination = client?.browserDestination(for: url), destination != url {
+           let destination = routedDestination(url), destination != url {
             decisionHandler(.cancel, preferences)
             var request = navigationAction.request
             request.url = destination
@@ -552,6 +562,15 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
             } else { error = "当前链接需要其他应用打开，可从菜单复制链接" }
             decisionHandler(.cancel, preferences)
         }
+    }
+
+    private func routedDestination(_ url: URL) -> URL? {
+        if service == .payment {
+            let source = WebVPN.unwrap(url) ?? url
+            if ["pay.neu.edu.cn", "pass.neu.edu.cn"].contains(source.host?.lowercased() ?? "") { return source }
+            return url
+        }
+        return client?.browserDestination(for: url)
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {

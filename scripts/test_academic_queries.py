@@ -26,7 +26,7 @@ class AcademicContracts(unittest.TestCase):
         paths = re.findall(r'"(api/[^"?]+\.do)', MODEL)
         self.assertEqual(set(paths), {'api/home/student/schoolCalendars.do', 'api/home/student/educational-program.do',
             'api/home/homeSchoolCalendar.do', 'api/home/student/academic-status.do', 'api/home/teachingSchedule/classWeek.do'})
-        request = CLIENT.split('func fetchAcademicQuery(', 1)[1].split('func fetchJwxtGrades(', 1)[0]
+        request = CLIENT.split('func fetchAcademicQuery(', 1)[1].split('// Verified against pyfagl', 1)[0]
         self.assertNotIn('http.post', request)
         self.assertEqual(request.count('validateIdentity('), 2)
         self.assertEqual(request.count('jwxtGet("api/home/currentUser.do")'), 2)
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     swift = shutil.which('swiftc')
     if swift:
         sources = [MODELS/'AcademicQueries.swift', MODELS/'AcademicQueryParser.swift', MODELS/'AcademicPageReader.swift',
-                   MODELS/'AcademicPlanPresentation.swift', CORE/'Persistence/AcademicPlanCacheStore.swift',
+                   MODELS/'AcademicPlanPresentation.swift', MODELS/'PersonalAcademicProgram.swift', CORE/'Persistence/AcademicPlanCacheStore.swift',
                    MODELS/'DataReliability.swift', CORE/'Support/LoadState.swift', ROOT/'Tests/Academic/main.swift']
         with tempfile.TemporaryDirectory(prefix='lumen-academic-') as tmp:
             binary = Path(tmp)/'academic-tests'

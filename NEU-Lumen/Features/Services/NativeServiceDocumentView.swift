@@ -14,6 +14,7 @@ struct NativeServiceDocumentView: View {
     @State private var confirmedAction: NativeServiceDocument.Action?
     @State private var request = UUID()
     private static let world = WKContentWorld.world(name: "NEULumen.ServiceDocument")
+    private var hasEdits: Bool { document?.fields.contains { values[$0.id] != $0.value } ?? false }
 
     var body: some View {
         List {
@@ -77,6 +78,15 @@ struct NativeServiceDocumentView: View {
             if !browser.isLoading { await read() }
         }
         .refreshable { await read() }
+        .task {
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(1)) } catch { return }
+                guard !busy, !browser.isLoading, !hasEdits, pendingAction == nil, confirmedAction == nil else { continue }
+                let status = try? await execute(command: "watch")
+                guard status?["changed"] as? Bool == true, !hasEdits, pendingAction == nil, confirmedAction == nil else { continue }
+                await read()
+            }
+        }
         .sheet(item: $pendingAction, onDismiss: {
             guard let action = confirmedAction else { return }
             confirmedAction = nil
@@ -163,6 +173,7 @@ struct NativeServiceDocumentView: View {
             let result = try JSONDecoder().decode(NativeServiceDocument.self, from: JSONSerialization.data(withJSONObject: raw))
             guard request == token else { return }
             document = result; values = Dictionary(uniqueKeysWithValues: result.fields.map { ($0.id, $0.value) }); error = nil
+            if result.requiresWebsite == true { showWebsite() }
         } catch {
             guard request == token, !NetworkError.isCancellation(error) else { return }
             document = nil; values = [:]; self.error = NetworkError.from(error).message

@@ -262,7 +262,7 @@ struct UIValidationRoot: View {
                 case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
                 case "academic-center": NavigationStack { AcademicCenterView().nativeUIFixtureCaption("模拟器合成学业查询 · 非真实账号数据") }
                 case "academic-calendar": NavigationStack { AcademicCalendarView().nativeUIFixtureCaption("模拟器合成校历与周次 · 非学校实际安排") }
-                case "academic-plan": NavigationStack { AcademicPlanView().nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
+                case "academic-plan": NavigationStack { PersonalAcademicProgramDetail(program: PersonalAcademicProgram(id: "SYNTH-PROGRAM", name: "合成个人培养方案 · UI 验证", minimumCredits: "154", facts: [])).nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
                 case "native-payment": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
@@ -931,6 +931,24 @@ def service_fixture(relative, signature, insertion, extension=''):
     if source.count(signature) != 1:
         raise RuntimeError(f'Native service fixture hook changed: {signature}')
     path.write_text(source.replace(signature, signature + insertion) + extension, encoding='utf-8')
+
+service_fixture('NEU-Lumen/Features/Academic/PersonalAcademicProgramView.swift',
+                'func load(session: SessionStore, program: PersonalAcademicProgram? = nil) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=academic-plan") {
+            let sample = PersonalAcademicProgram(id: "SYNTH-PROGRAM", name: "合成个人培养方案 · UI 验证", minimumCredits: "154", facts: [])
+            programs = [sample]
+            tree = AcademicProgramTree(program: sample, nodes: [
+                AcademicProgramNode(id: sample.id, parentID: nil, name: sample.name, minimumCredits: "154", minimumGroups: nil, kind: "培养方案", inherited: false, referenced: false, mustPass: false),
+                AcademicProgramNode(id: "SYNTH-PLATFORM", parentID: sample.id, name: "合成通识教育平台", minimumCredits: "48", minimumGroups: "2", kind: "平台", inherited: false, referenced: false, mustPass: false),
+                AcademicProgramNode(id: "SYNTH-GROUP-A", parentID: "SYNTH-PLATFORM", name: "合成公共基础课组", minimumCredits: "24", minimumGroups: nil, kind: "课组", inherited: false, referenced: true, mustPass: true),
+                AcademicProgramNode(id: "SYNTH-GROUP-B", parentID: "SYNTH-PLATFORM", name: "合成人文素养课组", minimumCredits: "8", minimumGroups: nil, kind: "课组", inherited: false, referenced: false, mustPass: false)])
+            loading = false; error = nil; return
+        }
+''')
+# Open the actual native detail diagram in this screenshot-only copy.
+program_view = destination / 'NEU-Lumen/Features/Academic/PersonalAcademicProgramView.swift'
+program_source = program_view.read_text(encoding='utf-8').replace('private struct PersonalAcademicProgramDetail:', 'struct PersonalAcademicProgramDetail:')
+program_view.write_text(program_source, encoding='utf-8')
 
 service_fixture('NEU-Lumen/Core/Services/NativeMailStore.swift',
                 'func connect(session: SessionStore, apps: [PortalApp], server: URL? = nil) async {', r'''

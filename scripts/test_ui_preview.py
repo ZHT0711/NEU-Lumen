@@ -322,7 +322,7 @@ class UIPreviewTests(unittest.TestCase):
         for path in paths:
             self.assertEqual((root / path).read_bytes(), original[path])
         app = (destination / 'NEU-Lumen/App/NEULumenApp.swift').read_text()
-        for view in ('AcademicCenterView()', 'AcademicCalendarView()', 'AcademicPlanView()',
+        for view in ('AcademicCenterView()', 'AcademicCalendarView()', 'PersonalAcademicProgramDetail(program:',
                      'LiveActivityExpandedPreview(', 'runLiveActivityLayoutChecks()',
                      'runAcademicWebSyncChecks(environment)', 'verifyLearningProcessRestart(save: save'):
             self.assertIn(view, app)

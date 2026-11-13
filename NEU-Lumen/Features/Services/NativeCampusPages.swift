@@ -9,13 +9,17 @@ struct NativePaymentView: View {
     private var repo: PortalRepository { environment.repository }
     var body: some View {
         Form {
-            Section("缴费与账户") {
+            Section("缴费服务") {
+                Button("缴费项目", systemImage: "square.grid.2x2") { openPayment(path: "/openApplication") }
+                Button("我的订单", systemImage: "list.clipboard") { openPayment(path: "/orders.html") }
+                Button("缴费大厅首页", systemImage: "house") { openPayment() }
+            }
+            Section("校园账户") {
                 LabeledContent("校园卡余额", value: money(repo.cardBalance?.balance))
                 if let subsidy = repo.cardBalance?.subsidy { LabeledContent("补助余额", value: money(subsidy)) }
                 LabeledContent("网费余额", value: money(repo.netInfo?.balance))
                 if let date = repo.cardUpdatedAt { Text("校园卡更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
                 if let date = repo.netUpdatedAt { Text("网费更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                Button("学宿费与其他缴费", systemImage: "creditcard") { openPayment() }
                 Text("学校页面核对缴费项目、金额并完成支付。账户余额不等同于待缴费用。")
                     .font(.caption).foregroundStyle(.secondary)
                 ServiceLoadNotice(state: repo.cardState)
@@ -67,7 +71,10 @@ struct NativePaymentView: View {
         .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .payment) } }
     }
     private func money(_ value: Double?) -> String { value.map { $0.formatted(.currency(code: "CNY")) } ?? "未读取" }
-    private func openPayment() { web = NativeServiceWebLink(url: NativeCampusService.payment.entryURL(apps: repo.apps)) }
+    private func openPayment(path: String? = nil) {
+        let entry = NativeCampusService.payment.entryURL(apps: repo.apps)
+        web = NativeServiceWebLink(url: path.flatMap { URL(string: $0, relativeTo: entry)?.absoluteURL } ?? entry)
+    }
     private func loadBills() async {
         let now = Date(), calendar = Calendar.current
         await repo.loadBills(year: calendar.component(.year, from: now), month: calendar.component(.month, from: now))

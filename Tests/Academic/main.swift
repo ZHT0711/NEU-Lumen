@@ -114,3 +114,31 @@ try planCache.clear()
 expect(planCache.load() == nil, "clear removes only this plan snapshot")
 try FileManager.default.removeItem(at: cacheRoot)
 print("Academic plan browsing: status, credits, filtering, page merge and isolated persistent cache passed")
+
+
+let personalProgram = try PersonalAcademicProgramParser.program(["PYFADM": "SYNTH-P", "PYFAMC": "合成个人方案", "ZSYQXF": "154", "XDLXDM_DISPLAY": "主修"])
+let programGroups: [[String: Any]] = [
+    ["PYFADM":"SYNTH-P", "KZH":"a", "FKZH":"-1", "KZM":"合成平台", "KZLXDM":"02", "ZSXDXF":"48", "ZSWCKZS":"2"],
+    ["PYFADM":"SYNTH-P", "KZH":"b", "FKZH":"a", "KZM":"合成必过课组", "KZLXDM":"01", "ZSXDXF":"24", "SFBG":"1", "GGKZLY":"02", "ISTKZ":"1"],
+    ["PYFADM":"SYNTH-P", "KZH":"c", "FKZH":"a", "KZM":"合成继承课组", "KZLXDM":"01", "GGKZLY":"03", "ISTKZ":"1"]]
+let programTree = try PersonalAcademicProgramParser.tree(program: personalProgram, groups: programGroups)
+precondition(programTree.nodes.count == 4 && programTree.children(of: "a").map(\.id) == ["b", "c"])
+precondition(programTree.nodes[2].mustPass && programTree.nodes[2].referenced && programTree.nodes[3].inherited)
+precondition(programTree.nodes[3].minimumCredits == nil && programTree.nodes[1].minimumGroups == "2")
+let fullLayout = AcademicProgramLayout(tree: programTree, collapsed: [], query: "")
+precondition(fullLayout.columns == 3 && fullLayout.items.count == 4 && fullLayout.height == 252)
+precondition(Set(fullLayout.items.filter { $0.depth == 2 }.map(\.y)).count == 2)
+let foldedLayout = AcademicProgramLayout(tree: programTree, collapsed: ["a"], query: "")
+precondition(foldedLayout.items.count == 2 && foldedLayout.columns == 2)
+let searchLayout = AcademicProgramLayout(tree: programTree, collapsed: ["a"], query: "必过")
+precondition(Set(searchLayout.items.map(\.id)) == ["SYNTH-P", "a", "b"])
+precondition(AcademicProgramLayout(tree: programTree, collapsed: [], query: "不存在").items.isEmpty)
+for groups in [programGroups + [programGroups[0]],
+               [["PYFADM":"SYNTH-P", "KZH":"a", "FKZH":"a", "KZM":"循环"]],
+               [["PYFADM":"SYNTH-P", "KZH":"a", "FKZH":"missing", "KZM":"缺少父节点"]],
+               [["PYFADM":"OTHER", "KZH":"a", "FKZH":"-1", "KZM":"其他方案"]]] {
+    do { _ = try PersonalAcademicProgramParser.tree(program: personalProgram, groups: groups); preconditionFailure("Invalid graph must fail") } catch { }
+}
+let directCourse = try PersonalAcademicProgramParser.course(["KCH":"SYNTH-C", "KCM":"合成课程", "XF":"2.5", "NEWXS":"48", "KCXZDM_DISPLAY":"必修", "XDXQ":"1,2"], index: 0)
+precondition(directCourse.creditsText == "2.5" && directCourse.hoursText == "48" && directCourse.studyStatus == nil)
+print("Personal program diagram: real parent hierarchy, requirements, inherited/reference marks, collapse/search layout and course parser passed")

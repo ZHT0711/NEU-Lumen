@@ -772,6 +772,77 @@ final class PortalClient {
         }
     }
 
+    // Verified against pyfagl/modules/pyfacxcd/pyfacxcd.js and
+    // public/commonpage_PYFAGL/jsmindFrame/{jsmindFrameBS,jsmindSidebar}.js.
+    private func personalProgramRows(action: String, fields: [String: String] = [:]) async throws -> [[String: Any]] {
+        let modules = ["pyfacdxxcx": "pyfacxcd", "cxpyfa": "pyfaglepg", "pyfakzcx": "pyfaglepg", "pyfakzkccxx": "pyfaglepg"]
+        guard let module = modules[action] else { throw AcademicQueryError.invalid("培养方案查询") }
+        let epoch = sessionEpoch
+        let source = URL(string: Self.jwxtBase + "/jwapp/sys/pyfagl/modules/\(module)/\(action).do")!
+        let url = URL(string: maybeWrap(source.absoluteString))!
+        var result: [[String: Any]] = []
+        for page in 1...20 {
+            var parameters = fields
+            parameters["pageNumber"] = String(page); parameters["pageSize"] = "500"
+            let response = try await http.postForm(url, fields: parameters, extraHeaders: [
+                "Accept": "application/json", "X-Requested-With": "XMLHttpRequest", "Referer": Self.jwxtBase + "/jwapp/sys/pyfagl/*default/index.do"
+            ])
+            guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+            let landed = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+            if response.status == 401 || landed.host == "pass.neu.edu.cn" { throw NetworkError.sessionExpired() }
+            guard response.status == 200, landed == source else { throw AcademicQueryError.invalid("培养方案接口来源") }
+            let parsed = try PersonalAcademicProgramParser.rows(http.json(response), action: action)
+            result += parsed.rows
+            if let total = parsed.total {
+                if result.count >= total { return result }
+                guard !parsed.rows.isEmpty else { throw AcademicQueryError.invalid("培养方案分页") }
+            } else if parsed.rows.count < 500 { return result }
+        }
+        throw AcademicQueryError.invalid("培养方案分页")
+    }
+
+    func fetchPersonalPrograms(expectedAccount: String) async throws -> [PersonalAcademicProgram] {
+        try await jwxtSSO()
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        let entry = URL(string: maybeWrap(Self.jwxtBase + "/jwapp/sys/pyfagl/*default/index.do?forceApp=pyfagl"))!
+        let landing = try await http.get(entry)
+        let original = WebVPN.unwrap(landing.finalURL) ?? landing.finalURL
+        guard landing.status == 200, original.host == "jwxt.neu.edu.cn", original.path.hasPrefix("/jwapp/sys/pyfagl/") else {
+            throw AcademicQueryError.authenticationRequired
+        }
+        let rows = try await personalProgramRows(action: "pyfacdxxcx")
+        let values = try rows.map(PersonalAcademicProgramParser.program)
+        guard Set(values.map(\.id)).count == values.count else { throw AcademicQueryError.invalid("个人培养方案") }
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        return values
+    }
+
+    func fetchPersonalProgramTree(_ program: PersonalAcademicProgram, expectedAccount: String) async throws -> AcademicProgramTree {
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        let allowed = try await personalProgramRows(action: "pyfacdxxcx")
+        guard allowed.contains(where: { AcademicQueryParser.scalar($0["PYFADM"]) == program.id }) else { throw AcademicQueryError.accountMismatch }
+        let fields = ["PYFADM": program.id]
+        let details = try await personalProgramRows(action: "cxpyfa", fields: fields)
+        guard details.count == 1 else { throw AcademicQueryError.invalid("培养方案详情") }
+        let actual = try PersonalAcademicProgramParser.program(details[0])
+        guard actual.id == program.id else { throw AcademicQueryError.accountMismatch }
+        let groups = try await personalProgramRows(action: "pyfakzcx", fields: fields)
+        let tree = try PersonalAcademicProgramParser.tree(program: actual, groups: groups)
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        return tree
+    }
+
+    func fetchPersonalProgramCourses(_ tree: AcademicProgramTree, node: AcademicProgramNode, expectedAccount: String) async throws -> [AcademicPageCourse] {
+        guard tree.nodes.contains(node) else { throw AcademicQueryError.invalid("培养方案课组") }
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        var fields = ["PYFADM": tree.program.id, "*order": "+KCH"]
+        if node.parentID != nil { fields["KZH"] = node.id }
+        let rows = try await personalProgramRows(action: "pyfakzkccxx", fields: fields)
+        let courses = try rows.enumerated().map { try PersonalAcademicProgramParser.course($0.element, index: $0.offset) }
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        return courses
+    }
+
     func fetchJwxtGrades() async throws -> GradeReport {
         do {
             return try await fetchGradeReport()

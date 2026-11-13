@@ -349,5 +349,16 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     _ = try await web.evaluateJavaScript("location.hash='synthetic-new-step'")
     result = try await call("act", token: snapshot.token, action: order.id)
     try require(result["error"] as? String == "stale", "SPA navigation invalidates old document")
+    _ = try await web.evaluateJavaScript("document.body.insertAdjacentHTML('beforeend', '<div id=projects><a onclick=\"window.syntheticProjects=(window.syntheticProjects||0)+1\"><p>合成缴费项目</p></a></div>')")
+    result = try await call("watch")
+    try require(result["changed"] as? Bool == true, "AJAX project list is detected")
+    snapshot = try await read()
+    guard let project = snapshot.actions.first(where: { $0.title == "合成缴费项目" }) else { throw NetworkError(message: "Missing onclick-only school payment project") }
+    result = try await call("watch")
+    try require(result["changed"] as? Bool == false, "background observation preserves the current action snapshot")
+    result = try await call("act", token: snapshot.token, action: project.id)
+    try require(result["activated"] as? Bool == true, "onclick-only payment project works")
+    let projectCount = try await web.evaluateJavaScript("window.syntheticProjects") as? Int
+    try require(projectCount == 1, "school payment project handler executes once")
     print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
 }

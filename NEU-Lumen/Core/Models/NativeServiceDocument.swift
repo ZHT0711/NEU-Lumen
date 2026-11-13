@@ -34,6 +34,7 @@ struct NativeServiceDocument: Decodable {
     let tables: [Table]
     let notices: [String]
     let needsWeb: Bool
+    let requiresWebsite: Bool?
 
     /// Reads the currently rendered school document. The original DOM retains
     /// hidden CSRF fields, form actions, JavaScript validators and order identifiers.
@@ -122,10 +123,12 @@ struct NativeServiceDocument: Decodable {
         return {activated:true};
     }
     const state={token:crypto.randomUUID(),url:location.href,fields:new Map(),actions:new Map(),hidden:[],consumed:false};
-    let needsWeb=false,serial=0;
+    let needsWeb=false,requiresWebsite=false,serial=0;
     const fields=[],actions=[],tables=[],notices=[];
     const radios=new Set();
     for (const doc of docs) {
+        if (Array.from(doc.querySelectorAll('input[type=password],img[src*=qrcode],img[src*=qrCode],[id*=qrcode],[id*=qrCode],canvas'))
+            .some(visible)) requiresWebsite=true;
         for (const node of doc.querySelectorAll('input[type=hidden]')) state.hidden.push({node,value:node.value});
         for (const el of doc.querySelectorAll('input,textarea,select')) {
             if (!visible(el) || el.type==='hidden') continue;
@@ -160,8 +163,9 @@ struct NativeServiceDocument: Decodable {
             tables.push({id:'t'+serial++,title:clean(table.caption?.textContent || doc.title,256),headers,rows,truncated:all.length>200});
             if (tables.length>=30) { needsWeb=true; break; }
         }
-        for (const el of doc.querySelectorAll('a[href],button,input[type=submit],input[type=button],[role=button]')) {
+        for (const el of doc.querySelectorAll('a[href],a[onclick],button,input[type=submit],input[type=button],[role=button],[onclick]')) {
             if (!visible(el) || el.disabled || el.getAttribute('aria-disabled')==='true' || el.closest('form')?.querySelector('input[type=password]')) continue;
+            if (el.matches('input,select,textarea,img') || el.querySelector('a[href],a[onclick],button,[role=button]')) continue;
             const title=clean(el.innerText || el.value || el.getAttribute('aria-label'),256);
             if (!title) continue;
             const id='a'+serial++;
@@ -174,7 +178,16 @@ struct NativeServiceDocument: Decodable {
         }
         if (doc.querySelector('input[type=file],[contenteditable=true],canvas')) needsWeb=true;
     }
+    const contents={title:clean(document.title,256),fields,actions,tables,notices:notices.slice(0,20),needsWeb,requiresWebsite};
+    const fingerprint=JSON.stringify(contents);
+    if (command==='watch') {
+        const previous=globalThis[key];
+        return {changed:!previous || previous.fingerprint!==fingerprint ||
+            Array.from(previous.actions.values()).some(entry=>!entry.node.isConnected) ||
+            Array.from(previous.fields.values()).some(entry=>!entry.node.isConnected)};
+    }
+    state.fingerprint=fingerprint;
     globalThis[key]=state;
-    return {token:state.token,title:clean(document.title,256),fields,actions,tables,notices:notices.slice(0,20),needsWeb};
+    return {token:state.token,...contents};
     """#
 }
