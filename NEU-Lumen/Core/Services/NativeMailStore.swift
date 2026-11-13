@@ -287,6 +287,8 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError failure: Error) { failed(failure) }
     private func failed(_ failure: Error) {
         guard current, !NetworkError.isCancellation(failure) else { return }
+        let nativeError = failure as NSError
+        if nativeError.domain == "WebKitErrorDomain", nativeError.code == 102 { loadingWeb = false; return }
         loadingWeb = false; needsLogin = true; error = NetworkError.from(failure).message
     }
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
@@ -318,6 +320,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func adopt(_ download: WKDownload, from view: WKWebView) {
         guard current, let session else { download.cancel(nil); return }
+        loadingWeb = false
         let downloads = BrowserDownloadStore.shared
         downloads.activate(account: ownerAccount, epoch: session.requestEpoch)
         downloads.adopt(download, from: view, scope: downloads.scope)

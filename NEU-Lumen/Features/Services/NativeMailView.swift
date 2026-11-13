@@ -216,7 +216,12 @@ private struct NativeMailWebSheet: View {
             .navigationTitle("学校邮箱").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
-                ToolbarItem(placement: .topBarLeading) { Button("下载管理", systemImage: "arrow.down.circle") { downloads = true } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu("邮箱工具", systemImage: "ellipsis.circle") {
+                        Button("下载管理", systemImage: "arrow.down.circle") { downloads = true }
+                        Button("重新打开邮箱入口", systemImage: "arrow.clockwise") { store.reloadLogin() }
+                    }
+                }
             }
             .sheet(isPresented: $downloads) { BrowserDownloadsView(store: BrowserDownloadStore.shared) }
             .task { await navigate() }
