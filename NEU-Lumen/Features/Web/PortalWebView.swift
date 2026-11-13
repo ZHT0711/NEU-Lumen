@@ -5,6 +5,7 @@ import Observation
 /// 校园浏览器：保留网页当前地址、历史和会话，提供原生导航与页面工具。
 struct PortalWebViewScreen: View {
     let url: URL
+    var nativeService: NativeCampusService?
     var academicMode = false
     var cardMode = false
     var cgMode = false
@@ -18,6 +19,7 @@ struct PortalWebViewScreen: View {
     @State private var syncError: String?
     @State private var isSyncingCard = false
     @State private var showPermissionsHelp = false
+    @State private var showNativeDocument = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,8 +43,16 @@ struct PortalWebViewScreen: View {
                     .tint(AppTheme.accent)
                     .frame(height: 2)
             }
-            PortalWebView(browser: browser)
+            ZStack {
+                PortalWebView(browser: browser)
                 .id(ObjectIdentifier(browser.webView))
+                .opacity(nativeService != nil && showNativeDocument ? 0 : 1)
+                .allowsHitTesting(nativeService == nil || !showNativeDocument)
+                .accessibilityHidden(nativeService != nil && showNativeDocument)
+                if let nativeService, showNativeDocument {
+                    NativeServiceDocumentView(browser: browser, service: nativeService) { showNativeDocument = false }
+                }
+            }
                 .ignoresSafeArea(.container, edges: .bottom)
                 .overlay {
                     if let error = browser.error {
@@ -60,6 +70,11 @@ struct PortalWebViewScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if nativeService != nil && !showNativeDocument {
+                        Button("原生表单与订单", systemImage: "rectangle.on.rectangle") {
+                            showNativeDocument = true
+                        }
+                    }
                     Button("前进", systemImage: "chevron.right") { browser.webView.goForward() }
                         .disabled(!browser.canGoForward)
                     Button("在页面中查找", systemImage: "doc.text.magnifyingglass") {
@@ -121,7 +136,7 @@ struct PortalWebViewScreen: View {
             Text("网页使用定位、相机、麦克风或运动传感器时会请求授权。若已拒绝应用权限，可在系统设置中重新允许。校园乐跑请开启定位服务并允许精确位置，返回后刷新网页，再允许该网站使用位置。")
         }
         .task {
-            await browser.start(url, client: environment.session.client, session: environment.session)
+            await browser.start(url, client: environment.session.client, session: environment.session, service: nativeService)
             if let cardQuery {
                 do { try await browser.openCardQuery(cardQuery) }
                 catch { if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message } }
@@ -418,7 +433,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         observeWebView()
     }
 
-    func start(_ url: URL, client: PortalClient, session: SessionStore? = nil) async {
+    func start(_ url: URL, client: PortalClient, session: SessionStore? = nil, service: NativeCampusService? = nil) async {
         guard !started else {
             webView.configuration.websiteDataStore.httpCookieStore.add(self)
             return
@@ -434,6 +449,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         downloadScope = BrowserDownloadStore.shared.scope
         learningPlatform = LearningPlatform.allCases.first { $0.accepts(WebVPN.unwrap(url) ?? url) }
         if let learningPlatform, let identifier = session?.learningBrowserIdentifier(for: learningPlatform) {
+            useLearningProfile(identifier)
+        } else if let service, let user = session?.user,
+                  let identifier = LearningBrowserProfiles().identifier(account: user.sid.isEmpty ? user.uid : user.sid, service: service) {
             useLearningProfile(identifier)
         }
         Task { await session?.cleanRetiredLearningBrowsers() }
@@ -451,6 +469,16 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
             let saved = Set(existing.map(SavedWebSession.Cookie.init))
             for cookie in client.browserCookies() where learningPlatform.ownsCookie(cookie) {
                 if !saved.contains(SavedWebSession.Cookie(cookie)) { await store.setCookie(cookie) }
+            }
+        } else if let service, webView.configuration.websiteDataStore.isPersistent {
+            let existing = await store.allCookies()
+            guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
+            for cookie in client.browserCookies() {
+                let host = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+                let preserved = service.owns(host: host) && existing.contains {
+                    $0.name == cookie.name && $0.domain == cookie.domain && $0.path == cookie.path
+                }
+                if !preserved { await store.setCookie(cookie) }
             }
         } else {
             for cookie in client.browserCookies() { await store.setCookie(cookie) }
@@ -800,7 +828,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         pendingDocumentRequest = nil
     }
 
-    private func present(_ alert: UIAlertController, fallback: () -> Void) {
+    static func present(_ alert: UIAlertController, in webView: WKWebView, fallback: () -> Void) {
         guard var controller = webView.window?.rootViewController else { fallback(); return }
         while let presented = controller.presentedViewController { controller = presented }
         guard !(controller is UIAlertController) else { fallback(); return }
@@ -823,14 +851,14 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let alert = UIAlertController(title: webView.url?.host, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "好", style: .default) { _ in completionHandler() })
-        present(alert, fallback: completionHandler)
+        Self.present(alert, in: webView, fallback: completionHandler)
     }
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         let alert = UIAlertController(title: webView.url?.host, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
         alert.addAction(UIAlertAction(title: "确定", style: .default) { _ in completionHandler(true) })
-        present(alert) { completionHandler(false) }
+        Self.present(alert, in: webView) { completionHandler(false) }
     }
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
@@ -838,6 +866,6 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         alert.addTextField { $0.text = defaultText }
         alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(nil) })
         alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak alert] _ in completionHandler(alert?.textFields?.first?.text) })
-        present(alert) { completionHandler(nil) }
+        Self.present(alert, in: webView) { completionHandler(nil) }
     }
 }

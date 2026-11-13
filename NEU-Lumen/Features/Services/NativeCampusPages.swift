@@ -64,7 +64,7 @@ struct NativePaymentView: View {
             await loadBills()
         }
         .refreshable { await repo.loadCardOverview(force: true); await loadBills() }
-        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url) } }
+        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .payment) } }
     }
     private func money(_ value: Double?) -> String { value.map { $0.formatted(.currency(code: "CNY")) } ?? "未读取" }
     private func openPayment() { web = NativeServiceWebLink(url: NativeCampusService.payment.entryURL(apps: repo.apps)) }
@@ -180,7 +180,7 @@ struct NativeAffairsView: View {
         List {
             Section {
                 NavigationLink { NativeAffairsDirectoryView() } label: { Label("办事服务中心", systemImage: "square.grid.2x2") }
-                Text("申请表单和审批操作在学校页面完成。下方显示门户已返回的在办事项。")
+                Text("申请表单可在办事指南中开始填写，下方显示门户已返回的在办事项。")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("搜索事项或处理节点", text: $query)
             }
@@ -209,7 +209,7 @@ struct NativeAffairsView: View {
             if active { await store.load(session: environment.session, reset: true) }
         }
         .refreshable { await store.load(session: environment.session, reset: true) }
-        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url) } }
+        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .affairs) } }
     }
 }
 

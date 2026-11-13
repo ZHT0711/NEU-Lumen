@@ -35,4 +35,22 @@ class NativeServicesTests(unittest.TestCase):
         self.assertIn('fetchTodos(page: target, pageSize: 20)',source)
         self.assertNotIn('DemoData',source)
 
+    def test_form_order_bridge_keeps_school_state_and_one_shot_actions(self):
+        bridge=(ROOT/'NEU-Lumen/Core/Models/NativeServiceDocument.swift').read_text(encoding='utf-8')
+        for key in ['state.token!==token','state.url!==location.href','state.consumed',
+                    'state.hidden.some', 'context(selected.node)!==selected.context', 'form.checkValidity()',
+                    "command==='fill'", "el.dispatchEvent(new win.Event('input'", 'el.click()']:
+            self.assertIn(key,bridge)
+        for forbidden in ['method:', 'fetch(', 'localStorage', '.submit();']:
+            self.assertNotIn(forbidden,bridge)
+        view=(ROOT/'NEU-Lumen/Features/Services/NativeServiceDocumentView.swift').read_text(encoding='utf-8')
+        self.assertIn('session.requestEpoch == epoch',view)
+        self.assertIn('contentWorld: Self.world',view)
+        self.assertIn('service.owns(host: host)',view)
+        self.assertIn('pendingAction = action',view)
+        fixture=(ROOT/'Tests/BrowserDownloads/WebKitValidation.swift').read_text(encoding='utf-8')
+        self.assertIn('NativeServiceDocument.bridge',fixture)
+        self.assertIn('changed order amount invalidates confirmation',fixture)
+        self.assertIn('fill never resubmits form',fixture)
+
 if __name__=='__main__': unittest.main()

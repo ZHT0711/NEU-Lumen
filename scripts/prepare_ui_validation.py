@@ -337,6 +337,7 @@ struct UIValidationRoot: View {
                 let output = documents.appendingPathComponent("download-checks.txt")
                 do {
                     try await verifyBrowserDownloads(browser: testBrowser, client: environment.session.client, base: downloadBase)
+                    try await verifyNativeServiceDocument(browser: testBrowser, base: downloadBase)
                     try "PASS: real WKDownload original PDF bytes, cookies/Referer, POST safety, blob/data, duplicate names, progress, cancel/failure, browser close, account isolation and manifest recovery".write(to: output, atomically: true, encoding: .utf8)
                 } catch {
                     try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)

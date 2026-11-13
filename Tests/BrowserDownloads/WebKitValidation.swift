@@ -263,3 +263,87 @@ func seedBrowserDownloadScreenshot(browser: PortalBrowser, client: PortalClient,
         throw NetworkError(message: "Synthetic download screenshot lacks required states")
     }
 }
+
+
+/// Executes the shipped form/order bridge in an actual isolated WebKit world.
+@MainActor
+func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws {
+    let web = browser.webView
+    let oldFrame = web.frame
+    web.frame = CGRect(x: 0, y: 0, width: 390, height: 700)
+    defer { web.frame = oldFrame }
+    let html = #"""
+    <!doctype html><meta charset="utf-8"><title>Synthetic service document</title>
+    <form onsubmit="event.preventDefault(); window.syntheticActivations=(window.syntheticActivations||0)+1">
+    <input type="hidden" name="csrf" value="SYNTH-CSRF">
+    <label>申请理由<input name="reason" required></label>
+    <label>说明<textarea name="note">合成说明</textarea></label>
+    <label>项目<select name="item"><option value="one">合成项目一</option><option value="two">合成项目二</option></select></label>
+    <fieldset><legend>领取方式</legend><label><input type="radio" name="delivery" value="online">线上</label><label><input type="radio" name="delivery" value="desk">窗口</label></fieldset>
+    <label><input type="checkbox" name="agreement" required>确认合成条款</label>
+    <button type="submit">提交合成申请</button></form>
+    <table><thead><tr><th>订单</th><th>金额</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody><tr><td>SYNTH-ORDER</td><td id="amount">12.34</td><td>学校待确认</td><td><button onclick="window.syntheticOrders=(window.syntheticOrders||0)+1">查看合成订单</button></td></tr></tbody></table>
+    <script>window.syntheticActivations=0;window.syntheticOrders=0;</script>
+    """#
+    web.loadHTMLString(html, baseURL: base.appendingPathComponent("service-document"))
+    for _ in 0..<200 {
+        if web.title == "Synthetic service document" && !web.isLoading { break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    let world = WKContentWorld.world(name: "NEULumen.ServiceDocument")
+    func require(_ value: Bool, _ message: String) throws {
+        if !value { throw NetworkError(message: "Native service document: " + message) }
+    }
+    func call(_ command: String, token: String = "", action: String = "", values: [String: String] = [:]) async throws -> [String: Any] {
+        let raw = try await web.callAsyncJavaScript(NativeServiceDocument.bridge,
+            arguments: ["command": command, "token": token, "actionID": action, "values": values], in: nil, contentWorld: world)
+        guard let result = raw as? [String: Any] else { throw NetworkError(message: "Missing service bridge result") }
+        return result
+    }
+    func read() async throws -> NativeServiceDocument {
+        let raw = try await call("read")
+        let data = try JSONSerialization.data(withJSONObject: raw)
+        return try JSONDecoder().decode(NativeServiceDocument.self, from: data)
+    }
+    var snapshot = try await read()
+    try require(snapshot.fields.count == 5 && snapshot.tables.first?.rows.first?.contains("SYNTH-ORDER") == true, "native controls and original order cells")
+    try require(!snapshot.fields.contains(where: { $0.label == "csrf" }), "hidden CSRF stays in school document")
+    guard let submit = snapshot.actions.first(where: { $0.title == "提交合成申请" }) else { throw NetworkError(message: "Missing school submit control") }
+    var result = try await call("act", token: snapshot.token, action: submit.id)
+    try require(result["error"] as? String == "validation", "required fields must stop activation")
+    snapshot = try await read()
+    var values = Dictionary(uniqueKeysWithValues: snapshot.fields.map { ($0.id, $0.value) })
+    for field in snapshot.fields {
+        if field.label == "申请理由" { values[field.id] = "合成申请理由" }
+        if field.kind == "checkbox" { values[field.id] = "true" }
+        if field.kind == "radio" { values[field.id] = "online" }
+        if field.kind == "select" { values[field.id] = "two" }
+    }
+    result = try await call("act", token: snapshot.token, action: submit.id, values: values)
+    try require(result["activated"] as? Bool == true, "single explicit school handler activation")
+    var facts = try await web.evaluateJavaScript("[window.syntheticActivations,document.querySelector('[name=csrf]').value,document.querySelector('[name=item]').value,document.querySelector('[name=delivery]:checked').value]") as? [Any]
+    try require(facts?[0] as? Int == 1 && facts?[1] as? String == "SYNTH-CSRF" && facts?[2] as? String == "two" && facts?[3] as? String == "online", "handlers, CSRF, select and radio values")
+    result = try await call("act", token: snapshot.token, action: submit.id, values: values)
+    try require(result["error"] as? String == "stale", "consumed snapshot blocks duplicate actions")
+    snapshot = try await read()
+    guard let order = snapshot.actions.first(where: { $0.title == "查看合成订单" }) else { throw NetworkError(message: "Missing order action") }
+    _ = try await web.evaluateJavaScript("document.getElementById('amount').textContent='99.00'")
+    result = try await call("act", token: snapshot.token, action: order.id)
+    try require(result["error"] as? String == "stale", "changed order amount invalidates confirmation")
+    snapshot = try await read()
+    _ = try await web.evaluateJavaScript("document.querySelector('[name=csrf]').value='SYNTH-ROTATED'")
+    result = try await call("act", token: snapshot.token, action: order.id)
+    try require(result["error"] as? String == "stale", "changed hidden order/form token invalidates confirmation")
+    snapshot = try await read()
+    guard let note = snapshot.fields.first(where: { $0.kind == "textarea" }) else { throw NetworkError(message: "Missing text area") }
+    result = try await call("fill", token: snapshot.token, values: [note.id: "继续在学校页面填写"])
+    try require(result["filled"] as? Bool == true, "transfer edited values to original webpage")
+    facts = try await web.evaluateJavaScript("[window.syntheticActivations,document.querySelector('[name=note]').value]") as? [Any]
+    try require(facts?[0] as? Int == 1 && facts?[1] as? String == "继续在学校页面填写", "fill never resubmits form")
+    snapshot = try await read()
+    _ = try await web.evaluateJavaScript("location.hash='synthetic-new-step'")
+    result = try await call("act", token: snapshot.token, action: order.id)
+    try require(result["error"] as? String == "stale", "SPA navigation invalidates old document")
+    print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
+}

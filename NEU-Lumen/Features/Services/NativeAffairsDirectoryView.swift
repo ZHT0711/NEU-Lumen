@@ -137,7 +137,9 @@ private struct NativeAffairsGuideView: View {
         .navigationTitle("办事指南").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) { await load() }
         .refreshable { await load() }
-        .sheet(item: $web) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
+        .sheet(item: $web) { link in NavigationStack {
+            PortalWebViewScreen(url: link.url, nativeService: link.url == guide?.applicationURL ? .affairs : nil)
+        } }
     }
 
     private func load() async {

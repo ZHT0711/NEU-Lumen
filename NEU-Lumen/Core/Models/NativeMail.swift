@@ -13,6 +13,40 @@ struct NativeMailMessage: Identifiable, Hashable {
     let sender: String
     let dateText: String
     let unread: Bool?
+    var flagged: Bool? = nil
+}
+
+struct NativeMailSearch: Equatable {
+    var subject = ""
+    var from = ""
+    var to = ""
+    var unreadOnly = false
+    var attachedOnly = false
+    var flaggedOnly = false
+
+    var parameters: [String: Any] {
+        var result: [String: Any] = [:]
+        for (key, value) in [("subject", subject), ("from", from), ("to", to)] {
+            let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { result[key] = String(text.prefix(200)) }
+        }
+        if unreadOnly { result["read"] = false }
+        if attachedOnly { result["attachType"] = "attached" }
+        if flaggedOnly { result["flagType"] = "flagged" }
+        return result
+    }
+}
+
+enum NativeMailMutation {
+    case read(Bool), flagged(Bool), move(String)
+
+    var attributes: [String: Any] {
+        switch self {
+        case .read(let value): ["flags": ["read": value]]
+        case .flagged(let value): value ? ["flags": ["flagged": true]] : ["flags": ["flagged": false], "label0": 0]
+        case .move(let folder): ["fid": Int(folder) ?? -1]
+        }
+    }
 }
 
 struct NativeMailBody: Identifiable {
@@ -48,7 +82,7 @@ enum NativeMailProtocol {
             }
             return NativeMailMessage(id: id, subject: String((row["subject"] as? String ?? "无主题").prefix(1024)),
                 sender: String((row["sender"] as? String ?? "未提供发件人").prefix(1024)),
-                dateText: dateText(row["date"]), unread: row["unread"] as? Bool)
+                dateText: dateText(row["date"]), unread: row["unread"] as? Bool, flagged: row["flagged"] as? Bool)
         }
     }
 
@@ -76,11 +110,12 @@ enum NativeMailProtocol {
         if (func==='folders') { endpoint='XT/jsp/mail.jsp'; form=true; }
         if (func==='search') { endpoint='XT/jsp/mail.jsp'; form=true; }
         if (func==='read') { endpoint='XT/jsp/readMessage.jsp'; form=true; }
+        if (func==='compose') { endpoint='XT/jsp/compose.jsp'; form=true; }
         const url = new URL(endpoint,root);
         url.searchParams.set('sid',sid);
         if (func==='folders') url.searchParams.set('func','getAllFolders');
         else if (func==='search') url.searchParams.set('func','searchMessages');
-        else if (func!=='read') url.searchParams.set('func',func);
+        else if (func!=='read' && func!=='compose') url.searchParams.set('func',func);
         const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),15000);
         try {
             const response=await fetch(url.href,{method:'POST',credentials:'include',redirect:'error',cache:'no-store',signal:controller.signal,
@@ -88,7 +123,7 @@ enum NativeMailProtocol {
                 body:form?new URLSearchParams(payload).toString():JSON.stringify(payload)});
             if (!response.ok || new URL(response.url).origin!==root.origin) throw new Error('login');
             const json=await response.json();
-            if (json.code!=='S_OK') throw new Error('login');
+            if (json.code!=='S_OK') throw new Error(/SESSION|NOT_LOGIN|AUTH/.test(json.code || '')?'login':'operation');
             return json.var;
         } finally { clearTimeout(timer); }
     };
@@ -106,6 +141,33 @@ enum NativeMailProtocol {
         const matched=expectedEmail ? email===expectedEmail.toLowerCase()
             : expectedSID && local===expectedSID.toLowerCase() && (school==='neu.edu.cn'||school.endsWith('.neu.edu.cn'));
         if (!matched) return {error:'binding',email};
+        if (command==='compose') {
+            if (!['normal','reply','replyall','forward'].includes(composeKind) ||
+                (composeKind!=='normal' && (typeof messageID!=='string'||!messageID||messageID.length>512))) throw new Error('format');
+            const parameters={ctype:composeKind,mboxa:''};
+            if (composeKind!=='normal') parameters.mid=messageID;
+            const draft=await rpc('compose',parameters);
+            if (await getIdentity()!==email) throw new Error('identity');
+            if (typeof draft.id!=='string'||!draft.id||draft.id.length>512) throw new Error('format');
+            return {email,composeID:draft.id};
+        }
+        if (command==='update') {
+            if (!Array.isArray(messageIDs)||!messageIDs.length||messageIDs.length>100||new Set(messageIDs).size!==messageIDs.length||
+                messageIDs.some(id=>typeof id!=='string'||!id||id.length>512)) throw new Error('format');
+            const keys=Object.keys(attributes || {});
+            const flags=attributes?.flags;
+            const validFlag=flags && Object.keys(flags).length===1 &&
+                ['read','flagged'].some(key=>typeof flags[key]==='boolean' && Object.hasOwn(flags,key));
+            const validMove=keys.length===1 && Number.isInteger(attributes.fid) && attributes.fid>0;
+            const validFlags=validFlag && keys.every(key=>key==='flags'||key==='label0') &&
+                (!Object.hasOwn(attributes,'label0') || (flags.flagged===false && attributes.label0===0));
+            if (!validMove && !validFlags) throw new Error('format');
+            // Verify immediately before a user-requested write as well as after it.
+            if (await getIdentity()!==email) throw new Error('identity');
+            await rpc('mbox:updateMessageInfos',{mboxa:'',ids:messageIDs,attrs:attributes,returnOriginalMsgInfos:true});
+            if (await getIdentity()!==email) throw new Error('identity');
+            return {email,updated:true};
+        }
         if (command==='read') {
             if (typeof messageID!=='string'||!messageID||messageID.length>512) throw new Error('format');
             const data=await rpc('read',{mid:messageID,mboxa:'',sid});
@@ -134,13 +196,21 @@ enum NativeMailProtocol {
         const selected=folderID || folders.find(f=>f.id==='1')?.id || folders[0]?.id || '1';
         if (!/^\d{1,12}$/.test(selected) || !Number.isInteger(start) || start<0) throw new Error('format');
         const parameters={fid:Number(selected),start,limit:20,order:'receivedDate',desc:true,returnTotal:true,summaryWindowSize:0};
-        if (searchText) parameters.subject=clean(searchText,200);
-        const rows=await rpc(searchText?'search':'mbox:listMessages',parameters);
+        const condition={};
+        for (const key of ['subject','from','to']) {
+            if (typeof searchFields[key]==='string' && searchFields[key].trim()) condition[key]=clean(searchFields[key].trim(),200);
+        }
+        if (searchText && !condition.subject) condition.subject=clean(searchText,200);
+        if (searchFields.read===false) condition.read=false;
+        if (searchFields.attachType==='attached') condition.attachType='attached';
+        if (searchFields.flagType==='flagged') condition.flagType='flagged';
+        const rows=await rpc(Object.keys(condition).length?'search':'mbox:listMessages',{...parameters,...condition});
         if (!Array.isArray(rows)||rows.length>100) throw new Error('format');
         if (await getIdentity()!==email) throw new Error('identity');
         return {email,folders,folderID:selected,nextStart:start+rows.length,hasMore:rows.length>=20,
             messages:rows.map(m=>({id:clean(m.id,512),subject:clean(m.subject || '无主题',1024),sender:address(m.from || m.sender),
-                date:m.receivedDate || m.sentDate || '',unread:typeof m.flags?.read==='boolean'?!m.flags.read:null}))};
-    } catch (error) { return {error:error.name==='AbortError'||error.name==='TypeError'?'network':error.message==='identity'?'identity':error.message==='format'?'format':'login'}; }
+                date:m.receivedDate || m.sentDate || '',unread:typeof m.flags?.read==='boolean'?!m.flags.read:null,
+                flagged:typeof m.flags?.flagged==='boolean'?m.flags.flagged:null}))};
+    } catch (error) { return {error:error.name==='AbortError'||error.name==='TypeError'?'network':['identity','format','operation'].includes(error.message)?error.message:'login'}; }
     """#
 }

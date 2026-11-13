@@ -182,6 +182,24 @@ precondition(mailRows.count == 1 && mailRows[0].unread == false)
 do { _ = try NativeMailProtocol.messages([["id":"x"],["id":"x"]]); preconditionFailure("Duplicate mail IDs must fail") } catch { }
 print("Native services: original routes, verified hosts, five native services and Coremail decoder passed")
 
+var mailSearch = NativeMailSearch()
+mailSearch.from = " fixture@example.invalid "
+mailSearch.to = "synthetic@stu.neu.edu.cn"
+mailSearch.unreadOnly = true; mailSearch.attachedOnly = true; mailSearch.flaggedOnly = true
+precondition(mailSearch.parameters["from"] as? String == "fixture@example.invalid")
+precondition(mailSearch.parameters["read"] as? Bool == false && mailSearch.parameters["attachType"] as? String == "attached")
+precondition(mailSearch.parameters["flagType"] as? String == "flagged")
+let movedMail = NativeMailMutation.move("7").attributes
+precondition(movedMail["fid"] as? Int == 7)
+let unflaggedMail = NativeMailMutation.flagged(false).attributes
+precondition(unflaggedMail["label0"] as? Int == 0)
+let serviceDocumentJSON = #"""
+{"token":"synthetic","title":"合成缴费订单","fields":[],"actions":[],"tables":[{"id":"t","title":"订单","headers":["状态","金额"],"rows":[["待确认",""]],"truncated":false}],"notices":[],"needsWeb":true}
+"""#
+let serviceDocument = try JSONDecoder().decode(NativeServiceDocument.self, from: Data(serviceDocumentJSON.utf8))
+precondition(serviceDocument.tables[0].rows[0] == ["待确认", ""] && serviceDocument.needsWeb)
+print("Native services: advanced mail criteria, reversible mutations and original order values passed")
+
 let affairsHTML = #"""
 <a class="object_class active" id="object_1">学生办事</a>
 <a id="type_0" class="type_class">全部</a>

@@ -11,6 +11,11 @@ struct NativeMailView: View {
     @State private var selectedMessage: NativeMailMessage?
     @State private var web: MailWebReason?
     @State private var compose = false
+    @State private var search = NativeMailSearch()
+    @State private var selecting = false
+    @State private var selection = Set<String>()
+    @State private var moving = false
+    @State private var downloads = false
     var body: some View {
         List {
             Section {
@@ -18,20 +23,28 @@ struct NativeMailView: View {
                 HStack {
                     Menu {
                         ForEach(store.folders) { folder in
-                            Button(folder.name) { query = ""; Task { await store.selectFolder(folder) } }
+                            Button(folderTitle(folder)) { query = ""; search = NativeMailSearch(); selection = []; Task { await store.selectFolder(folder) } }
                         }
                     } label: {
                         Label(store.folders.first(where: { $0.id == store.folderID })?.name ?? "收件箱", systemImage: "tray")
                     }.disabled(store.folders.isEmpty || store.busy)
                     Spacer()
                     Button("写邮件", systemImage: "square.and.pencil") {
-                        if MFMailComposeViewController.canSendMail() { compose = true }
-                        else { web = .compose }
+                        web = .compose
                     }.disabled(store.email.isEmpty)
                 }
                 TextField("搜索邮件主题，回车查询", text: $query)
                     .submitLabel(.search).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .onSubmit { Task { await store.refresh(search: query) } }
+                    .onSubmit { applySearch() }
+                DisclosureGroup("高级搜索") {
+                    TextField("发件人", text: $search.from).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("收件人", text: $search.to).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Toggle("仅未读", isOn: $search.unreadOnly)
+                    Toggle("包含普通附件", isOn: $search.attachedOnly)
+                    Toggle("仅星标", isOn: $search.flaggedOnly)
+                    Button("查询") { applySearch() }.disabled(store.busy)
+                    Button("清除搜索条件") { query = ""; search = NativeMailSearch(); applySearch() }.disabled(store.busy)
+                }
             }
             if let candidate = store.bindingCandidate {
                 Section("确认邮箱关联") {
@@ -59,18 +72,36 @@ struct NativeMailView: View {
                     ContentUnavailableView(query.isEmpty ? "当前文件夹没有邮件" : "没有匹配的邮件", systemImage: "tray")
                 }
                 ForEach(store.messages) { message in
-                    Button { selectedMessage = message } label: { mailRow(message) }
-                        .buttonStyle(.plain).disabled(store.busy)
+                    HStack {
+                        if selecting {
+                            Button {
+                                if selection.contains(message.id) { selection.remove(message.id) } else { selection.insert(message.id) }
+                            } label: { Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle") }
+                                .accessibilityLabel("选择邮件「\(message.subject)」")
+                        }
+                        Button { selectedMessage = message } label: { mailRow(message) }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(message.unread == true ? "标为已读" : "标为未读") {
+                                    Task { _ = await store.update([message.id], mutation: .read(message.unread == true)) }
+                                }
+                                Button(message.flagged == true ? "取消星标" : "添加星标") {
+                                    Task { _ = await store.update([message.id], mutation: .flagged(message.flagged != true)) }
+                                }
+                            }
+                    }.disabled(store.busy)
                 }
                 if store.hasMore && !store.busy {
                     Button("加载更多邮件") { Task { await store.refresh(reset: false) } }
                 }
             }
             Section {
-                Button("重新同步", systemImage: "arrow.clockwise") { Task { await store.refresh(search: query) } }
+                Button("重新同步", systemImage: "arrow.clockwise") { applySearch() }
                     .disabled(store.busy || store.loadingWeb)
                 Menu("邮箱登录与网站") {
                     Button("学校邮箱网页登录") { web = .login }
+                    Button("系统邮件写信") { compose = true }.disabled(!MFMailComposeViewController.canSendMail())
+                    Button("下载管理") { downloads = true }
                     Button("切换到教工邮箱") {
                         Task { await store.connect(session: environment.session, apps: environment.repository.apps,
                             server: URL(string: "https://mail.neu.edu.cn/coremail/")); web = .login }
@@ -83,23 +114,66 @@ struct NativeMailView: View {
             }
         }
         .privacySensitive()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(selecting ? "完成选择" : "批量操作") { selecting.toggle(); selection = [] }
+                    .disabled(store.messages.isEmpty || store.busy)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if selecting {
+                HStack {
+                    Button(selection.count == store.messages.count ? "取消全选" : "全选") {
+                        selection = selection.count == store.messages.count ? [] : Set(store.messages.map(\.id))
+                    }
+                    Text("\(selection.count) 封").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Menu("标记") {
+                        Button("标为已读") { updateSelection(.read(true)) }
+                        Button("标为未读") { updateSelection(.read(false)) }
+                        Button("添加星标") { updateSelection(.flagged(true)) }
+                        Button("取消星标") { updateSelection(.flagged(false)) }
+                    }.disabled(selection.isEmpty)
+                    Button("移动") { moving = true }.disabled(selection.isEmpty)
+                }.padding().background(.regularMaterial).disabled(store.busy)
+            }
+        }
+        .confirmationDialog("移动所选 \(selection.count) 封邮件到", isPresented: $moving, titleVisibility: .visible) {
+            ForEach(store.folders.filter { $0.id != store.folderID }) { folder in
+                Button(folder.name) { updateSelection(.move(folder.id)) }
+            }
+        }
+        .onChange(of: store.messages) { _, messages in selection.formIntersection(Set(messages.map(\.id))) }
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
             store.invalidateIfNeeded(session: environment.session)
             if store.webView != nil && !active { await store.persist() }
             guard active else { return }
             await store.connect(session: environment.session, apps: environment.repository.apps)
         }
-        .refreshable { await store.refresh(search: query) }
+        .refreshable { await store.refresh() }
         .onChange(of: environment.session.requestEpoch) { _, _ in
-            selectedMessage = nil; web = nil; compose = false
+            selectedMessage = nil; web = nil; compose = false; selection = []; selecting = false; downloads = false
         }
         .onChange(of: scenePhase) { _, value in if value != .active { Task { await store.persist() } } }
         .onDisappear { Task { await store.persist() } }
         .sheet(item: $web, onDismiss: { Task { await store.refresh() } }) { reason in
             NativeMailWebSheet(store: store, reason: reason)
         }
-        .sheet(item: $selectedMessage) { message in NativeMailReadingView(store: store, message: message) }
+        .sheet(item: $selectedMessage, onDismiss: { Task { await store.refresh() } }) { message in NativeMailReadingView(store: store, message: message) }
         .sheet(isPresented: $compose) { NativeMailComposer(sender: store.email) }
+        .sheet(isPresented: $downloads) { BrowserDownloadsView(store: BrowserDownloadStore.shared) }
+    }
+
+    private func applySearch() {
+        search.subject = query; selection = []
+        Task { await store.refresh(advanced: search) }
+    }
+    private func updateSelection(_ mutation: NativeMailMutation) {
+        let ids = selection
+        Task { if await store.update(ids, mutation: mutation) { selection = [] } }
+    }
+    private func folderTitle(_ folder: NativeMailFolder) -> String {
+        folder.name + (folder.unread.map { "（\($0) 未读）" } ?? "")
     }
 
     private func mailRow(_ message: NativeMailMessage) -> some View {
@@ -109,6 +183,7 @@ struct NativeMailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(message.subject).font(message.unread == true ? .headline : .body).lineLimit(2)
                 Text(message.sender).font(.subheadline).lineLimit(1).foregroundStyle(.secondary)
+                if message.flagged == true { Label("星标", systemImage: "star.fill").font(.caption).foregroundStyle(.orange) }
                 if !message.dateText.isEmpty { Text(message.dateText).font(.caption).foregroundStyle(.secondary) }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(.vertical, 6).accessibilityElement(children: .combine)
@@ -116,9 +191,14 @@ struct NativeMailView: View {
 }
 
 private enum MailWebReason: Identifiable {
-    case login, compose, message(String)
+    case login, compose, message(String), reply(String, String)
     var id: String {
-        switch self { case .login: "login"; case .compose: "compose"; case .message(let id): "message-" + id }
+        switch self {
+        case .login: "login"
+        case .compose: "compose"
+        case .message(let id): "message-" + id
+        case .reply(let id, let kind): kind + "-" + id
+        }
     }
 }
 
@@ -126,6 +206,7 @@ private struct NativeMailWebSheet: View {
     let store: NativeMailStore
     let reason: MailWebReason
     @Environment(\.dismiss) private var dismiss
+    @State private var downloads = false
     var body: some View {
         NavigationStack {
             Group {
@@ -133,7 +214,11 @@ private struct NativeMailWebSheet: View {
                 else { ContentUnavailableView("邮箱尚未准备好", systemImage: "envelope") }
             }
             .navigationTitle("学校邮箱").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) { Button("下载管理", systemImage: "arrow.down.circle") { downloads = true } }
+            }
+            .sheet(isPresented: $downloads) { BrowserDownloadsView(store: BrowserDownloadStore.shared) }
             .task { await navigate() }
             .onChange(of: store.loaded) { _, loaded in
                 guard loaded else { return }
@@ -147,6 +232,7 @@ private struct NativeMailWebSheet: View {
         case .login: if store.webView?.url == nil { store.reloadLogin() }
         case .compose: await store.showWebMail(compose: true)
         case .message(let id): await store.showWebMail(messageID: id)
+        case .reply(let id, let kind): await store.showWebMail(messageID: id, compose: true, reply: kind)
         }
     }
 }
@@ -164,7 +250,6 @@ private struct NativeMailReadingView: View {
     @State private var bodyData: NativeMailBody?
     @State private var error: String?
     @State private var web: MailWebReason?
-    @State private var compose = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -197,8 +282,12 @@ private struct NativeMailReadingView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("完成") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("写邮件", systemImage: "square.and.pencil") {
-                        if MFMailComposeViewController.canSendMail() { compose = true } else { web = .compose }
+                    Menu("邮件操作", systemImage: "ellipsis.circle") {
+                        Button("回复") { web = .reply(message.id, "reply") }
+                        Button("回复全部") { web = .reply(message.id, "replyall") }
+                        Button("转发") { web = .reply(message.id, "forward") }
+                        Button("写新邮件") { web = .compose }
+                        Button("查看完整邮件与附件") { web = .message(message.id) }
                     }
                 }
             }
@@ -207,7 +296,6 @@ private struct NativeMailReadingView: View {
                 catch { if !NetworkError.isCancellation(error) { self.error = NetworkError.from(error).message } }
             }
             .sheet(item: $web) { reason in NativeMailWebSheet(store: store, reason: reason) }
-            .sheet(isPresented: $compose) { NativeMailComposer(sender: store.email) }
         }
     }
 }
