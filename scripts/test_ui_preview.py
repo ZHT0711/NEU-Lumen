@@ -272,6 +272,8 @@ class UIPreviewTests(unittest.TestCase):
                 preview.package(self.path, self.env)
         path.write_text(valid)
         preview.package(self.path, self.env)
+        path.write_text('IOServiceMatchingfailed for: AppleM2ScalerParavirtDriver\n' + valid)
+        preview.package(self.path, self.env)
 
     def test_check_evidence_hash_cannot_change_after_packaging(self):
         manifest = preview.package(self.path, self.env)

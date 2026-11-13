@@ -59,6 +59,7 @@ struct NativeServiceSwitcher: View {
                     GlassEffectContainer(spacing: 10) { buttons }
                 } else { buttons }
             }
+            .scrollClipDisabled()
             .onAppear { proxy.scrollTo(selected, anchor: .center) }
             .onChange(of: selected) { _, value in
                 withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { proxy.scrollTo(value, anchor: .center) }
@@ -71,6 +72,7 @@ struct NativeServiceSwitcher: View {
                 Button { select(service) } label: {
                     Label(service.title, systemImage: service.symbol)
                         .font(.subheadline.weight(selected == service ? .semibold : .regular))
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 14).frame(minHeight: 44)
                         .contentShape(Capsule())
                 }

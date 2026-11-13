@@ -41,6 +41,7 @@ struct NEULumenLiveActivity: Widget {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
+                        .padding(.trailing, 8)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     LiveActivityExpandedContent(state: context.state, isStale: context.isStale)

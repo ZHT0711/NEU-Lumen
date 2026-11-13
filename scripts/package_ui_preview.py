@@ -109,7 +109,7 @@ def check_info(directory):
         if name == 'system-island-checks.txt':
             expected = [f'PASS: actual system expanded {kind}; title and metric visible above Settings; simulator synthetic data'
                         for kind in ('nextCourse', 'custom', 'electricBalance')]
-            if lines != expected:
+            if [line for line in lines if line.startswith('PASS:')] != expected:
                 raise ValueError('Incomplete actual system expanded Island evidence')
         if name == ACADEMIC_WEB_CHECK:
             cases = [line[len('CASE: '):] for line in lines if line.startswith('CASE: ')]

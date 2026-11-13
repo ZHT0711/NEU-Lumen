@@ -41,7 +41,7 @@ xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
   -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID,arch=$(uname -m)" \
   -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
-  > "$OUTPUT/simulator-build.log" 2>&1
+  2>&1 | tee "$OUTPUT/simulator-build.log"
 APP_PATH="$PREVIEW/DerivedData/Build/Products/Debug-iphonesimulator/NEU-Lumen.app"
 python3 "$ROOT/scripts/check_live_activity_bundle.py" "$APP_PATH"
 xcrun simctl install "$SIM_ID" "$APP_PATH"
@@ -225,7 +225,7 @@ for KIND in nextCourse custom electricBalance; do
   done
   cat "$CONTAINER/Documents/system-island-sent.txt"
   grep -q "^PASS:" "$CONTAINER/Documents/system-island-sent.txt"
-  sleep 0.8
+  sleep 2
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/system-island-$KIND.png"
   "$PREVIEW/system-island-check" "$OUTPUT/system-island-$KIND.png" "$KIND" 2>&1 | tee -a "$OUTPUT/system-island-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   xcrun simctl terminate "$SIM_ID" edu.neu.lumen || true

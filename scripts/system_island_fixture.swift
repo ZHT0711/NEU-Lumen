@@ -13,17 +13,21 @@ func prepareSystemIsland(kind: String, manager: DynamicIslandActivityManager) as
             try await Task.sleep(for: .milliseconds(50))
         }
         for activity in Activity<NEULumenActivityAttributes>.activities { await activity.end(nil, dismissalPolicy: .immediate) }
+        // Ended activities may remain in Activity.activities briefly. A unique
+        // owner prevents updating the previous case instead of the new activity.
+        let owner = "system-fixture." + UUID().uuidString
+        try await Task.sleep(for: .seconds(1))
         var state = LiveActivityUIFixture.state(kind)
         state.title = "NEU TEST · " + state.title
         var initial = state; initial.title = "准备系统展开验证"
-        manager.synchronize(.init(enabled: true, accountID: "system-fixture", campus: "合成校区",
+        manager.synchronize(.init(enabled: true, accountID: owner, campus: "合成校区",
             state: initial, isForeground: true, refreshDate: Date()))
         try await manager.settleForValidation()
         for _ in 0..<200 {
-            if Activity<NEULumenActivityAttributes>.activities.contains(where: { $0.attributes.accountID == "system-fixture" }) { break }
+            if Activity<NEULumenActivityAttributes>.activities.contains(where: { $0.attributes.accountID == owner && $0.activityState == .active }) { break }
             try await Task.sleep(for: .milliseconds(50))
         }
-        guard let activity = Activity<NEULumenActivityAttributes>.activities.first(where: { $0.attributes.accountID == "system-fixture" }) else {
+        guard let activity = Activity<NEULumenActivityAttributes>.activities.first(where: { $0.attributes.accountID == owner && $0.activityState == .active }) else {
             throw NetworkError(message: "System island fixture did not start")
         }
         let background = UIApplication.shared.beginBackgroundTask(withName: "SystemIslandValidation", expirationHandler: {})
@@ -38,8 +42,9 @@ func prepareSystemIsland(kind: String, manager: DynamicIslandActivityManager) as
                 guard UIApplication.shared.applicationState == .background else {
                     throw NetworkError(message: "System island fixture was not backgrounded")
                 }
+                guard activity.activityState == .active else { throw NetworkError(message: "System fixture selected an inactive activity") }
                 var updated = finalState; updated.updatedAt = Date()
-                await activity.update(ActivityContent(state: updated, staleDate: updated.freshnessDeadline),
+                await activity.update(ActivityContent(state: updated, staleDate: updated.freshnessDeadline, relevanceScore: 50),
                     alertConfiguration: AlertConfiguration(title: "NEU TEST", body: "模拟器系统展开验证", sound: .default))
                 try "PASS: real ActivityKit background alert sent; synthetic data".write(to: sent, atomically: true, encoding: .utf8)
                 try await Task.sleep(for: .seconds(5))
