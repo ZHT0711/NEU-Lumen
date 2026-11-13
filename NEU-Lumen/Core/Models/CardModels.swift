@@ -41,6 +41,31 @@ struct NetUsageInfo: Hashable {
     let monthSeconds: Int64
     let monthTimes: Int64
     let flowFromPortal: Bool
+    let secondsFromPortal: Bool
+    let timesFromPortal: Bool
+
+    init(balance: Double, monthBytes: Int64, monthSeconds: Int64, monthTimes: Int64,
+         flowFromPortal: Bool, secondsFromPortal: Bool = false, timesFromPortal: Bool = false) {
+        self.balance = balance; self.monthBytes = monthBytes; self.monthSeconds = monthSeconds; self.monthTimes = monthTimes
+        self.flowFromPortal = flowFromPortal; self.secondsFromPortal = secondsFromPortal; self.timesFromPortal = timesFromPortal
+    }
+    /// Preserve each actual presence independently. A missing field is not zero;
+    /// an explicitly returned nonnegative zero is a valid observed value.
+    static func fromPortal(balance: Double, bytes: Int64?, seconds: Int64?, times: Int64?) -> Self {
+        let b = bytes.flatMap { $0 >= 0 ? $0 : nil }, s = seconds.flatMap { $0 >= 0 ? $0 : nil }, t = times.flatMap { $0 >= 0 ? $0 : nil }
+        return Self(balance: balance, monthBytes: b ?? 0, monthSeconds: s ?? 0, monthTimes: t ?? 0,
+                    flowFromPortal: b != nil, secondsFromPortal: s != nil, timesFromPortal: t != nil)
+    }
+    /// Production cards/activity consume these same facts; callers do not infer
+    /// missing timing fields from whether the flow field happened to be present.
+    var usageFacts: [(String, String)] {
+        var facts: [(String, String)] = []
+        if flowFromPortal && monthBytes >= 0 { facts.append(("本月流量", usedFlowText)) }
+        else { facts.append(("用量", "本月流量尚未读取")) }
+        if secondsFromPortal && monthSeconds >= 0 { facts.append(("在线时长", "\(monthSeconds / 3600)小时\((monthSeconds % 3600) / 60)分")) }
+        if timesFromPortal && monthTimes >= 0 { facts.append(("本月连接", "\(monthTimes) 次")) }
+        return facts
+    }
 
     /// 已用流量文案：≥1 GiB 用 GB 一位小数，否则 MB 整数。
     var usedFlowText: String {

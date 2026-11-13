@@ -3,11 +3,17 @@ from pathlib import Path
 import shutil
 import sys
 
+from ui_layout_fixture import inject as inject_measured_ui
+
 root = Path(__file__).resolve().parents[1]
 destination = Path(sys.argv[1]).resolve()
+# Reject all paths inside/above the Release source tree, including symlink aliases.
+if destination == root or root in destination.parents or destination in root.parents:
+    raise RuntimeError("UI fixture destination must be outside the production repository")
 destination.mkdir(parents=True, exist_ok=True)
 for name in ["NEU-Lumen", "NEU-LumenLiveActivity", "NEU-Lumen.xcodeproj"]:
     shutil.copytree(root / name, destination / name, dirs_exist_ok=True)
+inject_measured_ui(root, destination)
 demo_source = destination / "NEU-Lumen/Core/Services/DemoData.swift"
 demo_source.write_text(demo_source.read_text(encoding="utf-8").replace(
     'department: "计算机科学与工程学院"', 'department: "未来技术学院"'
@@ -254,6 +260,11 @@ struct UIValidationRoot: View {
                 case "grades", "mooc", "chaoxing": GradesView()
                 case "card": NavigationStack { CardView() }
                 case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
+                case "academic-center": NavigationStack { AcademicCenterView().nativeUIFixtureCaption("模拟器合成学业查询 · 非真实账号数据") }
+                case "academic-calendar": NavigationStack { AcademicCalendarView().nativeUIFixtureCaption("模拟器合成校历与周次 · 非学校实际安排") }
+                case "academic-plan": NavigationStack { AcademicPlanView().nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
+                case let token where token.hasPrefix("live-expanded-"):
+                    LiveActivityExpandedPreview(token: String(token.dropFirst("live-expanded-".count)))
                 case "downloads":
                     BrowserDownloadsView(store: BrowserDownloadStore.shared)
                         .safeAreaInset(edge: .bottom) {
@@ -285,6 +296,15 @@ struct UIValidationRoot: View {
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let downloadBase = URL(string: "http://127.0.0.1:8787")!
+            if ProcessInfo.processInfo.arguments.contains("--academic-web-sync-checks") {
+                environment.session.seedScreenshotSession()
+                await runAcademicWebSyncChecks(environment)
+                return
+            }
+            if ProcessInfo.processInfo.arguments.contains("--live-activity-layout-checks") {
+                await runLiveActivityLayoutChecks()
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--learning-save-check") ||
                 ProcessInfo.processInfo.arguments.contains("--learning-restore-check") {
                 let save = ProcessInfo.processInfo.arguments.contains("--learning-save-check")
@@ -342,6 +362,13 @@ struct UIValidationRoot: View {
                 environment.dynamicIslandStore.kind = screen == "live-activity-custom" ? .custom : .nextCourse
             }
             environment.repository.seedUIValidation()
+            if screen.hasPrefix("academic-") {
+                do { try await seedAcademicUIValidation(environment) }
+                catch {
+                    try? ("FAIL: " + error.localizedDescription).write(to: documents.appendingPathComponent(screen + "-screenshot.txt"), atomically: true, encoding: .utf8)
+                    return
+                }
+            }
             if screen == "live-activity-custom" {
                 environment.dynamicIslandStore.customTitle = "{course}"
                 environment.dynamicIslandStore.customSubtitle = "卡 {card} · 网 {net}"
@@ -365,6 +392,7 @@ struct UIValidationRoot: View {
                 return
             }
             ready = true
+            await writeNativeUIValidationMarker(screen: screen, environment: environment)
             if ProcessInfo.processInfo.arguments.contains("--live-activity-checks") {
                 await runLiveActivityChecks(environment.liveActivityManager)
             }

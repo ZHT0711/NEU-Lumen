@@ -148,6 +148,37 @@ struct LiveActivitySchedule {
         return Self(items: items, next: next, availability: availability, portalLoaded: portalLoaded,
                     finishedCount: items.filter { $0.end <= now }.count)
     }
+
+    /// Useful source facts, not placeholders. Exact portal clocks are required
+    /// before naming teaching periods; arbitrary personal times are not classes.
+    func expandedDetails(for item: Item, at now: Date, note: String? = nil,
+                         calendar: Calendar = .current) -> [LiveActivityDetail] {
+        let slot = item.occurrence.slot
+        var rows: [LiveActivityDetail] = []
+        func append(_ label: String, _ value: String?, temporal: Bool = false) {
+            if let row = LiveActivityText.detail(label, value, timeSensitive: temporal) { rows.append(row) }
+        }
+        append("地点", slot.room)
+        append("时间", LiveActivityDataPolicy.dateText(item.start, format: "MM-dd HH:mm", calendar: calendar)
+            + "–" + LiveActivityDataPolicy.dateText(item.end, format: calendar.isDate(item.start, inSameDayAs: item.end) ? "HH:mm" : "MM-dd HH:mm", calendar: calendar))
+        if slot.kind != "custom" {
+            append("教师", slot.teacher)
+            let week = Semester.weekNumberOf(item.occurrence.date)
+            var teaching = (1...Semester.totalWeeks).contains(week) ? "第\(week)周" : "非教学周"
+            if let first = Semester.periodStarts.firstIndex(of: slot.startMinutes),
+               let last = Semester.periodEnds.firstIndex(of: slot.endMinutes), first <= last {
+                teaching += first == last ? " · 第\(first + 1)节" : " · 第\(first + 1)–\(last + 1)节"
+            }
+            append("周节", teaching)
+        } else { append("备注", note) }
+        let daily = items.filter { calendar.isDate($0.occurrence.date, inSameDayAs: item.occurrence.date) }
+        append("当天", "已加载 \(daily.count) 项 · 待完成 \(daily.filter { $0.end > now }.count) 项", temporal: true)
+        if let following = items.first(where: { $0.occurrence.id != item.occurrence.id && $0.start >= item.end && $0.end > now }) {
+            append("后续", LiveActivityDataPolicy.dateText(following.start, format: "MM-dd HH:mm", calendar: calendar)
+                + " " + following.occurrence.slot.name, temporal: true)
+        }
+        return Array(rows.prefix(LiveActivityContentState.maximumDetails))
+    }
 }
 
 /// Counts only rows actually read by the existing learning bridges. Unread rows

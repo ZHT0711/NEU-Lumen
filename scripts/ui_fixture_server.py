@@ -3,6 +3,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import parse_qs, urlsplit
 import sys
 from browser_download_fixture import handle_download_fixture
+from academic_fixture_server import handle_academic_fixture
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -21,6 +22,8 @@ class Handler(SimpleHTTPRequestHandler):
         return 'card-fixture=ready' in self.headers.get('Cookie', '')
 
     def do_GET(self):
+        if handle_academic_fixture(self):
+            return
         if handle_download_fixture(self, 'GET'):
             return
         path = urlsplit(self.path).path

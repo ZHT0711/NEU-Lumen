@@ -174,3 +174,152 @@ func verifySemesterCalibration() {
     print("Semester calibration: Sunday normalization, account isolation, restart, invalid dates and reset passed")
 }
 verifySemesterCalibration()
+
+// BEGIN standalone presentation checks (also compiled by the Python runner).
+let liveFixtureKinds = ["nextCourse", "cardBalance", "netBalance", "electricBalance", "assignments", "planner", "dayOverview", "academicOverview", "custom"]
+func liveFixture(_ kind: String) -> LiveActivityContentState {
+    LiveActivityContentState(title: "离线示例标题", subtitle: "示例来源上下文", value: "12",
+        kind: kind, updatedAt: Date(timeIntervalSinceReferenceDate: 100), startDate: nil, endDate: nil,
+        accent: "cyan", detailItems: [LiveActivityDetail(label: "示例标签", value: "真实字段的合成测试值")])
+}
+let liveEncoder = JSONEncoder()
+let legacyData = Data(#"{"title":"旧活动","subtitle":"旧数据","value":"0","kind":"nextCourse","updatedAt":0,"startDate":100,"endDate":200,"countdownTitle":"距上课"}"#.utf8)
+let legacyState = try JSONDecoder().decode(LiveActivityContentState.self, from: legacyData)
+precondition(legacyState.detailItems == nil && legacyState.phase == nil && legacyState.countdownDate == Date(timeIntervalSinceReferenceDate: 100))
+let legacyDetail = try JSONDecoder().decode(LiveActivityDetail.self, from: Data(#"{"label":"教室","value":"示例楼"}"#.utf8))
+precondition(legacyDetail.isTimeSensitive == nil)
+let family = "👨‍👩‍👧‍👦"
+precondition(LiveActivityText.prefix(family + family, bytes: family.utf8.count + 1) == family)
+precondition(LiveActivityText.detail("教师", " \n ") == nil && LiveActivityText.detail("地点", "待定") == nil)
+let adversarialTexts = [String(repeating: "汉字😀", count: 800), String(repeating: "\"\\/", count: 1000),
+    "a" + String(repeating: "\u{301}", count: 4000), String(repeating: family, count: 500),
+    String(repeating: "\u{0}\u{1}\n\t", count: 800)]
+var liveLargestPayload = 0
+for kind in liveFixtureKinds {
+    for text in adversarialTexts {
+        var state = liveFixture(kind)
+        state.title = text
+        state.subtitle = text
+        state.value = text
+        state.secondaryValue = text
+        state.kind = kind
+        state.detailItems = (0..<20).map { LiveActivityDetail(label: String($0) + text, value: text, isTimeSensitive: true) }
+        state.progress = .nan
+        state.staleAfter = Date(timeIntervalSinceReferenceDate: .infinity)
+        let bounded = state.boundedText()
+        let data = try liveEncoder.encode(bounded)
+        liveLargestPayload = max(liveLargestPayload, data.count)
+        precondition(data.count <= LiveActivityContentState.payloadBudget)
+        precondition((bounded.detailItems?.count ?? 0) <= LiveActivityContentState.maximumDetails)
+        precondition(bounded.progress == nil && bounded.staleAfter == nil)
+        let decoded = try JSONDecoder().decode(LiveActivityContentState.self, from: data)
+        precondition(decoded == bounded)
+        precondition(bounded.boundedText() == bounded)
+    }
+}
+var invalidDates = liveFixture("custom")
+invalidDates.updatedAt = Date(timeIntervalSinceReferenceDate: .nan)
+invalidDates.startDate = Date(timeIntervalSinceReferenceDate: .infinity)
+invalidDates.endDate = Date(timeIntervalSinceReferenceDate: -.infinity)
+invalidDates.progress = 10
+let safeDates = invalidDates.boundedText()
+precondition(safeDates.updatedAt == .distantPast && safeDates.startDate == nil && safeDates.endDate == nil && safeDates.progress == 1)
+let safeDateBytes = try liveEncoder.encode(safeDates).count
+precondition(safeDateBytes <= 3200)
+print("Live activity payload: nine sources, old JSON, detail migration, empty fields, Unicode/escaping/nonfinite values passed; maximum \(liveLargestPayload) bytes")
+
+var timedState = liveFixture("nextCourse")
+timedState.startDate = Date(timeIntervalSinceReferenceDate: 200)
+timedState.endDate = Date(timeIntervalSinceReferenceDate: 300)
+timedState.countdownTarget = "start"
+timedState.secondaryValue = "即将开始"
+timedState.phase = "upcoming"
+timedState.detailItems = [LiveActivityDetail(label: "教师", value: "合成教师"),
+    LiveActivityDetail(label: "后续", value: "合成下一项", isTimeSensitive: true)]
+precondition(timedState.freshnessDeadline == timedState.startDate)
+precondition(timedState.displaySecondary(isStale: true) == nil)
+precondition(timedState.visibleDetails(isStale: true).map(\.label) == ["教师"])
+precondition(timedState.displayValue(isStale: true) == "待更新")
+timedState.updatedAt = Date(timeIntervalSinceReferenceDate: 220)
+timedState.phase = "ongoing"
+timedState.countdownTarget = "end"
+precondition(timedState.freshnessDeadline == timedState.endDate)
+timedState.staleAfter = Date(timeIntervalSinceReferenceDate: 250)
+precondition(timedState.freshnessDeadline == timedState.staleAfter)
+for kind in ["nextCourse", "planner", "dayOverview", "assignments"] {
+    var finishedState = liveFixture(kind)
+    finishedState.title = "已结束或已完成"
+    finishedState.subtitle = "今天事项已结束"
+    finishedState.phase = "finished"
+    precondition(!finishedState.displayTitle(isStale: true).contains("已结束"))
+    precondition(finishedState.displaySubtitle(isStale: true) == nil)
+    precondition(finishedState.displayValue(isStale: true) == "待更新")
+}
+var plainCustom = liveFixture("custom")
+precondition(plainCustom.freshnessDeadline == nil)
+plainCustom.staleAfter = Date(timeIntervalSinceReferenceDate: 120)
+precondition(plainCustom.freshnessDeadline == plainCustom.staleAfter)
+for kind in liveFixtureKinds {
+    var destination = liveFixture(kind)
+    destination.destinationPath = "https://untrusted.invalid"
+    precondition(destination.destination.scheme == "neulumen")
+    precondition(!destination.destination.absoluteString.contains("untrusted"))
+}
+precondition(liveFixture("academicOverview").destination.absoluteString == "neulumen://activity/learning?section=grades")
+print("Live activity freshness: start/end/custom boundaries, stale labels/counts and destination allowlist passed")
+
+for width in [CGFloat(220), 280, 330, 350, 370] {
+    for labelWidth in [CGFloat(33), 60, 120, 240] {
+        for timerWidth in [CGFloat(70), 108, 180, 360, 600] {
+            let plan = LiveActivityLayoutMetrics.metricPlan(width: width,
+                label: CGSize(width: labelWidth, height: 14), value: CGSize(width: timerWidth, height: 24))
+            precondition(plan.size.width == width && plan.size.height > 0)
+            for rect in [plan.label, plan.value] {
+                precondition(rect.minX >= 0 && rect.minY >= 0 && rect.maxX <= width && rect.maxY <= plan.size.height)
+            }
+            precondition(!plan.label.intersects(plan.value))
+            if !plan.stacked { precondition(plan.label.width == min(width, labelWidth)) }
+            else { precondition(plan.value.width == width) }
+        }
+    }
+}
+precondition(LiveActivityLayoutMetrics.detailColumns(width: 330, accessibility: false) == 2)
+precondition(LiveActivityLayoutMetrics.detailColumns(width: 370, accessibility: true) == 1)
+precondition(LiveActivityLayoutMetrics.expandedContentHeight == 130)
+print("Live activity geometry: 100 real-policy width/label/timer plans are bounded, nonoverlapping; 130pt budget and accessibility reflow passed")
+// END standalone presentation checks
+
+let detailedCourse = CourseOccurrence(date: date(12), slot: CourseSlot(weekday: 4,
+    startMinutes: 630, endMinutes: 730, name: "合成课程", room: "合成教室", teacher: "合成教师"))
+let detailedSchedule = LiveActivitySchedule.snapshot([detailedCourse, occurrence(12, 840, 940, "合成后续")],
+    from: date(12), to: date(13), at: date(12, 9), portalLoaded: true, calendar: calendar)
+let courseDetails = detailedSchedule.expandedDetails(for: detailedSchedule.next!, at: date(12, 9), calendar: calendar)
+precondition(courseDetails.contains { $0.label == "教师" && $0.value == "合成教师" })
+precondition(courseDetails.contains { $0.label == "周节" && $0.value.contains("第3–4节") })
+precondition(courseDetails.contains { $0.label == "当天" && $0.value.contains("2 项") })
+precondition(courseDetails.contains { $0.label == "后续" && $0.isTimeSensitive == true })
+let manualDetails = local.expandedDetails(for: local.next!, at: night, note: "合成备注", calendar: calendar)
+precondition(manualDetails.contains { $0.label == "备注" && $0.value == "合成备注" })
+precondition(!manualDetails.contains { $0.label == "教师" || $0.label == "周节" })
+let irregular = LiveActivitySchedule.interval(for: occurrence(12, 613, 644))!
+let irregularDetails = detailedSchedule.expandedDetails(for: irregular, at: date(12, 9), calendar: calendar)
+precondition(!irregularDetails.contains { $0.label == "周节" && $0.value.contains("节") })
+print("Live activity metadata: teacher/room/exact periods/day counts/next event, manual notes and non-fabricated periods passed")
+
+// Real production portal-count constructor -> same fact rows used by Repository.
+let missingNetCounts = NetUsageInfo.fromPortal(balance: 20, bytes: 1024, seconds: nil, times: nil)
+precondition(!missingNetCounts.secondsFromPortal && !missingNetCounts.timesFromPortal)
+precondition(!missingNetCounts.usageFacts.contains { $0.0 == "在线时长" || $0.0 == "本月连接" })
+let zeroNetCounts = NetUsageInfo.fromPortal(balance: 20, bytes: 0, seconds: 0, times: 0)
+precondition(zeroNetCounts.flowFromPortal && zeroNetCounts.secondsFromPortal && zeroNetCounts.timesFromPortal)
+precondition(zeroNetCounts.usageFacts.contains { $0.0 == "在线时长" && $0.1 == "0小时0分" })
+precondition(zeroNetCounts.usageFacts.contains { $0.0 == "本月连接" && $0.1 == "0 次" })
+let partialNetCounts = NetUsageInfo.fromPortal(balance: 20, bytes: nil, seconds: 3600, times: nil)
+precondition(!partialNetCounts.flowFromPortal && partialNetCounts.secondsFromPortal && !partialNetCounts.timesFromPortal)
+precondition(partialNetCounts.usageFacts.contains { $0.0 == "在线时长" && $0.1 == "1小时0分" })
+precondition(!partialNetCounts.usageFacts.contains { $0.0 == "本月连接" })
+let invalidNetCounts = NetUsageInfo.fromPortal(balance: 20, bytes: -1, seconds: -1, times: -1)
+precondition(!invalidNetCounts.flowFromPortal && !invalidNetCounts.secondsFromPortal && !invalidNetCounts.timesFromPortal)
+precondition(!invalidNetCounts.usageFacts.contains { $0.0 == "在线时长" || $0.0 == "本月连接" })
+precondition(Int64(exactly: Double.nan) == nil && Int64(exactly: Double.infinity) == nil && Int64(exactly: 1.5) == nil)
+print("Network usage: production presence/fact path preserves missing, real zero, partial and invalid counters")

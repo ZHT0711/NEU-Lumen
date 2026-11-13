@@ -52,6 +52,26 @@
 
 网页工具 → **下载管理**：下载原始 PDF 和网页附件，查看进度、预览、分享或存储到“文件”。“导出网页为 PDF”与原文件下载分开；下载按账号保存在本机，系统挂起后不保证继续。
 
+## 原生教务与实时活动
+
+服务大厅／我的 → **教务查询**：原生校历、培养方案与学业信息。课程明细支持主动只读网页同步；没有读取到的日期、学分或课程不会补造。能力边界见 [教务说明](docs/academic-queries.md)。
+
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-center-light.png" width="245" alt="原生教务查询" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-calendar-light.png" width="245" alt="原生校历（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-plan-light.png" width="245" alt="原生培养计划（合成演示）" />
+</p>
+
+实时活动展开区支持课程、校园卡、网费、电量、作业、个人日程、今日概览、学业概览和自定义内容；窄屏或大字体按可用空间精简详情，点击可查看完整页面。
+
+以下是 **iPhone 模拟器中的生产共享组件布局验证**，不是系统灵动岛截屏或实体真机截图；使用合成数据。
+
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/live-expanded-nextCourse-light.png" width="245" alt="课程展开组件布局验证" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/live-expanded-netBalance-light.png" width="245" alt="网费展开组件布局验证" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/live-expanded-custom-light.png" width="245" alt="自定义展开组件布局验证" />
+</p>
+
 ## 安装
 
 下载 [未签名 IPA](https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/NEU-Lumen-iOS-unsigned.ipa)，使用 Sideloadly、AltStore 或开发者证书签名后安装。

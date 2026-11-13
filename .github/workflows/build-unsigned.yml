@@ -119,6 +119,7 @@ jobs:
             NEU-Lumen/Core/Support/JSONHelpers.swift \
             NEU-Lumen/Core/Models/PortalModels.swift \
             NEU-Lumen/Core/Models/ServiceCatalog.swift \
+            NEU-Lumen/App/Navigation.swift \
             NEU-Lumen/Core/Models/CourseModels.swift \
             NEU-Lumen/Core/Models/GradeModels.swift \
             NEU-Lumen/Core/Models/AcademicResponse.swift \
@@ -213,6 +214,13 @@ jobs:
             -o "${RUNNER_TEMP}/data-reliability-tests"
           "${RUNNER_TEMP}/data-reliability-tests"
 
+      - name: Test native academic query protocols
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/academic-query-tests.log") 2>&1
+          python3 scripts/test_academic_queries.py --require-swift
+
       - name: Build unsigned IPA
         shell: bash
         run: |
@@ -226,13 +234,14 @@ jobs:
       - name: Require warning-free compiler logs
         # Add each new native test log here and increment --required-count together.
         run: >-
-          python3 scripts/check_build_diagnostics.py --required-count 8
+          python3 scripts/check_build_diagnostics.py --required-count 9
           "${RUNNER_TEMP}/catalog-tests.log"
           "${RUNNER_TEMP}/planner-tests.log"
           "${RUNNER_TEMP}/login-tests.log"
           "${RUNNER_TEMP}/live-activity-data-tests.log"
           "${RUNNER_TEMP}/browser-download-tests.log"
           "${RUNNER_TEMP}/data-reliability-tests.log"
+          "${RUNNER_TEMP}/academic-query-tests.log"
           build/ios-build.log build/ui-preview/simulator-build.log
 
       - name: Bind IPA and UI provenance to this successful build attempt

@@ -251,7 +251,7 @@ struct CardView: View {
                             if net?.flowFromPortal == true {
                                 statBlock("本月已用", net?.usedFlowText ?? "—")
                             }
-                            if let times = net?.monthTimes, times > 0 {
+                            if net?.timesFromPortal == true, let times = net?.monthTimes, times >= 0 {
                                 statBlock("连接次数", "\(times)")
                             }
                         }

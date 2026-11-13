@@ -95,6 +95,9 @@ final class DynamicIslandActivityManager {
             return
         }
 
+        let usesRefreshDate = state.updatedAt == .distantPast
+        if usesRefreshDate { state.updatedAt = request.refreshDate }
+        // Bound the final timestamp too, before testing ActivityKit's full envelope.
         state = state.boundedText()
         let payloadAttributes = NEULumenActivityAttributes(campus: request.campus, accountID: request.accountID)
         let encoder = JSONEncoder()
@@ -108,15 +111,14 @@ final class DynamicIslandActivityManager {
         }
         if let activity {
             var previous = activity.content.state
-            if state.updatedAt == .distantPast { previous.updatedAt = .distantPast }
-            guard previous != state else { return }
-            if state.updatedAt == .distantPast { state.updatedAt = request.refreshDate }
+            var comparison = state
+            if usesRefreshDate { previous.updatedAt = .distantPast; comparison.updatedAt = .distantPast }
+            guard previous != comparison else { return }
             await activity.update(content(for: state))
             lastError = nil
             return
         }
         guard request.isForeground, !automaticStartBlocked else { return }
-        if state.updatedAt == .distantPast { state.updatedAt = request.refreshDate }
         do {
             let attributes = NEULumenActivityAttributes(campus: request.campus, accountID: request.accountID)
             let started = try Activity.request(attributes: attributes,
@@ -148,17 +150,8 @@ final class DynamicIslandActivityManager {
 
     private func content(for state: NEULumenActivityAttributes.ContentState)
         -> ActivityContent<NEULumenActivityAttributes.ContentState> {
-        // A user-defined countdown expires at its target; plain text has no deadline.
-        let staleDate: Date?
-        if (state.kind == "nextCourse" || state.kind == "planner"), let start = state.startDate, start > state.updatedAt {
-            // System timers can finish in the background, but changing to the next
-            // course requires fresh app data. Mark the start boundary honestly.
-            staleDate = start
-        } else if let end = state.endDate { staleDate = end }
-        else if state.kind == "custom" { staleDate = nil }
-        else { staleDate = state.updatedAt.addingTimeInterval(30 * 60) }
-        let expiration = [staleDate, state.staleAfter].compactMap { $0 }.min()
-        return ActivityContent(state: state, staleDate: expiration, relevanceScore: 50)
+        // Shared, natively tested policy preserves start/end and template boundaries.
+        ActivityContent(state: state, staleDate: state.freshnessDeadline, relevanceScore: 50)
     }
 
     private func observe(_ activity: Activity<NEULumenActivityAttributes>) {

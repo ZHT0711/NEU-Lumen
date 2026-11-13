@@ -91,6 +91,8 @@ struct HomeView: View {
                     PortalWebViewScreen(url: url)
                 case .card:
                     CardView()
+                case .academic:
+                    AcademicCenterView()
                 }
             }
         }
@@ -381,7 +383,7 @@ struct HomeView: View {
                             open(app)
                         } label: {
                             VStack(spacing: 6) {
-                                RemoteImageView(path: app.iconUrl)
+                                ServiceAppIcon(app: app)
                                     .frame(width: 40, height: 40)
                                 Text(app.name)
                                     .font(.caption2)
@@ -537,9 +539,8 @@ struct HomeView: View {
     }
 
     private func open(_ app: PortalApp) {
-        let entry = app.entryUrl()
-        guard !entry.isEmpty, let url = URL(string: entry) else { return }
-        path.append(.web(url))
+        guard let destination = AppDestination.service(app) else { return }
+        path.append(destination)
     }
 }
 

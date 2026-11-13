@@ -11,6 +11,8 @@
 		A10000000000000000000002 /* NEULumenLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NEULumenLiveActivity.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Services/DynamicIslandActivityAttributes.swift"; sourceTree = "<group>"; };
 		A10000000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000006 /* LiveActivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Models/LiveActivityPresentation.swift"; sourceTree = "<group>"; };
+		A10000000000000000000007 /* LiveActivityExpandedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Services/LiveActivityExpandedContent.swift"; sourceTree = "<group>"; };
 		5AFE00000000000000000004 /* NEU-Lumen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NEU-Lumen.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -38,6 +40,8 @@
 /* Begin PBXBuildFile section */
 		A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* NEULumenLiveActivity.swift */; };
 		A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */; };
+		A10000000000000000000024 /* LiveActivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* LiveActivityPresentation.swift */; };
+		A10000000000000000000025 /* LiveActivityExpandedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* LiveActivityExpandedContent.swift */; };
 		A10000000000000000000013 /* Embed Live Activity */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* NEU-LumenLiveActivity.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -84,6 +88,8 @@
 			children = (
 				A10000000000000000000002 /* NEULumenLiveActivity.swift */,
 				A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */,
+				A10000000000000000000006 /* LiveActivityPresentation.swift */,
+				A10000000000000000000007 /* LiveActivityExpandedContent.swift */,
 				A10000000000000000000004 /* Info.plist */,
 			);
 			path = NEU-LumenLiveActivity;
@@ -183,7 +189,7 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
-		A10000000000000000000015 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */, A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000015 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */, A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */, A10000000000000000000024 /* LiveActivityPresentation.swift in Sources */, A10000000000000000000025 /* LiveActivityExpandedContent.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 		A10000000000000000000016 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		A10000000000000000000017 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 

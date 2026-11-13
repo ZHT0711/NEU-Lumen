@@ -34,7 +34,9 @@ class LiveActivityDataContracts(unittest.TestCase):
 
     def test_optional_payload_and_countdown_target_contract(self):
         attributes = (ROOT / 'NEU-Lumen/Core/Services/DynamicIslandActivityAttributes.swift').read_text()
-        for field, kind in [('accent', 'String'), ('symbolName', 'String'), ('secondaryValue', 'String'), ('progress', 'Double'), ('countdownTitle', 'String'), ('destinationPath', 'String')]:
+        self.assertIn('typealias ContentState = LiveActivityContentState', attributes)
+        attributes += (ROOT / 'NEU-Lumen/Core/Models/LiveActivityPresentation.swift').read_text()
+        for field, kind in [('accent', 'String'), ('symbolName', 'String'), ('secondaryValue', 'String'), ('progress', 'Double'), ('countdownTitle', 'String'), ('destinationPath', 'String'), ('detailItems', '[LiveActivityDetail]'), ('phase', 'String')]:
             self.assertIn(f'var {field}: {kind}? = nil', attributes)
         widget = (ROOT / 'NEU-LumenLiveActivity/NEULumenLiveActivity.swift').read_text()
         self.assertIn('countdownTitle == "距开始"', attributes)
@@ -50,6 +52,58 @@ class LiveActivityDataContracts(unittest.TestCase):
         self.assertIn('let query = kind == "academicOverview"', attributes)
         self.assertIn('pendingLearningSection', (ROOT / 'NEU-Lumen/App/MainTabView.swift').read_text())
         self.assertIn('pendingLearningSection', (ROOT / 'NEU-Lumen/Features/Grades/GradesView.swift').read_text())
+
+    def test_all_nine_sources_have_fact_based_expanded_metadata(self):
+        state = REPOSITORY.split('func liveActivityState(', 1)[1]
+        expected = {
+            'nextCourse, .planner': ['expandedDetails(for: next', 'planner.events.first', 'phase: ongoing'],
+            'cardBalance': ['cardBalance?.status', 'cardBalance?.subsidy', 'syncDetail(updatedAt)'],
+            'netBalance': ['net.flowFromPortal', 'net.usageFacts', 'syncDetail(netUpdatedAt)'],
+            'electricBalance': ['electric.roomLabel', 'electric.roomNo', 'electric.lastReadAt', 'electric.unbound'],
+            'assignments': ['assignments.loadedPlatformCount', 'assignments.completedCount', 'next.deadline', 'details: nearestDetails'],
+            'dayOverview': ['courseCount', 'schedule.remainingCount', 'next.occurrence.slot.name', 'min(dayEnd, boundary)'],
+            'academicOverview': ['academic.semester?.name', 'academic.credits', 'academic.weightedAverage', 'academic.scoredCount'],
+            'custom': ['store.customSubtitle', 'store.customValue', 'customDetails', 'snapshot.expiration', 'store.customIcon'],
+        }
+        for source, fields in expected.items():
+            with self.subTest(source=source):
+                block = state.split('case .' + source + ':', 1)[1].split('\n        case .', 1)[0]
+                for field in fields:
+                    self.assertIn(field, block)
+                self.assertIn('details:', block)
+        model = (ROOT / 'NEU-Lumen/Core/Models/LiveActivityPresentation.swift').read_text()
+        self.assertIn('maximumDetails = 6', model)
+        self.assertIn('payloadBudget = 3200', model)
+        self.assertIn('fields.append(row.value); fields.append(row.label)', model)
+        self.assertIn('isTimeSensitive != true', model)
+        self.assertIn('displaySecondary(isStale:', model)
+        self.assertIn('freshnessDeadline', model)
+        manager = (ROOT / 'NEU-Lumen/Core/Services/DynamicIslandActivityManager.swift').read_text()
+        self.assertIn('state.freshnessDeadline', manager)
+        for guard in ['ActivityAuthorizationInfo().areActivitiesEnabled', '$0.attributes.accountID == request.accountID',
+                      'stateBytes + attributeBytes < 4000', 'state = state.boundedText()']:
+            self.assertIn(guard, manager)
+
+    def test_net_usage_presence_is_independent_and_never_fabricated(self):
+        models = (ROOT / 'NEU-Lumen/Core/Models/CardModels.swift').read_text()
+        client = (ROOT / 'NEU-Lumen/Core/Networking/PortalClient.swift').read_text()
+        self.assertIn('NetUsageInfo.fromPortal(balance: finalBalance, bytes: bytes, seconds: seconds, times: times)', client)
+        self.assertIn('Int64(exactly: $0)', client)
+        self.assertIn('secondsFromPortal: s != nil, timesFromPortal: t != nil', models)
+        self.assertIn('if secondsFromPortal && monthSeconds >= 0', models)
+        self.assertIn('if timesFromPortal && monthTimes >= 0', models)
+        self.assertIn('let usage = net.usageFacts.map', REPOSITORY)
+        native = (ROOT / 'Tests/LiveActivity/main.swift').read_text()
+        for case in ['missingNetCounts', 'zeroNetCounts', 'partialNetCounts', 'invalidNetCounts']:
+            self.assertIn(case, native)
+
+    def test_native_regressions_use_production_schema_and_geometry(self):
+        native = (ROOT / 'Tests/LiveActivity/main.swift').read_text()
+        for executable_check in ['JSONDecoder().decode(LiveActivityContentState.self', 'liveEncoder.encode(bounded)',
+                                 'bounded.boundedText() == bounded', 'metricPlan(width: width',
+                                 'plan.label.intersects(plan.value)', 'expandedDetails(for: detailedSchedule.next!',
+                                 'irregularDetails', 'manualDetails']:
+            self.assertIn(executable_check, native)
 
     def test_emblem_is_rgba_and_corner_is_transparent(self):
         raw = (ROOT / 'NEU-Lumen/Assets.xcassets/FutureTechnologyEmblem.imageset/emblem.png').read_bytes()
@@ -73,7 +127,10 @@ class LiveActivityDataContracts(unittest.TestCase):
         shell = (ROOT / 'scripts/validate_ui.sh').read_text()
         self.assertIn('--live-activity-data-checks', shell)
         self.assertIn('live-activity-custom', shell)
-        self.assertEqual(len(preview.SCREENSHOTS), 20)
+        self.assertEqual(len(preview.SCREENSHOTS), 33)
+        for kind in ['nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'assignments', 'planner', 'dayOverview', 'academicOverview', 'custom']:
+            self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)
+        self.assertIn('live-activity-layout-checks.txt', preview.CHECKS)
         self.assertIn('PBXFileSystemSynchronizedRootGroup', (ROOT / 'NEU-Lumen.xcodeproj/project.pbxproj').read_text())
 
 

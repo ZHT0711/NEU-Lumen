@@ -1,0 +1,10 @@
+{
+  "_notice": "ALL VALUES ARE SYNTHETIC; NO REAL ACCOUNT OR SCHOOL RECORD",
+  "identity": {"code": "0", "datas": {"userId": "SYNTH-A"}},
+  "terms": {"code": "0", "datas": [{"itemCode": "SYNTH-TERM-1", "itemName": "合成学期一", "selected": true}, {"itemCode": "SYNTH-TERM-2", "itemName": "合成学期二", "selected": false}]},
+  "plans": {"code": "0", "datas": [{"planId": "SYNTH-PLAN-A", "planName": "合成培养方案", "selected": "1"}]},
+  "calendar": {"code": "0", "datas": {"startDate": "2031-09-08", "endDate": "2032-01-18", "holidays": [{"startDate": "2031-10-01", "endDate": "2031-10-03"}]}},
+  "week": {"code": "0", "datas": {"classWeek": "9"}},
+  "status": {"code": "0", "datas": {"academicRate": "62.5", "academicUnusual": 1, "flunkList": [{"courseId": "SYNTH-C-1", "courseName": "合成课程一"}], "nutrients": [{"nutrientSum": 999999}]}},
+  "page": {"account": "SYNTH-A", "title": "合成培养课程表", "sourceURL": "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.html?not_a_real_ticket=synthetic", "recognizedTables": 1, "courses": [{"name": "合成课程一", "code": "SYNTH-C-1", "creditsText": "2.5", "module": "合成基础模块", "studyStatus": "已修读", "suggestedTerm": "合成学期一"}]}
+}

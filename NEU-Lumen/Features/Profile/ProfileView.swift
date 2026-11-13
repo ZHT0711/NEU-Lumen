@@ -127,6 +127,14 @@ struct ProfileView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                Section("教务查询") {
+                    NavigationLink {
+                        AcademicCenterView()
+                    } label: {
+                        Label("校历与培养计划", systemImage: "graduationcap.fill")
+                    }
+                }
+
                 Section("实时活动") {
                     NavigationLink {
                         LiveActivitySettingsView()
@@ -205,6 +213,7 @@ struct ProfileView: View {
                 switch destination {
                 case .web(let url): PortalWebViewScreen(url: url)
                 case .card: CardView()
+                case .academic: AcademicCenterView()
                 }
             }
             .alert("退出登录？", isPresented: $confirmLogout) {

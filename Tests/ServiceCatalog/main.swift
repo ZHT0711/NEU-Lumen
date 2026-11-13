@@ -35,6 +35,32 @@ precondition(catalog.filtered(query: "不存在", category: nil).isEmpty, "无�
 precondition(ServiceCatalog(apps: []).categories.isEmpty, "空目录不生成虚假分类")
 print("ServiceCatalog: 14 checks passed")
 
+// Exercise the same routing function used by Home/Services favorites, not a fixture replica.
+func routingApp(_ entry: String, mobile: String = "", id: String = "SYNTH-ROUTE") -> PortalApp {
+    PortalApp(name: "合成教务入口", appId: id, url: entry, mobileUrl: mobile,
+              iconUrl: "", desc: "", category: "教学学习", visits: 0)
+}
+for entry in ["https://jwxt.neu.edu.cn", "https://jwxt.neu.edu.cn/",
+              "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do",
+              "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp"] {
+    let official = routingApp(entry)
+    precondition(AppDestination.service(official) == .academic, "核实的官方首页进入原生教务")
+    precondition(official.nativeSymbol == "graduationcap.fill", "原生入口不下载外站图标")
+}
+for entry in ["https://jwxt.neu.edu.cn/jwapp/sys/registration/index.do",
+              "http://jwxt.neu.edu.cn/", "https://jwxt.neu.edu.cn:8443/",
+              "https://jwxt.neu.edu.cn.evil.example/", "https://legacy.example/教务"] {
+    let external = routingApp(entry)
+    precondition(external.nativeDestination == nil, "不同功能、旧入口和外站不被重写")
+    precondition(AppDestination.service(external) == .web(URL(string: external.entryUrl())!), "原网页入口仍可用")
+}
+precondition(AppDestination.service(routingApp("https://user:password@jwxt.neu.edu.cn/")) == nil,
+             "拒绝带 URL 凭据的服务入口")
+precondition(AppDestination.service(routingApp("https://jwxt.neu.edu.cn/", mobile: "https://library.example/")) == .web(URL(string: "https://library.example/")!),
+             "继续优先使用门户移动端地址，不按名称误路由")
+precondition(AppDestination.service(routingApp("", id: "")) == nil, "空地址和空应用 ID 不生成虚假入口")
+print("Native academic routing: 12 real production routing cases passed")
+
 // 整周相同时间的课程曾经会互相打断合并。
 func occurrence(_ day: String, _ start: Int, _ end: Int, name: String = "高等数学", room: String = "A101",
                 teacher: String = "张老师", kind: String = "course", eventID: String? = nil) -> CourseOccurrence {

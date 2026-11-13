@@ -68,7 +68,29 @@ struct ServiceCatalog {
     }
 }
 
+enum NativeServiceDestination: Hashable {
+    case academic
+}
+
 extension PortalApp {
+    /// 仅替换已知官方入口，不把旧教务/任意同名外站错误路由到新接口。
+    var nativeDestination: NativeServiceDestination? {
+        guard let entry = URL(string: entryUrl()), entry.scheme?.lowercased() == "https",
+              entry.user == nil, entry.password == nil,
+              entry.port == nil || entry.port == 443 else { return nil }
+        let host = entry.host?.lowercased() ?? ""
+        if host == "jwxt.neu.edu.cn",
+           ["", "/", "/jwapp/sys/homeapp/index.do", "/jwapp/sys/homeapp/home/index.html"].contains(entry.path) { return .academic }
+        return nil
+    }
+
+    var nativeSymbol: String? {
+        switch nativeDestination {
+        case .academic: return "graduationcap.fill"
+        case nil: return nil
+        }
+    }
+
     var serviceCategory: String {
         let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "其他服务" : trimmed

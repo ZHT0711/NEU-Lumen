@@ -45,6 +45,17 @@ final class PortalRepository {
     private var gradeRequestID = 0
     private(set) var gradesState: LoadState = .idle
     private(set) var gradesWarning: String?
+
+    // 教务查询只在当前账号 / epoch 的内存中缓存，不落盘、不回退演示值。
+    private var academicCache: [AcademicQueryKey: AcademicQueryPayload] = [:]
+    private var academicStates: [AcademicQueryKey: LoadState] = [:]
+    private var academicDates: [AcademicQueryKey: Date] = [:]
+    private var academicWarnings: [AcademicQueryKey: String] = [:]
+    private var academicTasks: [AcademicQueryKey: Task<Void, Never>] = [:]
+    private var academicRequests: [AcademicQueryKey: UUID] = [:]
+    private var academicWaiters: [AcademicQueryKey: Set<UUID>] = [:]
+    private var academicPageCache: AcademicPageSnapshot?
+
     private(set) var cgReport: CGAssignmentReport?
     private(set) var cgState: LoadState = .idle
     private(set) var cgUpdatedAt: Date?
@@ -215,6 +226,15 @@ final class PortalRepository {
         gradesUpdatedAt = nil
         gradeRequestID += 1
         gradesWarning = nil
+        for task in academicTasks.values { task.cancel() }
+        academicTasks.removeAll()
+        academicRequests.removeAll()
+        academicWaiters.removeAll()
+        academicCache.removeAll()
+        academicStates.removeAll()
+        academicDates.removeAll()
+        academicWarnings.removeAll()
+        academicPageCache = nil
         cgRequestID = UUID()
         cgBrowser?.webView.stopLoading()
         cgBrowser = nil
@@ -804,6 +824,137 @@ final class PortalRepository {
         gradesState = .loaded
     }
 
+    // MARK: - 原生教务只读查询
+
+    var academicRequestContext: RepositoryRequestContext? { requestContext }
+    var academicTerms: [AcademicTerm] {
+        if case .terms(let terms)? = academicPayload(for: .terms) { return terms }
+        return []
+    }
+    var academicPlans: [AcademicPlan] {
+        if case .plans(let plans)? = academicPayload(for: .plans) { return plans }
+        return []
+    }
+    var academicPageSnapshot: AcademicPageSnapshot? {
+        guard let context = requestContext, academicPageCache?.account == context.account else { return nil }
+        return academicPageCache
+    }
+
+    func academicPayload(for key: AcademicQueryKey) -> AcademicQueryPayload? {
+        guard requestContext != nil else { return nil }
+        return academicCache[key]
+    }
+    func academicState(for key: AcademicQueryKey) -> LoadState {
+        guard requestContext != nil else { return .failed("尚未确认当前账号，请重试或在应用内更新正常网页登录") }
+        return academicStates[key] ?? .idle
+    }
+    func academicUpdatedAt(for key: AcademicQueryKey) -> Date? {
+        guard requestContext != nil else { return nil }
+        return academicDates[key]
+    }
+    func academicWarning(for key: AcademicQueryKey) -> String? {
+        guard requestContext != nil else { return nil }
+        return academicWarnings[key]
+    }
+
+    /// 每项数据独立 loading / error / 缓存日期；同 key 去重，强制刷新取消上一请求。
+    func loadAcademicQuery(_ key: AcademicQueryKey, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
+        guard session.user?.sid == context.account else {
+            academicStates[key] = .failed("尚未确认当前学号，请在应用内更新正常网页登录后重试")
+            return
+        }
+        guard AcademicQueryPolicy.allows(key, terms: academicTerms, plans: academicPlans) else {
+            academicStates[key] = .failed("当前查询不在已读取的学期 / 方案列表中，或日期无效；请先刷新列表后重试")
+            return
+        }
+        if !force, let task = academicTasks[key], let request = academicRequests[key] {
+            await waitForAcademicTask(task, key: key, request: request, context: context)
+            return
+        }
+        if !force, academicCache[key] != nil, AcademicQueryPolicy.isFresh(academicDates[key], key: key) { return }
+        academicTasks[key]?.cancel()
+        let request = UUID()
+        academicRequests[key] = request
+        academicWaiters[key] = []
+        academicStates[key] = .loading
+        let task = Task { @MainActor in
+            defer { if self.isCurrent(context), self.academicRequests[key] == request { self.academicTasks[key] = nil } }
+            do {
+                let value = try await self.withRecovery(retryInterruptedRequest: false) {
+                    try await self.session.client.fetchAcademicQuery(key, expectedAccount: context.account)
+                }
+                try Task.checkCancellation()
+                guard self.isCurrent(context), self.academicRequests[key] == request else { return }
+                self.academicCache[key] = value
+                self.academicDates[key] = Date()
+                self.academicWarnings[key] = nil
+                self.academicStates[key] = .loaded
+            } catch {
+                guard self.isCurrent(context), self.academicRequests[key] == request else { return }
+                if NetworkError.isCancellation(error) || Task.isCancelled {
+                    self.academicStates[key] = self.academicCache[key] == nil ? .idle : .loaded
+                } else if self.academicCache[key] != nil {
+                    self.academicWarnings[key] = "本次读取失败，保留上次结果：" + NetworkError.from(error).message
+                    self.academicStates[key] = .loaded
+                } else {
+                    self.academicStates[key] = .failed(NetworkError.from(error).message)
+                }
+            }
+        }
+        academicTasks[key] = task
+        await waitForAcademicTask(task, key: key, request: request, context: context)
+    }
+
+    /// Hub and detail views can share a query. Leaving one view must not cancel
+    /// a request still needed by another; the last cancelled waiter stops it.
+    private func waitForAcademicTask(_ task: Task<Void, Never>, key: AcademicQueryKey,
+                                     request: UUID, context: RepositoryRequestContext) async {
+        let waiter = UUID()
+        academicWaiters[key, default: []].insert(waiter)
+        defer {
+            if isCurrent(context), academicRequests[key] == request {
+                academicWaiters[key]?.remove(waiter)
+                if academicWaiters[key]?.isEmpty == true { academicWaiters[key] = nil }
+            }
+        }
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            Task { @MainActor in
+                guard self.isCurrent(context), self.academicRequests[key] == request else { return }
+                self.academicWaiters[key]?.remove(waiter)
+                if self.academicWaiters[key]?.isEmpty == true { task.cancel() }
+            }
+        }
+    }
+
+    /// 浏览器必须先核对官方 currentUser.userId，再带打开时的账号 / epoch / generation 回写。
+    func applyAcademicPageSnapshot(_ snapshot: AcademicPageSnapshot, context: RepositoryRequestContext) throws {
+        try Task.checkCancellation()
+        guard isCurrent(context), session.user?.sid == context.account,
+              AcademicQueryPolicy.acceptsPageAccount(snapshot.account, expected: context.account) else {
+            throw AcademicQueryError.accountMismatch
+        }
+        academicPageCache = snapshot
+    }
+
+    #if DEBUG
+    /// 仅供临时截图 copy 显式注入合成数据；Release 无此入口，无环境变量自动回退。
+    func seedAcademicPreview(_ values: [AcademicQueryKey: AcademicQueryPayload], page: AcademicPageSnapshot? = nil,
+                             updatedAt: Date = Date()) {
+        guard let context = requestContext else { return }
+        for task in academicTasks.values { task.cancel() }
+        academicTasks.removeAll(); academicRequests.removeAll(); academicWaiters.removeAll()
+        academicCache = values
+        academicDates = Dictionary(uniqueKeysWithValues: values.keys.map { ($0, updatedAt) })
+        academicStates = Dictionary(uniqueKeysWithValues: values.keys.map { ($0, LoadState.loaded) })
+        academicWarnings.removeAll()
+        if let page, page.account == context.account { academicPageCache = page }
+    }
+    #endif
+
     // MARK: - 一卡通 / 网费 / 电费
 
     /// 一卡通总览：余额、网费、电费并行拉取（校内直连，校外自动走 WebVPN）。
@@ -1189,7 +1340,9 @@ final class PortalRepository {
         func content(_ title: String, subtitle: String, value: String,
                      updatedAt: Date = .distantPast, start: Date? = nil, end: Date? = nil,
                      symbol: String? = nil, secondary: String? = nil, progress: Double? = nil,
-                     countdown: String? = nil, destination: String = "settings") -> NEULumenActivityAttributes.ContentState {
+                     countdown: String? = nil, destination: String = "settings",
+                     details: [LiveActivityDetail] = [], phase: String? = nil,
+                     staleAfter: Date? = nil) -> NEULumenActivityAttributes.ContentState {
             NEULumenActivityAttributes.ContentState(title: String(title.prefix(80)), subtitle: String(subtitle.prefix(160)),
                   value: String(value.prefix(32)), kind: store.kind.rawValue, updatedAt: updatedAt,
                   startDate: start, endDate: end, accent: LiveActivityDataPolicy.accent(store.accent),
@@ -1198,8 +1351,18 @@ final class PortalRepository {
                   progress: store.showProgress ? LiveActivityDataPolicy.progress(progress) : nil,
                   countdownTitle: countdown,
                   destinationPath: LiveActivityDataPolicy.destinations.contains(destination) ? destination : "settings",
-                  countdownTarget: countdown == "距上课" || countdown == "距开始" ? "start" : end != nil ? "end" : nil).boundedText()
+                  staleAfter: staleAfter,
+                  countdownTarget: countdown == "距上课" || countdown == "距开始" ? "start" : end != nil ? "end" : nil,
+                  detailItems: details.isEmpty ? nil : details, phase: phase).boundedText()
         }
+        func detail(_ label: String, _ value: String?, temporal: Bool = false) -> LiveActivityDetail? {
+            LiveActivityText.detail(label, value, timeSensitive: temporal)
+        }
+        func syncDetail(_ date: Date?) -> LiveActivityDetail? {
+            guard let date, date != .distantPast, date.timeIntervalSinceReferenceDate.isFinite else { return nil }
+            return detail("同步", LiveActivityDataPolicy.dateText(date, format: "MM-dd HH:mm"))
+        }
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: now))!
         switch store.kind {
         case .nextCourse, .planner:
             let local = store.kind == .planner
@@ -1210,21 +1373,31 @@ final class PortalRepository {
                 return content(local ? (empty ? "近期暂无个人日程" : "范围内日程已结束") :
                     (empty ? "暂无后续课程或日程" : "课程与日程已结束"),
                     subtitle: local ? "未来七天的本机日程已读取" : "未来七个自然日的课表与日程已读取",
-                    value: empty ? "无事项" : "已结束", destination: "course")
+                    value: empty ? "无事项" : "已结束", destination: "course",
+                    details: [detail("范围", "未来七个自然日"), detail("已加载", "\(schedule.items.count) 项")].compactMap { $0 },
+                    phase: empty ? "empty" : "finished", staleAfter: dayEnd)
             }
             let ongoing = next.isOngoing(at: now)
-            let label = local ? (ongoing ? "距结束" : "距开始") : (ongoing ? "距下课" : "距上课")
+            let personal = next.occurrence.slot.kind == "custom"
+            let label = local || personal ? (ongoing ? "距结束" : "距开始") : (ongoing ? "距下课" : "距上课")
             let date = LiveActivityDataPolicy.dateText(next.start, format: "MM-dd HH:mm")
             let room = next.occurrence.slot.room.isEmpty ? "地点未读取" : next.occurrence.slot.room
             let partial = !schedule.portalLoaded ? " · 课表未完整读取" : ""
+            let note = planner.events.first { $0.id == next.occurrence.slot.eventID }?.note
+            var details = schedule.expandedDetails(for: next, at: now, note: note)
+            if !local && !schedule.portalLoaded, let row = detail("来源", "课表尚未完整读取") { details.insert(row, at: 0) }
             return content(next.occurrence.slot.name, subtitle: "\(room) · \(date)\(partial)",
                 value: LiveActivityDataPolicy.countdown(to: ongoing ? next.end : next.start, at: now),
                 start: next.start, end: next.end, secondary: ongoing ? "进行中" : "即将开始",
-                progress: next.progress(at: now), countdown: label, destination: "course")
+                progress: next.progress(at: now), countdown: label, destination: "course",
+                details: details, phase: ongoing ? "ongoing" : "upcoming")
         case .cardBalance:
             guard let balance = LiveActivityDataPolicy.money(cardBalance?.balance), let updatedAt = cardUpdatedAt else { return nil }
             return content("校园卡余额", subtitle: cardWarning == nil ? "最近同步的真实可用余额" : "本次同步失败，保留上次真实余额",
-                value: balance, updatedAt: updatedAt, secondary: cardBalance?.status, destination: "card")
+                value: balance, updatedAt: updatedAt, secondary: cardBalance?.status, destination: "card",
+                details: [detail("卡状态", cardBalance?.status), detail("补助", LiveActivityDataPolicy.money(cardBalance?.subsidy)),
+                          detail(cardWarning == nil ? "来源" : "同步状态", cardWarning == nil ? "校园卡系统可用余额" : "本次失败，保留上次余额"),
+                          syncDetail(updatedAt)].compactMap { $0 })
         case .custom:
             let keys = LiveActivityTemplate.dependencies(in: [store.customTitle, store.customSubtitle, store.customValue])
             let snapshot = activityTemplateSnapshot(now: now, keys: keys)
@@ -1237,70 +1410,114 @@ final class PortalRepository {
             if let deadline, value.isEmpty {
                 value = deadline > now ? LiveActivityDataPolicy.countdown(to: deadline, at: now) : "已到期"
             }
+            var customDetails: [LiveActivityDetail] = []
+            if deadline != nil, !store.customValue.isEmpty, let row = detail("辅助值", value) { customDetails.append(row) }
+            if let deadline, let row = detail("截止", LiveActivityDataPolicy.dateText(deadline, format: "MM-dd HH:mm")) { customDetails.append(row) }
+            if !keys.isEmpty {
+                if let row = detail("变量", LiveActivityTemplate.variables.filter { keys.contains($0.key) }.map(\.token).joined(separator: " ")) { customDetails.append(row) }
+                if let row = detail("来源", "只读当前账号已加载缓存") { customDetails.append(row) }
+            }
             var state = content(title, subtitle: subtitle, value: value, end: deadline, symbol: store.customIcon,
-                countdown: deadline.map { $0 > now ? "距截止" : "已到期" }, destination: "settings")
+                countdown: deadline.map { $0 > now ? "距截止" : "已到期" }, destination: "settings",
+                details: customDetails)
             state.staleAfter = snapshot.expiration
             return state.boundedText()
         case .netBalance:
             guard let net = netInfo, let balance = LiveActivityDataPolicy.money(net.balance) else { return nil }
+            let usage = net.usageFacts.map { detail($0.0, $0.1) }
             return content("校园网余额", subtitle: "最近成功同步的余额与用量", value: balance,
                 updatedAt: netUpdatedAt ?? .distantPast,
-                secondary: net.flowFromPortal ? "本月流量 \(net.usedFlowText)" : "本月流量未读取", destination: "card")
+                secondary: net.flowFromPortal ? "本月流量 \(net.usedFlowText)" : "本月流量未读取", destination: "card",
+                details: (usage + [syncDetail(netUpdatedAt)]).compactMap { $0 })
         case .electricBalance:
             guard let electric = electricInfo else { return nil }
+            let electricDetails = [detail("房间", electric.roomLabel), detail("房间码", electric.roomNo),
+                                   detail("抄表", electric.lastReadAt), syncDetail(electricUpdatedAt)].compactMap { $0 }
             if electric.unbound {
                 return content("宿舍电量", subtitle: "在校园卡页填写宿舍房间码后同步", value: "未绑定",
-                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card")
+                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card",
+                    details: [detail("绑定", "尚未绑定宿舍"), syncDetail(electricUpdatedAt)].compactMap { $0 })
             }
             guard let remaining = electric.remainKwh, remaining.isFinite else {
                 return content("宿舍电量", subtitle: "接口已读取，但未提供可用余量", value: "未读取",
-                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card")
+                    updatedAt: electricUpdatedAt ?? .distantPast, destination: "card", details: electricDetails)
             }
             return content("宿舍电量", subtitle: "最近读取的剩余电量", value: String(format: "%.1f kWh", remaining),
                 updatedAt: electricUpdatedAt ?? .distantPast,
-                secondary: remaining <= 5 ? "电量偏低，请及时检查缴费" : "以校园电费系统最新数据为准", destination: "card")
+                secondary: remaining <= 5 ? "电量偏低，请及时检查缴费" : "以校园电费系统最新数据为准", destination: "card",
+                details: electricDetails + [detail("提示", remaining <= 5 ? "余量偏低，请检查缴费" : "以电费系统最新数据为准")].compactMap { $0 })
         case .assignments:
             let assignments = activityAssignments
             guard assignments.hasLoadedData else { return nil }
-            let timestamp = ([cgUpdatedAt].compactMap { $0 } + Array(assignmentUpdatedAt.values)).max() ?? .distantPast
+            let timestamps = [cgUpdatedAt].compactMap { $0 } + Array(assignmentUpdatedAt.values)
+            let timestamp = timestamps.max() ?? .distantPast
+            let expiration = timestamps.min()?.addingTimeInterval(1800)
             let coverage = "仅汇总已同步的 \(assignments.loadedPlatformCount) 个平台" + (assignments.hasUnreadData ? " · 部分未读取" : "")
+            let taskDetails = [detail("平台", "已同步 \(assignments.loadedPlatformCount) 个"),
+                               detail("覆盖", assignments.hasUnreadData ? "部分未读取，不视为零待办" : "仅统计已同步作业"),
+                               detail("已完成", "\(assignments.completedCount) 项", temporal: true)].compactMap { $0 }
             guard let pending = assignments.pendingText else {
                 return content("学习作业", subtitle: coverage, value: "待同步", updatedAt: timestamp,
-                    secondary: "请进入学习页完成平台登录与同步", destination: "learning")
+                    secondary: "请进入学习页完成平台登录与同步", destination: "learning",
+                    details: taskDetails, staleAfter: expiration)
             }
             guard let next = assignments.next(at: now) else {
                 return content("已同步作业已完成", subtitle: coverage, value: "待办 \(pending)", updatedAt: timestamp,
-                    progress: assignments.progress, destination: "learning")
+                    progress: assignments.progress, destination: "learning", details: taskDetails,
+                    phase: "finished", staleAfter: expiration)
             }
             let deadline = next.deadline.flatMap { $0 > now ? $0 : nil }
             let overdue = assignments.overdueCount(at: now)
+            let nearestDetails = [detail("待办", "\(pending) 项", temporal: true), detail("来源", next.platform),
+                                  next.deadline.flatMap { detail("截止", LiveActivityDataPolicy.dateText($0, format: "MM-dd HH:mm")) },
+                                  overdue > 0 ? detail("已截止未完成", "\(overdue) 项", temporal: true) : nil].compactMap { $0 }
             return content(next.title, subtitle: "\(next.platform) · \(coverage)", value: "待办 \(pending)",
                 updatedAt: timestamp, end: deadline,
                 secondary: overdue > 0 ? "\(overdue) 项已截止但未完成" : "按截止日期优先展示",
-                progress: assignments.progress, countdown: deadline == nil ? nil : "距截止", destination: "learning")
+                progress: assignments.progress, countdown: deadline == nil ? nil : "距截止", destination: "learning",
+                details: nearestDetails + taskDetails, staleAfter: expiration)
         case .dayOverview:
             let schedule = activitySchedule(now: now, dayOnly: true)
             guard schedule.isReady else { return nil }
             let next = schedule.next
-            let summary = next.map { "下一项：" + $0.occurrence.slot.name } ?? "今天已加载的事项已全部结束"
+            let summary = next.map { ($0.isOngoing(at: now) ? "正在进行：" : "下一项：") + $0.occurrence.slot.name }
+                ?? (schedule.items.isEmpty ? "今天暂无已加载事项" : "今天已加载的事项已全部结束")
             let count = schedule.items.count
+            let courseCount = schedule.items.filter { $0.occurrence.slot.kind != "custom" }.count
+            var dayDetails = [detail("已读课程", "\(courseCount) 门"), detail("已读日程", "\(count - courseCount) 项"),
+                              detail("待完成", "\(schedule.remainingCount) 项", temporal: true),
+                              detail("已结束", "\(schedule.finishedCount) 项", temporal: true)].compactMap { $0 }
+            if let next {
+                if let row = detail(next.isOngoing(at: now) ? "当前" : "下一项", next.occurrence.slot.name, temporal: true) { dayDetails.insert(row, at: 0) }
+                if let row = detail("时间地点", LiveActivityDataPolicy.dateText(next.start, format: "HH:mm") + " " + LiveActivityText.clean(next.occurrence.slot.room)) { dayDetails.append(row) }
+            }
+            if !schedule.portalLoaded, let row = detail("来源", "课表未完整读取") { dayDetails.insert(row, at: 0) }
+            let boundary = next.map { $0.isOngoing(at: now) ? $0.end : $0.start } ?? dayEnd
             return content("今日总览", subtitle: schedule.portalLoaded ? summary : summary + " · 课表未完整读取",
                 value: "剩余 \(schedule.remainingCount)", secondary: "已结束 \(schedule.finishedCount) / 已加载 \(count)",
-                progress: count > 0 ? Double(schedule.finishedCount) / Double(count) : nil, destination: "course")
+                progress: count > 0 ? Double(schedule.finishedCount) / Double(count) : nil, destination: "course",
+                details: dayDetails, phase: schedule.availability.rawValue, staleAfter: min(dayEnd, boundary))
         case .academicOverview:
             guard gradesCache != nil else { return nil }
             let academic = LiveActivityAcademic(semesters: grades)
             guard let gpa = academic.gpa else {
                 return content("学业总览", subtitle: academic.semester?.name ?? "成绩报告已读取", value: "暂无可统计成绩",
                     updatedAt: gradesUpdatedAt ?? .distantPast,
-                    secondary: "缺失或未知成绩不会作为零分统计", destination: "learning")
+                    secondary: "缺失或未知成绩不会作为零分统计", destination: "learning",
+                    details: [detail("学期", academic.semester?.name), detail("已加载", "\(academic.courseCount) 门"),
+                              detail("统计", "缺失与未知成绩不按零分计入"), syncDetail(gradesUpdatedAt)].compactMap { $0 })
             }
             var details: [String] = []
             if let average = academic.weightedAverage { details.append(String(format: "均分 %.1f", average)) }
             if let credits = academic.credits { details.append(String(format: "计入 %.1f 学分", credits)) }
             return content("学业总览", subtitle: academic.semester?.name ?? "已加载学期",
                 value: String(format: "GPA %.2f", gpa), updatedAt: gradesUpdatedAt ?? .distantPast,
-                secondary: details.joined(separator: " · "), progress: academic.progress, destination: "learning")
+                secondary: details.joined(separator: " · "), progress: academic.progress, destination: "learning",
+                details: [detail("学期", academic.semester?.name),
+                          academic.credits.flatMap { detail("计入学分", String(format: "%.1f 学分", $0)) },
+                          academic.weightedAverage.flatMap { detail("加权均分", String(format: "%.1f", $0)) },
+                          detail("有效成绩", "\(academic.scoredCount) / \(academic.courseCount) 门"),
+                          syncDetail(gradesUpdatedAt)].compactMap { $0 })
         }
     }
 }

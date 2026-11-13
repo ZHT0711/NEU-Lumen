@@ -659,15 +659,22 @@ final class PortalClient {
         }
     }
 
-    // MARK: - 教务系统（金智 jwapp）真实成绩
+    // MARK: - 教务系统（金智 jwapp）只读查询与真实成绩
 
     private var jwxtAppBase = PortalClient.jwxtBase + "/jwapp/sys/homeapp"
 
     /// 从真实的学生首页建立会话，并沿用落地后的协议/网关前缀。
     private func jwxtSSO() async throws {
+        let epoch = sessionEpoch
         await prepareAccess()
+        guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
         let response = try await casLand(Self.jwxtBase + "/jwapp/sys/homeapp/index.do")
+        guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
         if response.finalURL.host == "pass.neu.edu.cn" { throw NetworkError.sessionExpired() }
+        let original = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+        guard original.host?.lowercased() == "jwxt.neu.edu.cn" else {
+            throw NetworkError(message: "教务认证未落地到学校教务站点，请使用正常网页入口重试")
+        }
         let landed = response.finalURL.absoluteString
         if let range = landed.range(of: "/jwapp/") {
             jwxtAppBase = String(landed[..<range.lowerBound]) + "/jwapp/sys/homeapp"
@@ -679,27 +686,64 @@ final class PortalClient {
         }
         // 与泥洞保持一致：API Referer 是实际学生首页，而非认证入口 index.do。
         _ = try await http.get(URL(string: jwxtReferer)!)
+        guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
     }
 
     private var jwxtReferer: String { jwxtAppBase + "/home/index.html?av=&contextPath=/jwapp" }
 
     private func jwxtGet(_ path: String) async throws -> Any {
+        let epoch = sessionEpoch
         let url = URL(string: maybeWrap(jwxtAppBase + "/" + path))!
         let response = try await http.get(url, xhr: true, extraHeaders: [
             "Fetch-Api": "true", "Accept": "application/json", "Referer": jwxtReferer
         ])
-        if response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login") {
+        guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+        if response.status == 401 || response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login") {
             throw NetworkError.sessionExpired()
         }
         guard (200..<300).contains(response.status) else {
             throw NetworkError(message: "教务接口 HTTP \(response.status)，可打开教务网页后同步")
         }
+        let originalResponse = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+        let originalRequest = WebVPN.unwrap(url) ?? url
+        guard AcademicQueryPolicy.acceptsResponseURL(originalResponse, expected: originalRequest) else {
+            throw AcademicQueryError.invalid("教务接口来源")
+        }
         guard let json = try? http.json(response) else {
             let html = response.text.lowercased()
             if html.contains("tpass/login") || html.contains("name=\"lt\"") { throw NetworkError.sessionExpired() }
-            throw NetworkError(message: "教务接口返回了网页，未能取得成绩数据。请打开教务网页完成认证后同步")
+            throw NetworkError(message: "教务接口返回了网页，未能取得查询数据。请打开教务网页完成认证后重试")
         }
         return json
+    }
+
+    /// 官方静态 JS 已核实的只读 allow-list，HTTP 与业务 envelope 分别校验。
+    func fetchAcademicQuery(_ key: AcademicQueryKey, expectedAccount: String) async throws -> AcademicQueryPayload {
+        let epoch = sessionEpoch
+        let path = try key.path
+        func read() async throws -> AcademicQueryPayload {
+            try await jwxtSSO()
+            guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+            do {
+                let identity = try await jwxtGet("api/home/currentUser.do")
+                try AcademicQueryParser.validateIdentity(identity, expectedAccount: expectedAccount)
+                let raw = try await jwxtGet(path)
+                let value = try AcademicQueryParser.decode(raw, key: key)
+                let finalIdentity = try await jwxtGet("api/home/currentUser.do")
+                try AcademicQueryParser.validateIdentity(finalIdentity, expectedAccount: expectedAccount)
+                guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+                return value
+            } catch AcademicQueryError.authenticationRequired { throw NetworkError.sessionExpired() }
+        }
+        do { return try await read() }
+        catch {
+            guard epoch == sessionEpoch, !Task.isCancelled, !NetworkError.isCancellation(error) else { throw CancellationError() }
+            // 已拿到业务失败 / 未知 JSON 或认证错误时不轮询、不尝试额外接口。
+            guard !(error is AcademicQueryError), !NetworkError.from(error).isSessionExpired,
+                  !webvpnOn, await ensureWebVPN() else { throw error }
+            guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+            return try await read()
+        }
     }
 
     func fetchJwxtGrades() async throws -> GradeReport {
@@ -920,13 +964,7 @@ final class PortalClient {
             }
         }
         guard let finalBalance = balance else { throw NetworkError(message: lastError) }
-        return NetUsageInfo(
-            balance: finalBalance,
-            monthBytes: bytes ?? 0,
-            monthSeconds: seconds ?? 0,
-            monthTimes: times ?? 0,
-            flowFromPortal: bytes != nil
-        )
+        return NetUsageInfo.fromPortal(balance: finalBalance, bytes: bytes, seconds: seconds, times: times)
     }
 
     /// 电费：缴费大厅 queryRommInfo，房间码为宿舍 3 位 + 寝室 4 位。
@@ -1266,7 +1304,7 @@ final class PortalClient {
     }
 
     private static func findInt(_ value: Any, keys: [String]) -> Int64? {
-        findValue(value, keys: keys).flatMap { numberFrom($0).map { Int64($0) } }
+        findValue(value, keys: keys).flatMap { numberFrom($0).flatMap { Int64(exactly: $0) } }
     }
 
     // MARK: - HTML 解析
