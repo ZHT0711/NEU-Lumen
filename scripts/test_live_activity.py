@@ -96,10 +96,12 @@ class ExpandedActivityContracts(unittest.TestCase):
             main = Path(directory) / 'main.swift'
             main.write_text('import Foundation\n' + source)
             binary = Path(directory) / 'presentation-tests'
-            subprocess.run([shutil.which('swiftc'), '-swift-version', '5', '-warnings-as-errors',
-                            str(ROOT / 'NEU-Lumen/Core/Models/LiveActivityPresentation.swift'),
-                            str(main), '-o', str(binary)], check=True, capture_output=True, text=True)
-            result = subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+            built = subprocess.run([shutil.which('swiftc'), '-swift-version', '5', '-warnings-as-errors',
+                                    str(ROOT / 'NEU-Lumen/Core/Models/LiveActivityPresentation.swift'),
+                                    str(main), '-o', str(binary)], capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            result = subprocess.run([str(binary)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('Live activity payload: nine sources', result.stdout)
             self.assertIn('100 real-policy', result.stdout)
             print(result.stdout, end='')
