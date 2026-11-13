@@ -26,6 +26,7 @@ struct LiveActivityExpandedContent: View {
 
     private func content(detailLimit: Int, titleLines: Int, compact: Bool, footer: Bool) -> some View {
         let details = Array(state.visibleDetails(isStale: isStale).prefix(detailLimit))
+        let hasFooterContent = isStale || state.updatedAt != .distantPast || state.progress?.isFinite == true
         return VStack(alignment: .leading, spacing: compact ? 4 : 5) {
             Text(state.displayTitle(isStale: isStale))
                 .font(compact ? .subheadline.weight(.semibold) : .headline)
@@ -42,7 +43,7 @@ struct LiveActivityExpandedContent: View {
             if !details.isEmpty {
                 LiveActivityDetailRows(details: details)
             }
-            if footer {
+            if footer && hasFooterContent {
                 HStack(spacing: 6) {
                     if isStale {
                         Label("打开应用更新", systemImage: "arrow.clockwise")
