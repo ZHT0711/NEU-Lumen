@@ -11,6 +11,7 @@ struct NativeServiceDocumentView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var pendingAction: NativeServiceDocument.Action?
+    @State private var confirmedAction: NativeServiceDocument.Action?
     @State private var request = UUID()
     private static let world = WKContentWorld.world(name: "NEULumen.ServiceDocument")
 
@@ -72,11 +73,15 @@ struct NativeServiceDocumentView: View {
         .disabled(busy)
         .privacySensitive()
         .task(id: String(browser.isLoading) + (browser.currentURL?.absoluteString ?? "") + environment.session.requestEpoch.uuidString) {
-            document = nil; values = [:]; pendingAction = nil
+            document = nil; values = [:]; pendingAction = nil; confirmedAction = nil
             if !browser.isLoading { await read() }
         }
         .refreshable { await read() }
-        .sheet(item: $pendingAction) { action in
+        .sheet(item: $pendingAction, onDismiss: {
+            guard let action = confirmedAction else { return }
+            confirmedAction = nil
+            Task { await activate(action) }
+        }) { action in
             NavigationStack {
                 List {
                     Section("学校操作") {
@@ -91,8 +96,8 @@ struct NativeServiceDocumentView: View {
                     Section {
                         Text("继续后执行学校页面的对应操作，并展示学校返回的页面以核对办理或订单结果。").font(.footnote)
                         Button("继续「\(action.title)」") {
+                            confirmedAction = action
                             pendingAction = nil
-                            Task { await activate(action) }
                         }.disabled(busy)
                     }
                 }
