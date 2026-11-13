@@ -54,6 +54,8 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         close()
         ownerAccount = account; ownerEpoch = session.requestEpoch; self.session = session
         let token = generation
+        await session.cleanRetiredLearningBrowsers()
+        guard current, token == generation, !Task.isCancelled else { return }
         let saved = vault.load().flatMap { $0.user.isSameAccount(as: user) ? $0 : nil }
         boundEmail = saved?.user.email ?? ""
         if boundEmail.isEmpty, user.email.lowercased().hasSuffix("neu.edu.cn") { boundEmail = user.email.lowercased() }

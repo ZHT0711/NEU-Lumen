@@ -50,12 +50,19 @@ struct NativeServiceSwitcher: View {
     let select: (NativeCampusService) -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            if #available(iOS 26.0, *), !reduceTransparency, contrast != .increased {
-                GlassEffectContainer(spacing: 10) { buttons }
-            } else { buttons }
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                if #available(iOS 26.0, *), !reduceTransparency, contrast != .increased {
+                    GlassEffectContainer(spacing: 10) { buttons }
+                } else { buttons }
+            }
+            .onAppear { proxy.scrollTo(selected, anchor: .center) }
+            .onChange(of: selected) { _, value in
+                withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { proxy.scrollTo(value, anchor: .center) }
+            }
         }
     }
     private var buttons: some View {
@@ -68,6 +75,7 @@ struct NativeServiceSwitcher: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .id(service)
                 .modifier(NativeServiceGlass(selected: selected == service))
                 .accessibilityAddTraits(selected == service ? .isSelected : [])
                 .accessibilityLabel(service.title)

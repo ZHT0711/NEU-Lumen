@@ -97,7 +97,8 @@ let merged = AcademicPlanPresentation.merge([done, pending], [studying, planCour
 expect(merged.count == 3 && Set(merged.map(\.id)).count == 3, "pagination merges and gives unique row IDs")
 expect(merged.first?.credits == 3, "new page updates an existing course")
 let grouped = AcademicPlanPresentation.groups([done,pending,studying,failed], query: "", status: nil, grouping: .module)
-expect(grouped.count == 2 && grouped.first?.unknownCredits == 1, "module summaries retain missing-credit counts")
+expect(grouped.count == 2 && grouped.first(where: { $0.title == "基础" })?.unknownCredits == 1,
+       "module summaries retain missing-credit counts independently of locale collation")
 expect(AcademicPlanPresentation.groups([done,pending], query: "B", status: .pending, grouping: .term).first?.courses.count == 1,
        "course search and status filter intersect")
 var savedPlan = page; savedPlan.planID = "SYNTH-PLAN-A"; savedPlan.courses = merged
