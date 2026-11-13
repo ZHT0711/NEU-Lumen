@@ -49,7 +49,7 @@ struct NativeServiceSwitcher: View {
     let selected: NativeCampusService
     let select: (NativeCampusService) -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -87,7 +87,7 @@ struct NativeServiceSwitcher: View {
 private struct NativeServiceGlass: ViewModifier {
     let selected: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityContrast) private var contrast
+    @Environment(\.colorSchemeContrast) private var contrast
     func body(content: Content) -> some View {
         if reduceTransparency || contrast == .increased {
             content.background(Color(.secondarySystemGroupedBackground), in: Capsule())

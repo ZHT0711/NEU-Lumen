@@ -227,6 +227,8 @@ private struct NativeMailComposer: UIViewControllerRepresentable {
     @MainActor final class Coordinator: NSObject, MFMailComposeViewControllerDelegate {
         let close: @MainActor () -> Void
         init(close: @escaping @MainActor () -> Void) { self.close = close }
-        func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) { close() }
+        nonisolated func mailComposeController(_ controller: MFMailComposeViewController, didFinishWith result: MFMailComposeResult, error: Error?) {
+            Task { @MainActor in close() }
+        }
     }
 }
