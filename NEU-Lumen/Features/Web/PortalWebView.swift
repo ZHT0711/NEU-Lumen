@@ -366,9 +366,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var provisionalUnsafeMethod = false
     @ObservationIgnored private var documentUnsafeMethod = false
 
-    init(websiteDataStore: WKWebsiteDataStore = .nonPersistent()) {
+    override init() {
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = websiteDataStore
+        config.websiteDataStore = .nonPersistent()
         config.defaultWebpagePreferences.preferredContentMode = .mobile
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
