@@ -121,6 +121,8 @@ jobs:
             NEU-Lumen/Core/Models/ServiceCatalog.swift \
             NEU-Lumen/Core/Models/NativeCampusService.swift \
             NEU-Lumen/Core/Models/NativeMail.swift \
+            NEU-Lumen/Core/Models/NativeAffairsCatalog.swift \
+            NEU-Lumen/Core/Models/HTMLInputFields.swift \
             NEU-Lumen/App/Navigation.swift \
             NEU-Lumen/Core/Models/CourseModels.swift \
             NEU-Lumen/Core/Models/GradeModels.swift \

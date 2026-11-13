@@ -181,3 +181,41 @@ let mailRows = try NativeMailProtocol.messages([["id":"fixture-1","subject":"合
 precondition(mailRows.count == 1 && mailRows[0].unread == false)
 do { _ = try NativeMailProtocol.messages([["id":"x"],["id":"x"]]); preconditionFailure("Duplicate mail IDs must fail") } catch { }
 print("Native services: original routes, verified hosts, five native services and Coremail decoder passed")
+
+let affairsHTML = #"""
+<a class="object_class active" id="object_1">学生办事</a>
+<a id="type_0" class="type_class">全部</a>
+<a class="organize_class" id="organize_0">全部部门</a>
+<a class="english_class" id="english_0">ALL</a>
+<div class="alk-service-nav"><h2><a href="/db_portal/guide?id=SYNTH-A">合成部门</a></h2>
+<a href="/db_portal/guide?id=SYNTH-A"><img src="/file/synthetic"></a>
+<span><a href="/db_portal/guide?id=SYNTH-A">合成证明 &amp; 申请</a></span></div>
+"""#
+let affairsCatalog = try NativeAffairsCatalogParser.catalog(affairsHTML)
+precondition(affairsCatalog.services.count == 1 && affairsCatalog.services[0].department == "合成部门")
+precondition(affairsCatalog.services[0].title == "合成证明 & 申请" && affairsCatalog.audiences[0].id == "1")
+precondition(affairsCatalog.departments[0].id == "0" && affairsCatalog.initials[0].title == "ALL")
+let emptyCatalog = String(affairsHTML.prefix { $0 != "\n" }) + "<a class='type_class' id='type_0'>全部</a><a class='organize_class' id='organize_0'>全部</a><a class='english_class' id='english_0'>ALL</a>"
+let emptyAffairsCatalog = try NativeAffairsCatalogParser.catalog(emptyCatalog)
+precondition(emptyAffairsCatalog.services.isEmpty)
+do { _ = try NativeAffairsCatalogParser.catalog("<html>请登录</html>"); preconditionFailure("A login page cannot become an empty service directory") } catch { }
+do {
+    _ = try NativeAffairsCatalogParser.catalog(affairsHTML.replacingOccurrences(of: "/db_portal/guide?id=SYNTH-A", with: "https://evil.example/db_portal/guide?id=SYNTH-A"))
+    preconditionFailure("A changed service destination must be rejected")
+} catch { }
+let guideHTML = #"""
+<h2 class="title-h2">合成指南</h2><input onclick="jump_open('https://ehall.neu.edu.cn/infoplus/form/SYNTH/start')">
+<div class="top-nav-box"><p>收费标准：无</p></div>
+<ul><li class="left-nav"><h3>办理条件</h3><p>合成条件</p><li></ul>
+<div id="cont_one_1"><img src="/file/synthetic-flow"></div>
+<div id="cont_one_2"><p>合成公告</p></div>
+<div id="cont_one_3"><a href="/file/synthetic-document">合成材料</a></div><!--relevance-->
+"""#
+let affairsGuide = try NativeAffairsCatalogParser.guide(guideHTML)
+precondition(affairsGuide.sections.first?.text == "合成条件" && affairsGuide.facts == ["收费标准：无"])
+precondition(affairsGuide.sections.first(where: { $0.title == "办事流程" })?.images.count == 1)
+precondition(affairsGuide.sections.first(where: { $0.title == "所需材料" })?.links.first?.title == "合成材料")
+precondition(affairsGuide.applicationURL?.path == "/infoplus/form/SYNTH/start")
+var affairsQuery = AffairsCatalogQuery(); affairsQuery.keyword = "合成 & 材料"
+precondition(URLComponents(url: affairsQuery.url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "keyword" })?.value == affairsQuery.keyword)
+print("Native affairs: dynamic catalogs, all filters, guide sections, attachments, diagrams and safe destinations passed")

@@ -584,6 +584,30 @@ final class PortalClient {
         return response.body
     }
 
+    func fetchAffairsCatalog(_ query: AffairsCatalogQuery) async throws -> AffairsCatalog {
+        let html = try await affairsPage(query.url)
+        return try NativeAffairsCatalogParser.catalog(html)
+    }
+
+    func fetchAffairsGuide(_ service: AffairsService) async throws -> AffairsServiceGuide {
+        guard service.guideURL.path == "/db_portal/guide" else { throw NetworkError(message: "办事指南地址无效") }
+        return try NativeAffairsCatalogParser.guide(await affairsPage(service.guideURL))
+    }
+
+    private func affairsPage(_ url: URL) async throws -> String {
+        guard NativeAffairsCatalogParser.schoolURL(url.absoluteString) == url else {
+            throw NetworkError(message: "办事服务地址无效")
+        }
+        await prepareAccess()
+        let response = try await http.get(URL(string: maybeWrap(url.absoluteString))!)
+        let landed = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+        guard response.status == 200, landed.host == url.host, landed.path == url.path,
+              response.body.count <= 5_000_000 else {
+            throw NetworkError(message: "办事服务暂时无法读取，请检查网络或学校认证状态")
+        }
+        return response.text
+    }
+
     /// 办事动态（在办事项），失败时由调用方降级为空。
     func fetchTodos(page: Int = 1, pageSize: Int = 10) async throws -> [TodoItem] {
         guard page > 0, (1...50).contains(pageSize) else { throw NetworkError(message: "办事列表分页参数无效") }

@@ -179,9 +179,7 @@ struct NativeAffairsView: View {
     var body: some View {
         List {
             Section {
-                Button("发起办事申请", systemImage: "plus.circle") {
-                    web = NativeServiceWebLink(url: NativeCampusService.affairs.entryURL(apps: environment.repository.apps))
-                }
+                NavigationLink { NativeAffairsDirectoryView() } label: { Label("办事服务中心", systemImage: "square.grid.2x2") }
                 Text("申请表单和审批操作在学校页面完成。下方显示门户已返回的在办事项。")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("搜索事项或处理节点", text: $query)
