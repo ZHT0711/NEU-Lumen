@@ -289,6 +289,15 @@ struct UIValidationRoot: View {
             if ready {
                 LiveActivityCoordinator()
                 BrowserDownloadCoordinator()
+                Color.clear.task {
+                    guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) else { return }
+                    do {
+                        try await Task.sleep(for: .milliseconds(750))
+                        let marker = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            .appendingPathComponent("screen-ready.txt")
+                        try ("PASS: screenshot page mounted " + screen).write(to: marker, atomically: true, encoding: .utf8)
+                    } catch { }
+                }
             }
         }
         .overlay(alignment: .bottomTrailing) {

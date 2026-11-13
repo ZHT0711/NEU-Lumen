@@ -68,25 +68,33 @@ wait_ui_marker() {
 python3 "$ROOT/scripts/ui_fixture_server.py" "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
+launch_screenshot_page() {
+  local SCREEN="$1"
+  shift
+  rm -f "$CONTAINER/Documents/screen-ready.txt"
+  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN" "$@"
+  wait_ui_marker screen-ready.txt 60
+  grep -Fxq "PASS: screenshot page mounted $SCREEN" "$OUTPUT/screen-ready.txt"
+}
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
 for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-vpn native-affairs native-mail; do
-  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
-  sleep 3
+  launch_screenshot_page "$SCREEN"
+  sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done
 
 # Actual production shared lower-region views, not a drawn Dynamic Island mock.
 # All widths are 330/350/370pt with 100pt lower regions; captions explicitly exclude system/device claims.
 for KIND in nextCourse cardBalance netBalance electricBalance assignments planner dayOverview academicOverview custom ax-stale; do
-  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=live-expanded-$KIND"
-  sleep 3
+  launch_screenshot_page "live-expanded-$KIND"
+  sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/live-expanded-$KIND-light.png"
 done
 
 # Actual native academic pages with explicit DEBUG-only account-scoped synthetic seed.
 for SCREEN in academic-center academic-calendar academic-plan; do
-  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
+  launch_screenshot_page "$SCREEN"
   wait_ui_marker "$SCREEN-screenshot.txt" 60
   sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
@@ -112,12 +120,12 @@ sleep 1
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/downloads-light.png"
 
 xcrun simctl ui "$SIM_ID" appearance dark
-xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen --screen=home
-sleep 3
+launch_screenshot_page home
+sleep 1
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/home-dark.png"
 for DARK_SCREEN in profile live-activity; do
-  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$DARK_SCREEN"
-  sleep 3
+  launch_screenshot_page "$DARK_SCREEN"
+  sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$DARK_SCREEN-dark.png"
 done
 xcrun simctl ui "$SIM_ID" appearance light
@@ -210,6 +218,9 @@ sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
 swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
+for SCREEN in services grades mooc chaoxing native-payment native-vpn native-affairs native-mail; do
+  "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
+done
 for KIND in nextCourse custom electricBalance; do
   rm -f "$CONTAINER/Documents/system-island-ready.txt" "$CONTAINER/Documents/system-island-sent.txt"
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--system-island=$KIND"
