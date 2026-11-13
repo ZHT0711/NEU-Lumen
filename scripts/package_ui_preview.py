@@ -23,7 +23,7 @@ LIVE_KINDS = ('nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'ass
 LIVE_SCREENSHOTS = tuple(f'live-expanded-{kind}-light.png' for kind in LIVE_KINDS) + ('live-expanded-ax-stale-light.png',)
 SYSTEM_ISLAND_SCREENSHOTS = tuple(f'system-island-{kind}.png' for kind in ('nextCourse', 'custom', 'electricBalance'))
 NATIVE_SCREENS = ('academic-center', 'academic-calendar', 'academic-plan')
-SERVICE_SCREENS = ('native-payment', 'native-vpn', 'native-affairs', 'native-mail')
+SERVICE_SCREENS = ('native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art')
 ACADEMIC_WEB_CHECK = 'academic-web-sync-checks.txt'
 ACADEMIC_WEB_CASES = ('same-account', 'wrong-account', 'spoofed-page-world',
                       'identity-changes-between-checks', 'account-epoch-rejects-old-snapshot')
@@ -32,7 +32,7 @@ ACADEMIC_IDENTITY_EVIDENCE = [
     for name, requests, accepted in zip(ACADEMIC_WEB_CASES, (2, 1, 1, 2), (True, False, False, False))
 ]
 LAYOUT_NEGATIVE_CONTROLS = ('negative-overlap-rejected', 'negative-oversize-rejected')
-SCREENSHOTS = SCREENSHOTS + SYSTEM_ISLAND_SCREENSHOTS + LIVE_SCREENSHOTS + tuple(f'{screen}-light.png' for screen in (*NATIVE_SCREENS, *SERVICE_SCREENS))
+SCREENSHOTS = SCREENSHOTS + SYSTEM_ISLAND_SCREENSHOTS + LIVE_SCREENSHOTS + tuple(f'{screen}-light.png' for screen in (*NATIVE_SCREENS, *SERVICE_SCREENS)) + ('services-art-dark.png',)
 LAYOUT_CHECK = 'live-activity-layout-checks.txt'
 LAYOUT_COVERAGE = {
     'shared_view_cases': 174, 'metric_layout_cases': 12, 'negative_controls': 2,
@@ -168,7 +168,7 @@ def package(directory, environment=None):
         },
         'native_preview': {
             'academic': 'actual AcademicCenterView / AcademicCalendarView / AcademicPlanView; explicit DEBUG seedAcademicPreview; synthetic only',
-            'services': 'actual NativeServiceHost / payment / VPN / affairs / mail views; disposable Debug synthetic fixtures only; no real account',
+            'services': 'actual native payment / VPN / affairs / mail / news / daily agenda / downloads and eight vector card illustrations; disposable Debug synthetic fixtures only; no real account',
         },
         'screenshots': images,
     }

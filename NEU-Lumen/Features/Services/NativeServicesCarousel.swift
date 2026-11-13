@@ -6,6 +6,7 @@ struct NativeServicesCarousel: View {
     let open: (NativeCampusService) -> Void
     @State private var expanded = false
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         DisclosureGroup(isExpanded: Binding(get: { expanded || searching }, set: { expanded = $0 })) {
@@ -18,9 +19,17 @@ struct NativeServicesCarousel: View {
                             Text(service.subtitle).font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 82, alignment: .leading)
                         .padding(12)
+                        .background(alignment: .trailing) {
+                            NativeServiceCardArt(service: service)
+                                .stroke(AppTheme.accent.opacity(contrast == .increased ? 0.07 : 0.16),
+                                        style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
+                                .frame(width: 116, height: 100).padding(.trailing, 2)
+                                .accessibilityHidden(true).allowsHitTesting(false)
+                        }
                         .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                         .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                         .accessibilityIdentifier("services.native." + service.rawValue)
@@ -116,16 +125,19 @@ struct NativeServiceHost: View {
                 NativeVPNView(active: selected == .vpn).tag(NativeCampusService.vpn)
                 NativeAffairsView(active: selected == .affairs).tag(NativeCampusService.affairs)
                 NativeMailView(active: selected == .mail).tag(NativeCampusService.mail)
+                NativeNewsView(active: selected == .news).tag(NativeCampusService.news)
+                NativeAgendaView(active: selected == .agenda).tag(NativeCampusService.agenda)
+                BrowserDownloadsView(store: .shared, embedded: true).tag(NativeCampusService.downloads)
             }.tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(selected.title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            if selected.hasSchoolPage { ToolbarItem(placement: .topBarTrailing) {
                 Button("学校原站", systemImage: "globe") {
                     originalWeb = NativeServiceWebLink(url: selected.entryURL(apps: environment.repository.apps))
                 }
-            }
+            } }
         }
         .sheet(item: $originalWeb) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
     }

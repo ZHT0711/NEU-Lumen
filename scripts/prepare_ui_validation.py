@@ -128,6 +128,10 @@ extension PortalRepository {
                     name: day == 2 ? "程序设计基础" : "高等数学", room: "浑南 A101")))
             }
         }
+        if !items.contains(where: { Calendar.current.isDateInToday($0.date) }) {
+            items.append(CourseOccurrence(date: Date(), slot: CourseSlot(weekday: PlannerEvent.mondayBasedWeekday(Date()),
+                startMinutes: 600, endMinutes: 695, name: "合成课程：程序设计基础", room: "合成教室 A101")))
+        }
         weekCache[start] = items
         weekCache[Calendar.current.date(byAdding: .day, value: 7, to: start)!] = []
         weekCache[Calendar.current.date(byAdding: .day, value: -7, to: start)!] = []
@@ -253,6 +257,11 @@ struct UIValidationRoot: View {
                 switch screen {
                 case "schedule": ScheduleView()
                 case "services": ServicesView()
+                case "services-art": NavigationStack {
+                    ScrollView { NativeServicesCarousel(services: NativeCampusService.allCases, searching: true) { _ in }.padding() }
+                        .background(Color(.systemGroupedBackground)).navigationTitle("原生服务")
+                        .nativeUIFixtureCaption("本次构建原生卡面 · 八项校园主题简笔画")
+                }
                 case "profile": ProfileView()
                 case "favorites": FavoritesEditor()
                 case "holidays": ScheduleSettingsSheet()
@@ -267,6 +276,9 @@ struct UIValidationRoot: View {
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
                 case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
+                case "native-news": NavigationStack { NativeServiceHost(initial: .news).nativeUIFixtureCaption("模拟器合成资讯 · 非学校实际新闻") }
+                case "native-agenda": NavigationStack { NativeServiceHost(initial: .agenda).nativeUIFixtureCaption("模拟器合成日程 · 非真实课程安排") }
+                case "native-downloads": NavigationStack { NativeServiceHost(initial: .downloads).nativeUIFixtureCaption("模拟器合成下载 · 非真实账号文件") }
                 case let token where token.hasPrefix("live-expanded-"):
                     LiveActivityExpandedPreview(token: String(token.dropFirst("live-expanded-".count)))
                 case "downloads":
@@ -302,7 +314,7 @@ struct UIValidationRoot: View {
         }
         .overlay(alignment: .bottomTrailing) {
             if ProcessInfo.processInfo.arguments.contains("--browser-checks") ||
-                ProcessInfo.processInfo.arguments.contains("--download-checks") || screen == "downloads" {
+                ProcessInfo.processInfo.arguments.contains("--download-checks") || screen == "downloads" || screen == "native-downloads" {
                 PortalWebView(browser: testBrowser).frame(width: 1, height: 1).opacity(0.01)
             }
         }
@@ -398,7 +410,7 @@ struct UIValidationRoot: View {
                 environment.dynamicIslandStore.customDeadline = Date().addingTimeInterval(3600)
             }
             if screen == "home-nanhu" { environment.repository.setCampusOverride(.nanhu) }
-            if screen == "downloads" {
+            if screen == "downloads" || screen == "native-downloads" {
                 // Only synthetic localhost responses enter this disposable simulator container.
                 let user = DemoData.user
                 BrowserDownloadStore.shared.activate(account: user.sid.isEmpty ? user.uid : user.sid)
@@ -950,6 +962,15 @@ program_view = destination / 'NEU-Lumen/Features/Academic/PersonalAcademicProgra
 program_source = program_view.read_text(encoding='utf-8').replace('private struct PersonalAcademicProgramDetail:', 'struct PersonalAcademicProgramDetail:')
 program_view.write_text(program_source, encoding='utf-8')
 
+service_fixture('NEU-Lumen/Features/Services/NativeNewsView.swift',
+                'func load(session: SessionStore, reset: Bool) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-news") {
+            channels = [NewsChannel(id: "synthetic", name: "合成校园资讯")]; channelID = "synthetic"
+            items = [NewsItem(id: "SYNTH-N-1", title: "合成资讯：校园科技文化节活动预告", date: "2026-11-14", category: "合成校园资讯", url: "http://127.0.0.1:8787/article.html", picUrl: ""),
+                     NewsItem(id: "SYNTH-N-2", title: "合成资讯：图书馆阅读活动与开放安排", date: "2026-11-13", category: "合成校园资讯", url: "http://127.0.0.1:8787/article.html", picUrl: "")]
+            busy = false; hasMore = false; return
+        }
+''')
 service_fixture('NEU-Lumen/Core/Services/NativeMailStore.swift',
                 'func connect(session: SessionStore, apps: [PortalApp], server: URL? = nil) async {', r'''
         if ProcessInfo.processInfo.arguments.contains("--screen=native-mail") { seedServiceScreenshot(); return }

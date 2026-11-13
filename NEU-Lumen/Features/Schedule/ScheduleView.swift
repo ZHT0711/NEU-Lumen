@@ -426,6 +426,11 @@ struct AddEventSheet: View {
     @State private var room = ""
     @State private var note = ""
 
+    init(date: Date = Date(), onAdd: @escaping (PlannerEvent) -> Void) {
+        self.onAdd = onAdd
+        _date = State(initialValue: date)
+    }
+
     var body: some View {
         NavigationStack {
             Form {

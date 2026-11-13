@@ -58,6 +58,11 @@ struct PortalUser: Equatable, Codable {
 }
 
 /// 校园资讯。
+struct NewsChannel: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
 struct NewsItem: Identifiable, Hashable {
     let id: String
     let title: String

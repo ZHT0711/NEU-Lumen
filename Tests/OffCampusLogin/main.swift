@@ -189,6 +189,27 @@ MockPortalProtocol.handle = { request in
 let shortList = try await client.fetchApps()
 precondition(shortList.count == 1 && shortList[0].appId == "138")
 precondition(ServiceCatalog.merging([DemoData.apps, shortList]).contains { $0.appId == "2" })
+// Native news must keep channel, page and Chinese search terms in the actual routed GET.
+var newsRequests = 0
+MockPortalProtocol.handle = { request in
+    let destination = WebVPN.unwrap(request.url!) ?? request.url!
+    precondition(request.httpMethod == "GET")
+    if destination.path.hasSuffix("/news/frontend/default/tabs") {
+        return (200, [:], #"{"e":0,"d":{"list":[{"id":"campus","name":"东大要闻"},{"id":"culture","name":"校园文化"},{"id":"culture","name":"重复频道"},{"id":"","name":"无效频道"}]}}"#)
+    }
+    precondition(destination.path.hasSuffix("/news/frontend/default/news-list"))
+    let fields = URLComponents(url: destination, resolvingAgainstBaseURL: false)!.queryItems!
+    func value(_ key: String) -> String? { fields.first { $0.name == key }?.value }
+    precondition(value("cid") == "culture" && value("page") == "2")
+    precondition(value("pageSize") == "30" && value("keyword") == "校园 科技&人文")
+    newsRequests += 1
+    return (200, [:], #"{"e":0,"d":{"list":[{"id":"article-2","title":"合成资讯","publish_time":"2026-11-14 09:00:00","url":"https://neunews.neu.edu.cn/info/1/2.htm"}]}}"#)
+}
+let newsChannels = try await client.fetchNewsChannels()
+precondition(newsChannels.count == 2 && newsChannels[1].name == "校园文化")
+let newsPage = try await client.fetchNews(pageSize: 30, channel: newsChannels[1], page: 2, keyword: "校园 科技&人文")
+precondition(newsRequests == 1 && newsPage.count == 1 && newsPage[0].category == "校园文化" && newsPage[0].date == "2026-11-14")
+print("Native news: unique channels, routed pagination and encoded Chinese keyword passed")
 // 校外资料被 WAF 拦截但没有 CASTGC 时，重试不能销毁唯一可用的网关票据。
 MockPortalProtocol.handle = { _ in (403, [:], "仅用于我校师生在校外登录") }
 do { _ = try await client.fetchUserInfo(); preconditionFailure("拦截页不能冒充个人资料") }

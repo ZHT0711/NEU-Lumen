@@ -524,25 +524,35 @@ final class PortalClient {
     }
 
     /// 校园资讯（东大要闻）。
-    func fetchNews(pageSize: Int = 12) async throws -> [NewsItem] {
+    func fetchNewsChannels() async throws -> [NewsChannel] {
         let tabs = try await api("news/frontend/default/tabs", query: [
             URLQueryItem(name: "system", value: ""),
             URLQueryItem(name: "need_num", value: "1"),
         ])
-        var cid = "1244bca0563f72ea134e4d78973c6911"
-        var cname = "东大要闻"
         let tabList = try PortalEnvelope.list(tabs).compactMap { $0 as? [String: Any] }
-        if let first = tabList.first(where: { $0.str("name") == "东大要闻" }) ?? tabList.first {
-            cid = first.str("id")
-            cname = first.str("name")
+        var seen = Set<String>()
+        return tabList.compactMap {
+            let id = $0.str("id"), name = $0.str("name")
+            guard !id.isEmpty, !name.isEmpty, seen.insert(id).inserted else { return nil }
+            return NewsChannel(id: id, name: name)
+        }
+    }
+
+    func fetchNews(pageSize: Int = 12, channel: NewsChannel? = nil, page: Int = 1, keyword: String = "") async throws -> [NewsItem] {
+        let selected: NewsChannel
+        if let channel { selected = channel }
+        else {
+            let channels = try await fetchNewsChannels()
+            selected = channels.first(where: { $0.name == "东大要闻" }) ?? channels.first
+                ?? NewsChannel(id: "1244bca0563f72ea134e4d78973c6911", name: "东大要闻")
         }
         let d = try await api("news/frontend/default/news-list", query: [
             URLQueryItem(name: "system", value: ""),
-            URLQueryItem(name: "cid", value: cid),
+            URLQueryItem(name: "cid", value: selected.id),
             URLQueryItem(name: "need_all", value: "0"),
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "pageSize", value: "\(pageSize)"),
-            URLQueryItem(name: "keyword", value: ""),
+            URLQueryItem(name: "page", value: "\(max(1, page))"),
+            URLQueryItem(name: "pageSize", value: "\(min(100, max(1, pageSize)))"),
+            URLQueryItem(name: "keyword", value: keyword),
             URLQueryItem(name: "year", value: ""),
             URLQueryItem(name: "month", value: ""),
             URLQueryItem(name: "publisher", value: ""),
@@ -556,7 +566,7 @@ final class PortalClient {
                 id: id,
                 title: title,
                 date: n.str("publish_time").split(separator: " ").first.map(String.init) ?? "",
-                category: cname,
+                category: selected.name,
                 url: PortalLink.from([n])?.absoluteString ?? "",
                 picUrl: PortalLink.resolve(n.str("picurl"))?.absoluteString ?? ""
             )

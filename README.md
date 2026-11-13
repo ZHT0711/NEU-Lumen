@@ -54,9 +54,19 @@
 
 ## 原生服务与实时活动
 
-服务大厅 → **原生服务**：横向滑动切换教务、缴费、WebVPN、办事和邮箱，进入后也可左右切换页面。iOS 26 导航使用 Liquid Glass，兼顾减少透明度、增强对比度和动态字体。学校原版应用入口继续打开原站。
+服务大厅 → **原生服务**：默认折叠，展开八张独立校园主题卡片，进入后可左右切换。新增资讯频道搜索、每日校园日程和附件下载中心。iOS 26 导航使用 Liquid Glass，兼顾减少透明度、增强对比度和动态字体。
 
-培养计划支持分组、搜索、课程详情和按账号保存的分页同步；缴费显示账户与流水，办事显示在办进度，邮箱提供文件夹、搜索和原生阅读。支付确认、业务表单及复杂邮件内容使用学校页面。能力边界见 [原生服务说明](docs/native-services.md) 与 [教务说明](docs/academic-queries.md)。
+个人培养方案详情支持多级思维导图与大纲、课组要求和课程查询；缴费支持项目与订单入口、账户与流水，办事支持目录、指南、进度和表单核对，邮箱支持组合搜索、批量标记与移动。能力边界见 [原生服务说明](docs/native-services.md) 与 [教务说明](docs/academic-queries.md)。
+
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-light.png" width="245" alt="八项原生服务校园简笔画卡面" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-dark.png" width="245" alt="深色校园简笔画卡面" />
+</p>
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-news-light.png" width="245" alt="校园资讯（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-agenda-light.png" width="245" alt="校园日程（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-downloads-light.png" width="245" alt="下载中心（合成演示）" />
+</p>
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-center-light.png" width="245" alt="原生教务查询" />

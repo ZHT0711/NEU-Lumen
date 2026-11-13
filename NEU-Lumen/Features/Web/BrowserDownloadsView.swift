@@ -33,18 +33,35 @@ struct BrowserDownloadCoordinator: View {
 @MainActor
 struct BrowserDownloadsView: View {
     let store: BrowserDownloadStore
+    var embedded = false
     @Environment(\.dismiss) private var dismiss
     @State private var preview: URL?
     @State private var shared: BrowserSharedFile?
     @State private var deleting: BrowserDownloadRecord?
     @State private var showDelete = false
     @State private var missingFile = false
+    @State private var query = ""
 
-    init(store: BrowserDownloadStore) { self.store = store }
+    init(store: BrowserDownloadStore, embedded: Bool = false) { self.store = store; self.embedded = embedded }
 
     var body: some View {
-        NavigationStack {
+        Group {
+            if embedded { content }
+            else { NavigationStack { content } }
+        }
+    }
+
+    private var content: some View {
             List {
+                if !store.records.isEmpty {
+                    Section {
+                        TextField("筛选下载文件", text: $query)
+                            .autocorrectionDisabled()
+                        if !query.isEmpty, !store.records.contains(where: matches) {
+                            Text("没有匹配的文件").foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 if let error = store.storageError {
                     Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
                 }
@@ -62,9 +79,11 @@ struct BrowserDownloadsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("下载管理")
+            .navigationTitle(embedded ? "下载中心" : "下载管理")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                if !embedded { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            }
             .quickLookPreview($preview)
             .sheet(item: $shared) { file in
                 BrowserDownloadShareSheet(url: file.url)
@@ -86,14 +105,14 @@ struct BrowserDownloadsView: View {
                 shared = nil
                 deleting = nil
                 showDelete = false
-                dismiss()
+                query = ""
+                if !embedded { dismiss() }
             }
-        }
     }
 
     @ViewBuilder
     private func downloadSection(_ title: String, states: [BrowserDownloadRecord.State]) -> some View {
-        let items = store.records.filter { states.contains($0.state) }
+        let items = store.records.filter { states.contains($0.state) && matches($0) }
         if !items.isEmpty {
             Section(title) { ForEach(items) { row($0) } }
         }
@@ -125,7 +144,7 @@ struct BrowserDownloadsView: View {
                         deleting = record
                         showDelete = true
                     }
-                } label: { Image(systemName: "ellipsis.circle").frame(width: 36, height: 36) }
+                } label: { Image(systemName: "ellipsis.circle").frame(width: 44, height: 44) }
                     .accessibilityLabel("管理下载：\(record.filename)")
             }
             if record.state == .downloading {
@@ -166,6 +185,11 @@ struct BrowserDownloadsView: View {
         case .cancelled: return "已取消 · \(bytes)"
         case .interrupted: return "已中断 · 请回原网页重新下载"
         }
+    }
+
+    private func matches(_ record: BrowserDownloadRecord) -> Bool {
+        let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty || record.filename.localizedStandardContains(value)
     }
 
     private func open(_ record: BrowserDownloadRecord, sharing: Bool) {

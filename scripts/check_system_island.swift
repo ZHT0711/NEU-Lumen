@@ -22,7 +22,8 @@ let normalized = text.replacingOccurrences(of: " ", with: "")
 if kind.hasPrefix("screen:") {
     let screen = String(kind.dropFirst("screen:".count))
     let expected: [String: [String]] = [
-        "services": ["原生服务", "学业查询"],
+        "services": ["原生服务", "服务大厅"],
+        "services-art": ["原生服务", "校园资讯", "下载中心"],
         "grades": ["学习", "成绩"],
         "mooc": ["学习", "作业"],
         "chaoxing": ["学习", "作业"],
@@ -30,6 +31,9 @@ if kind.hasPrefix("screen:") {
         "native-vpn": ["WebVPN", "访问状态"],
         "native-affairs": ["办事大厅", "我的在办事项"],
         "native-mail": ["学校邮箱", "收件箱"],
+        "native-news": ["校园资讯", "资讯频道"],
+        "native-agenda": ["校园日程", "查看日期"],
+        "native-downloads": ["下载中心", "已完成"],
     ]
     guard let terms = expected[screen], terms.allSatisfy({ normalized.contains($0) }) else {
         fatalError("Screenshot content missing for " + screen + "; OCR: " + text)
