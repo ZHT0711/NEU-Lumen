@@ -1,5 +1,13 @@
 import Foundation
 
+struct CampusNetworkPath: Equatable, Sendable {
+    let connected: Bool
+    let interfaces: [String]
+    let gateways: [String]
+    let expensive: Bool
+    let constrained: Bool
+}
+
 /// A business request is owned by an identity epoch, not by the latest visible user.
 /// Session recovery may renew transport cookies without changing this identity epoch.
 struct RepositoryRequestContext: Equatable {

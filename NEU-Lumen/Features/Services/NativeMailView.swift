@@ -16,6 +16,7 @@ struct NativeMailView: View {
     @State private var selection = Set<String>()
     @State private var moving = false
     @State private var downloads = false
+    @State private var networkRecoveryPending = false
     var body: some View {
         List {
             Section {
@@ -69,7 +70,7 @@ struct NativeMailView: View {
             Section {
                 if store.busy || store.loadingWeb { ProgressView("正在同步学校邮箱…") }
                 if store.loaded && store.messages.isEmpty {
-                    ContentUnavailableView(query.isEmpty ? "当前文件夹没有邮件" : "没有匹配的邮件", systemImage: "tray")
+                    ContentUnavailableView(store.hasSearch ? "没有匹配的邮件" : "当前文件夹没有邮件", systemImage: "tray")
                 }
                 ForEach(store.messages) { message in
                     HStack {
@@ -77,6 +78,7 @@ struct NativeMailView: View {
                             Button {
                                 if selection.contains(message.id) { selection.remove(message.id) } else { selection.insert(message.id) }
                             } label: { Image(systemName: selection.contains(message.id) ? "checkmark.circle.fill" : "circle") }
+                                .frame(minWidth: 44, minHeight: 44)
                                 .accessibilityLabel("选择邮件「\(message.subject)」")
                         }
                         Button { selectedMessage = message } label: { mailRow(message) }
@@ -115,9 +117,11 @@ struct NativeMailView: View {
         }
         .privacySensitive()
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(selecting ? "完成选择" : "批量操作") { selecting.toggle(); selection = [] }
-                    .disabled(store.messages.isEmpty || store.busy)
+            if active {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selecting ? "完成选择" : "批量操作") { selecting.toggle(); selection = [] }
+                        .disabled(store.messages.isEmpty || store.busy)
+                }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -155,6 +159,11 @@ struct NativeMailView: View {
             selectedMessage = nil; web = nil; compose = false; selection = []; selecting = false; downloads = false
         }
         .onChange(of: scenePhase) { _, value in if value != .active { Task { await store.persist() } } }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            networkRecoveryPending = true
+            recoverMailAfterNetworkChange()
+        }
+        .onChange(of: store.busy) { _, busy in if !busy { recoverMailAfterNetworkChange() } }
         .onDisappear { Task { await store.persist() } }
         .sheet(item: $web, onDismiss: { Task { await store.refresh() } }) { reason in
             NativeMailWebSheet(store: store, reason: reason)
@@ -167,6 +176,11 @@ struct NativeMailView: View {
     private func applySearch() {
         search.subject = query; selection = []
         Task { await store.refresh(advanced: search) }
+    }
+    private func recoverMailAfterNetworkChange() {
+        guard networkRecoveryPending, active, web == nil, selectedMessage == nil, !store.busy else { return }
+        networkRecoveryPending = false
+        Task { await store.recoverAfterNetworkChange() }
     }
     private func updateSelection(_ mutation: NativeMailMutation) {
         let ids = selection

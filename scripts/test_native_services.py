@@ -13,7 +13,7 @@ class NativeServicesTests(unittest.TestCase):
     def test_glass_is_on_navigation_with_accessible_fallback(self):
         source=(ROOT/'NEU-Lumen/Features/Services/NativeServicesCarousel.swift').read_text(encoding='utf-8')
         for key in ['GlassEffectContainer','glassEffect(', 'accessibilityReduceTransparency','accessibilityReduceMotion',
-                    'colorSchemeContrast','minHeight: 44','tabViewStyle(.page','scrollTargetBehavior(.viewAligned)']:
+                    'colorSchemeContrast','minHeight: 44','tabViewStyle(.page','DisclosureGroup(isExpanded:', '@State private var expanded = false']:
             self.assertIn(key,source)
         self.assertNotIn('Timer.publish',source)
 

@@ -344,6 +344,56 @@ final class PortalRepository {
 
     // MARK: - 首页
 
+    /// Retry resources that failed or were still loading on the previous path.
+    /// Successful account-owned values remain visible while replacement reads run.
+    func recoverAfterNetworkChange() async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, session.networkAvailable, !Task.isCancelled else { return }
+        func interrupted(_ state: LoadState) -> Bool {
+            if case .failed = state { return true }
+            return state == .loading
+        }
+        var work: [Task<Void, Never>] = []
+        if interrupted(homeState) { work.append(Task { await self.refreshHome(force: true) }) }
+        if !appsLoaded || appsLoading {
+            appsRequestID = UUID(); appsTask?.cancel(); appsTask = nil; appsLoading = false
+            work.append(Task { _ = await self.loadAppsIfNeeded(force: true) })
+        }
+        if interrupted(cardState) || cardWarning != nil { work.append(Task { await self.loadCardBalance(force: true) }) }
+        if interrupted(netState) || netWarning != nil { work.append(Task { await self.loadNetInfo(force: true) }) }
+        if interrupted(electricState) || electricWarning != nil { work.append(Task { await self.loadElectric(force: true) }) }
+        if interrupted(billsState) {
+            let year = billsYear, month = billsMonth
+            work.append(Task { await self.loadBills(year: year, month: month, force: true) })
+        }
+        walletAccessID = UUID(); walletAccessTask?.cancel(); walletAccessTask = nil
+        for (week, state) in weekStates where interrupted(state) {
+            work.append(Task { await self.loadWeek(containing: week, force: true) })
+        }
+        if interrupted(gradesState) || gradesWarning != nil {
+            gradeRequestID += 1; gradesState = gradesCache == nil ? .idle : .loaded
+            work.append(Task { await self.loadGrades(force: true) })
+        }
+        for (key, state) in academicStates where interrupted(state) || academicWarnings[key] != nil {
+            work.append(Task { await self.loadAcademicQuery(key, force: true) })
+        }
+        if interrupted(cgState) {
+            cgRequestID = UUID(); cgBrowser?.close(); cgBrowser = nil; cgState = .idle
+            work.append(Task { await self.loadCGAssignments(force: true) })
+        }
+        for (platform, state) in assignmentStates where interrupted(state) {
+            assignmentRequests[platform] = UUID(); assignmentBrowsers[platform]?.close(); assignmentBrowsers[platform] = nil
+            assignmentStates[platform] = .idle
+            work.append(Task { await self.loadAssignments(platform, force: true) })
+        }
+        let tasks = work
+        await withTaskCancellationHandler {
+            for task in tasks { await task.value }
+        } onCancel: { for task in tasks { task.cancel() } }
+        guard isCurrent(context), !Task.isCancelled else { return }
+        session.persistWebSession()
+    }
+
     func refreshHome(force: Bool = false) async {
         await ensureLoadedForCurrentUser()
         guard let context = requestContext, !Task.isCancelled else { return }

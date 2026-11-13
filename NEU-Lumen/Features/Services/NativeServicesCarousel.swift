@@ -2,45 +2,38 @@ import SwiftUI
 
 struct NativeServicesCarousel: View {
     let services: [NativeCampusService]
+    var searching = false
     let open: (NativeCampusService) -> Void
-    @State private var selected: NativeCampusService? = .academic
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var expanded = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("原生服务").font(.headline)
-                Spacer()
-                Text("左右滑动切换").font(.caption).foregroundStyle(.secondary)
-            }
-            NativeServiceSwitcher(services: services, selected: selected ?? services.first ?? .academic) { value in
-                withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { selected = value }
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(services) { service in
-                        VStack(alignment: .leading, spacing: 12) {
-                            Image(systemName: service.symbol).font(.title2).foregroundStyle(AppTheme.accent)
-                                .accessibilityHidden(true)
-                            Text(service.title).font(.title3.bold())
-                            Text(service.subtitle).font(.subheadline).foregroundStyle(.secondary)
+        DisclosureGroup(isExpanded: Binding(get: { expanded || searching }, set: { expanded = $0 })) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: typeSize.isAccessibilitySize ? 260 : 148), spacing: 10)], spacing: 10) {
+                ForEach(services) { service in
+                    Button { open(service) } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(service.title, systemImage: service.symbol)
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                            Text(service.subtitle).font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Button { open(service) } label: {
-                                HStack { Text("进入" + service.title); Spacer(); Image(systemName: "arrow.right") }
-                                    .font(.subheadline.weight(.semibold)).padding(.vertical, 8).frame(minHeight: 44)
-                            }.buttonStyle(.plain).foregroundStyle(AppTheme.accent)
-                                .accessibilityIdentifier("services.native." + service.rawValue)
                         }
-                        .padding(20).frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
-                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 24))
-                        .containerRelativeFrame(.horizontal).id(service)
-                    }
-                }.scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $selected)
-            .contentMargins(.horizontal, 0)
+                        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+                        .padding(12)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityIdentifier("services.native." + service.rawValue)
+                }
+            }.padding(.top, 12)
+        } label: {
+            Label("原生服务", systemImage: "square.stack.3d.up")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                .frame(minHeight: 44)
         }
+        .padding(.horizontal, 14).padding(.vertical, 4)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityIdentifier("services.native.disclosure")
     }
 }
 

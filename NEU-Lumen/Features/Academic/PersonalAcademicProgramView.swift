@@ -72,6 +72,9 @@ struct AcademicPlanView: View {
         }
         .navigationTitle("培养计划").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) { await store.load(session: environment.session) }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if store.error != nil || store.loading { Task { await store.load(session: environment.session) } }
+        }
         .refreshable { await store.load(session: environment.session) }
         .sheet(item: $web) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
     }
@@ -85,6 +88,9 @@ private struct PersonalAcademicProgramDetail: View {
     @State private var selected: AcademicProgramNode?
     @State private var query = ""
     @State private var zoom = 1.0
+    @State private var showOutline = false
+    @ScaledMetric(relativeTo: .body) private var nodeScale: CGFloat = 1
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var web: NativeServiceWebLink?
     var body: some View {
         VStack(spacing: 0) {
@@ -100,22 +106,29 @@ private struct PersonalAcademicProgramDetail: View {
                         if let credits = tree.program.minimumCredits { Text("最少要求 \(credits) 学分").font(.subheadline) }
                         Spacer()
                         Menu("展开与缩放", systemImage: "slider.horizontal.3") {
-                            Button("展开全部") { collapsed = [] }
-                            Button("收起到平台") { collapsed = Set(tree.nodes.filter { $0.parentID != nil }.map(\.id)) }
-                            Button("恢复大小") { zoom = 1 }
+                            Button(showOutline ? "查看思维导图" : "查看层级大纲") { showOutline.toggle() }
+                            if !showOutline {
+                                Button("展开全部") { collapsed = [] }
+                                Button("收起到平台") { collapsed = Set(tree.nodes.filter { $0.parentID != nil }.map(\.id)) }
+                                Button("恢复大小") { zoom = 1 }
+                            }
                         }
                     }
                     HStack {
                         Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                         TextField("搜索平台或课组", text: $query)
-                        Button("缩小", systemImage: "minus.magnifyingglass") { zoom = max(0.4, zoom - 0.15) }
-                        Text(zoom.formatted(.percent.precision(.fractionLength(0)))).font(.caption).monospacedDigit()
-                        Button("放大", systemImage: "plus.magnifyingglass") { zoom = min(1.8, zoom + 0.15) }
+                        if !showOutline {
+                            Button("缩小", systemImage: "minus.magnifyingglass") { zoom = max(0.4, zoom - 0.15) }
+                                .frame(minWidth: 44, minHeight: 44)
+                            Text(zoom.formatted(.percent.precision(.fractionLength(0)))).font(.caption).monospacedDigit()
+                            Button("放大", systemImage: "plus.magnifyingglass") { zoom = min(1.8, zoom + 0.15) }
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
                     }.labelStyle(.iconOnly)
                 }.padding(16)
                 Divider()
-                diagram(tree)
-                Text("拖动查看分支，点课组查看课程，点展开按钮折叠下级。")
+                if showOutline { outline(tree) } else { diagram(tree) }
+                Text(showOutline ? "展开层级，点课组查看课程。" : "拖动查看分支，点课组查看课程，点展开按钮折叠下级。")
                     .font(.caption).foregroundStyle(.secondary).padding(10)
             }
         }
@@ -123,19 +136,23 @@ private struct PersonalAcademicProgramDetail: View {
         .navigationTitle("培养方案详情").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) {
             selected = nil; collapsed = []; query = ""
+            showOutline = typeSize.isAccessibilitySize
             await store.load(session: environment.session, program: program)
             if let tree = store.tree { collapsed = Set(tree.nodes.filter(\.inherited).map(\.id)) }
         }
         .sheet(item: $selected) { node in
             if let tree = store.tree { AcademicProgramCourses(tree: tree, node: node) }
         }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if store.error != nil || store.loading { Task { await store.load(session: environment.session, program: program) } }
+        }
         .sheet(item: $web) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
     }
 
     private func diagram(_ tree: AcademicProgramTree) -> some View {
         let layout = AcademicProgramLayout(tree: tree, collapsed: collapsed, query: query)
-        let width = CGFloat(layout.columns * 284 + 24), height = CGFloat(layout.height + 24)
-        let positions = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.id, CGPoint(x: CGFloat($0.depth * 284 + 136), y: $0.y + 12)) })
+        let width = CGFloat(layout.columns * 284 + 24) * nodeScale, height = CGFloat(layout.height + 24) * nodeScale
+        let positions = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.id, CGPoint(x: CGFloat($0.depth * 284 + 136) * nodeScale, y: CGFloat($0.y + 12) * nodeScale)) })
         return ScrollView([.horizontal, .vertical]) {
             if layout.items.isEmpty { ContentUnavailableView.search(text: query).frame(width: 320, height: 200) }
             else {
@@ -143,18 +160,39 @@ private struct PersonalAcademicProgramDetail: View {
                     Canvas { context, _ in
                         for item in layout.items {
                             guard let parentID = item.node.parentID, let parent = positions[parentID], let child = positions[item.id] else { continue }
-                            let start = CGPoint(x: parent.x + 116, y: parent.y), end = CGPoint(x: child.x - 116, y: child.y)
+                            let start = CGPoint(x: parent.x + 116 * nodeScale, y: parent.y), end = CGPoint(x: child.x - 116 * nodeScale, y: child.y)
                             var path = Path(); path.move(to: start)
                             path.addCurve(to: end, control1: CGPoint(x: start.x + 28, y: start.y), control2: CGPoint(x: end.x - 28, y: end.y))
                             context.stroke(path, with: .color(.secondary.opacity(0.5)), lineWidth: 1.5)
                         }
                     }.frame(width: width, height: height).accessibilityHidden(true)
                     ForEach(layout.items) { item in
-                        nodeCard(item.node, tree: tree).frame(width: 232, height: 110).position(positions[item.id]!)
+                        nodeCard(item.node, tree: tree).frame(width: 232 * nodeScale, height: 110 * nodeScale).position(positions[item.id]!)
                     }
                 }.frame(width: width, height: height)
                     .scaleEffect(zoom, anchor: .topLeading)
                     .frame(width: width * zoom, height: height * zoom, alignment: .topLeading)
+            }
+        }
+    }
+
+    private func outline(_ tree: AcademicProgramTree) -> some View {
+        let layout = AcademicProgramLayout(tree: tree, collapsed: [], query: query)
+        let visible = Set(layout.items.map(\.id))
+        func branch(_ node: AcademicProgramNode) -> ProgramOutlineBranch {
+            let children = tree.children(of: node.id).filter { visible.contains($0.id) }.map(branch)
+            return ProgramOutlineBranch(node: node, children: children.isEmpty ? nil : children)
+        }
+        let roots = tree.nodes.filter { $0.parentID == nil && visible.contains($0.id) }.map(branch)
+        return List {
+            if roots.isEmpty { ContentUnavailableView.search(text: query) }
+            OutlineGroup(roots, children: \.children) { branch in
+                Button { selected = branch.node } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(branch.node.name).foregroundStyle(.primary)
+                        if let credits = branch.node.minimumCredits { Text("至少 \(credits) 学分").font(.caption).foregroundStyle(.secondary) }
+                    }.padding(.vertical, 4)
+                }
             }
         }
     }
@@ -180,6 +218,12 @@ private struct PersonalAcademicProgramDetail: View {
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(node.parentID == nil ? AppTheme.accent : Color.secondary.opacity(0.3), lineWidth: 1.5))
     }
+}
+
+private struct ProgramOutlineBranch: Identifiable {
+    let node: AcademicProgramNode
+    let children: [ProgramOutlineBranch]?
+    var id: String { node.id }
 }
 
 private struct AcademicProgramCourses: View {
@@ -217,6 +261,9 @@ private struct AcademicProgramCourses: View {
             .searchable(text: $query, prompt: "搜索课程名称或代码")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .task(id: environment.session.requestEpoch) { await load() }
+            .onChange(of: environment.session.networkRevision) { _, _ in
+                if error != nil || loading { Task { await load() } }
+            }
             .sheet(item: $selected) { AcademicCourseDetail(course: $0) }
         }
     }

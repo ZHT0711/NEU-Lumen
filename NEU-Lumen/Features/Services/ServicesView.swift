@@ -105,7 +105,7 @@ struct ServicesView: View {
                 keyword.isEmpty || ($0.title + $0.subtitle).localizedCaseInsensitiveContains(keyword)
             }
             if !services.isEmpty {
-                NativeServicesCarousel(services: services) { service in
+                NativeServicesCarousel(services: services, searching: !keyword.isEmpty) { service in
                     path.append(.nativeService(service))
                 }
             }

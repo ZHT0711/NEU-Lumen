@@ -771,11 +771,31 @@ func verifyNetworkRoaming() async throws {
     let inside = await session.silentRelogin()
     precondition(inside && session.phase == .loggedIn && !client.webvpnOn && client.hasWebVPNTicket && exchanges == 1)
     precondition(vault.load()!.restoredCookies().contains { $0.value == "campus-portal" })
+    let initialRevision = session.networkRevision
+    let roamingEpoch = session.requestEpoch
+    session.networkDidChange(isConnected: false)
+    precondition(!session.networkAvailable && session.phase == .loggedIn)
+    campus = false
+    session.networkDidChange(isConnected: true)
+    session.networkDidChange(isConnected: false)
+    session.networkDidChange(isConnected: true)
+    for _ in 0..<100 where session.recoveringNetwork { try await Task.sleep(for: .milliseconds(50)) }
+    precondition(session.networkRevision == initialRevision + 1 && client.webvpnOn && session.requestEpoch == roamingEpoch,
+                 "快速断开/重连只恢复最终链路，保留当前账号")
+    campus = true
+    session.networkDidChange(isConnected: true)
+    for _ in 0..<100 where session.recoveringNetwork { try await Task.sleep(for: .milliseconds(50)) }
+    precondition(session.networkRevision == initialRevision + 2 && !client.webvpnOn,
+                 "10 秒内再次换网也必须恢复，不能被节流丢掉")
     let secondUser = PortalUser(uid: "99", name: "另一账号", sid: "20260099", identity: "本科生", department: "学院", email: "", avatarUrl: "")
     let otherCAS = HTTPCookie(properties: [.name:"CASTGC", .value:"other-account", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
     let changed = await session.completeWebLogin(WebLoginSession(cookies: [otherCAS], user: secondUser, userAgent: "Other UA"))
     precondition(changed && !client.hasWebVPNTicket && vault.load()!.user == secondUser, "不同账号不能合并旧网络会话")
     session.logout()
+    let revisionAfterLogout = session.networkRevision
+    session.networkDidChange(isConnected: true)
+    try await Task.sleep(for: .milliseconds(800))
+    precondition(session.networkRevision == revisionAfterLogout && !session.recoveringNetwork)
     precondition(!client.hasLoginSession && vault.load() == nil)
     print("Network roaming: gateway denial, direct CAS renewal, repeated campus/off-campus transitions, vault retention and account isolation passed")
 }

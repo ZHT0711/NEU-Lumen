@@ -31,7 +31,12 @@ final class SessionStore {
     private var learningSessionAccount: String?
     private var lastSavedLearningSession: SavedWebSession?
     private var recoveryTask: Task<Bool, Never>?
-    private var lastNetworkRecovery = Date.distantPast
+    private(set) var networkRevision = 0
+    private(set) var networkAvailable = true
+    private(set) var recoveringNetwork = false
+    private var networkRecoveryTask: Task<Void, Never>?
+    private var networkRequest = UUID()
+    private var recoveryRequest = UUID()
     private var lastForegroundValidation = Date.distantPast
     private var lastIdentityAttempt = Date.distantPast
     private var pendingUsername: String?
@@ -88,6 +93,7 @@ final class SessionStore {
     @discardableResult
     func performLogin(username: String, password: String, keep: Bool) async -> Bool {
         sessionEpoch = UUID()
+        stopNetworkRecovery()
         let epoch = sessionEpoch
         refreshingProfile = false
         recoveryTask?.cancel()
@@ -147,6 +153,7 @@ final class SessionStore {
     /// 二次认证（图形码 + 短信）完成后的收尾：保存凭据并进入主界面。
     func completeSecondAuth(username: String, password: String, keep: Bool, user: PortalUser) {
         sessionEpoch = UUID()
+        stopNetworkRecovery()
         let finalUsername = username.isEmpty ? (pendingUsername ?? "") : username
         let finalPassword = password.isEmpty ? (pendingPassword ?? "") : password
         if keep, !finalUsername.isEmpty, !finalPassword.isEmpty {
@@ -185,6 +192,7 @@ final class SessionStore {
         let wasLoggedIn = phase == .loggedIn
         let previousAgent = client.browserUserAgent
         sessionEpoch = UUID()
+        stopNetworkRecovery()
         let epoch = sessionEpoch
         refreshingProfile = false
         recoveryTask?.cancel()
@@ -394,6 +402,8 @@ final class SessionStore {
     func silentRelogin() async -> Bool {
         if let task = recoveryTask { return await task.value }
         let epoch = sessionEpoch
+        let request = UUID()
+        recoveryRequest = request
         let task = Task { @MainActor [weak self] () -> Bool in
             guard let self, self.phase == .loggedIn else { return false }
             let retained = self.client.browserCookies()
@@ -428,7 +438,7 @@ final class SessionStore {
         }
         recoveryTask = task
         let result = await task.value
-        if epoch == sessionEpoch { recoveryTask = nil }
+        if epoch == sessionEpoch, recoveryRequest == request { recoveryTask = nil }
         return result
     }
 
@@ -445,11 +455,34 @@ final class SessionStore {
         Task { _ = await silentRelogin() }
     }
 
-    func networkDidChange() {
+    private func stopNetworkRecovery() {
+        networkRequest = UUID()
+        networkRecoveryTask?.cancel()
+        networkRecoveryTask = nil
+        recoveringNetwork = false
+    }
+
+    func networkDidChange(isConnected: Bool = true) {
         client.invalidateAccessRoute()
-        guard phase == .loggedIn, Date().timeIntervalSince(lastNetworkRecovery) > 10 else { return }
-        lastNetworkRecovery = Date()
-        Task { _ = await silentRelogin() }
+        networkAvailable = isConnected
+        stopNetworkRecovery()
+        recoveryRequest = UUID()
+        recoveryTask?.cancel()
+        recoveryTask = nil
+        let request = UUID()
+        networkRequest = request
+        guard phase == .loggedIn, isConnected else { return }
+        let epoch = sessionEpoch
+        recoveringNetwork = true
+        networkRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.networkRequest == request { self.recoveringNetwork = false; self.networkRecoveryTask = nil } }
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
+            guard self.sessionEpoch == epoch, self.phase == .loggedIn, self.networkRequest == request else { return }
+            _ = await self.silentRelogin()
+            guard self.sessionEpoch == epoch, self.phase == .loggedIn, self.networkRequest == request, !Task.isCancelled else { return }
+            self.networkRevision += 1
+        }
     }
 
     func logout() {
@@ -469,6 +502,7 @@ final class SessionStore {
         }
         lastSavedLearningSession = nil
         sessionEpoch = UUID()
+        stopNetworkRecovery()
         recoveryTask?.cancel()
         recoveryTask = nil
         lastIdentityAttempt = .distantPast

@@ -82,6 +82,9 @@ struct NativeAffairsDirectoryView: View {
             await store.load(query, session: environment.session)
         }
         .refreshable { await store.load(query, session: environment.session) }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if store.error != nil || store.loading { Task { await store.load(query, session: environment.session) } }
+        }
     }
 
     private func filter(_ title: String, selection: Binding<String>, values: [AffairsCatalogFilter]) -> some View {
@@ -137,6 +140,9 @@ private struct NativeAffairsGuideView: View {
         .navigationTitle("办事指南").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) { await load() }
         .refreshable { await load() }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if error != nil || loading { Task { await load() } }
+        }
         .sheet(item: $web) { link in NavigationStack {
             PortalWebViewScreen(url: link.url, nativeService: link.url == guide?.applicationURL ? .affairs : nil)
         } }

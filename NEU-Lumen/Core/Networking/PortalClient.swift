@@ -19,6 +19,7 @@ final class PortalClient {
     private(set) var webvpnOn = false
     private var routeInvalidated = false
     private var campusProbe: (date: Date, isCampus: Bool)?
+    private var accessRouteRevision = UUID()
 
     init(http: HTTPClient = HTTPClient()) {
         self.http = http
@@ -33,12 +34,14 @@ final class PortalClient {
 
     /// 是否校园网：ecard:80 或 jwxt:443 任一可达（结果缓存 10 分钟）。
     func invalidateAccessRoute() {
+        accessRouteRevision = UUID()
         campusProbe = nil
         routeInvalidated = true
     }
 
     func isCampusNet() async -> Bool {
         let epoch = sessionEpoch
+        let revision = accessRouteRevision
         if let probe = campusProbe, Date().timeIntervalSince(probe.date) < 600 {
             return probe.isCampus
         }
@@ -49,7 +52,7 @@ final class PortalClient {
         } else {
             ok = await quickReachable("https://jwxt.neu.edu.cn/")
         }
-        guard epoch == sessionEpoch, !Task.isCancelled else { return ok }
+        guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { return ok }
         campusProbe = (Date(), ok)
         routeInvalidated = false
         return ok
@@ -73,10 +76,12 @@ final class PortalClient {
     /// 在已有 CAS 会话所在的认证域中换取 WebVPN 票据。
     @discardableResult
     func ensureWebVPN(force: Bool = false) async -> Bool {
+        let revision = accessRouteRevision
         if !force && webvpnOn && http.cookies.hasWebVPNTicket() { return true }
         for _ in 0..<2 {
             let url = authenticationURL(for: WebVPN.casService)
             if let resp = try? await http.get(url) {
+                guard revision == accessRouteRevision, !Task.isCancelled else { return false }
                 let landed = resp.finalURL.absoluteString
                 if http.cookies.hasWebVPNTicket() && !landed.contains("/tpass/login") {
                     webvpnOn = true
@@ -91,8 +96,9 @@ final class PortalClient {
     /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
     func prepareAccess() async {
         let epoch = sessionEpoch
+        let revision = accessRouteRevision
         let campus = await isCampusNet()
-        guard epoch == sessionEpoch, !Task.isCancelled else { return }
+        guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { return }
         webvpnOn = !campus
         if !campus { _ = await ensureWebVPN() }
     }

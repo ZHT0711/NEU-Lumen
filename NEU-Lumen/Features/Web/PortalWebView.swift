@@ -155,6 +155,9 @@ struct PortalWebViewScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { Task { await browser.saveSession() } }
         }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            Task { await browser.recoverAfterNetworkChange() }
+        }
     }
 
     private var floatingControls: some View {
@@ -571,6 +574,35 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
             return url
         }
         return client?.browserDestination(for: url)
+    }
+
+    func recoverAfterNetworkChange() async {
+        guard let client, let session, session.phase == .loggedIn, session.requestEpoch == downloadSessionEpoch,
+              client.sessionGeneration == clientEpoch, error != nil || isLoading,
+              !documentUnsafeMethod, !provisionalUnsafeMethod else { return }
+        if webView.url != nil {
+            let dirty = try? await webView.callAsyncJavaScript(#"""
+            return Array.from(document.querySelectorAll('input,textarea,select,[contenteditable=true]')).some(el=> {
+                if (el.isContentEditable) return true;
+                if (el.type==='hidden') return false;
+                if (el.type==='checkbox'||el.type==='radio') return el.checked!==el.defaultChecked;
+                if (el.tagName==='SELECT') {
+                    const options=Array.from(el.options);
+                    return options.some(o=>o.defaultSelected) || el.multiple
+                        ? options.some(o=>o.selected!==o.defaultSelected) : el.selectedIndex!==options.findIndex(o=>!o.disabled);
+                }
+                return el.value!==el.defaultValue;
+            });
+            """#, arguments: [:], in: nil, contentWorld: .world(name: "NEULumen.NetworkRecovery")) as? Bool
+            guard dirty == false else { return }
+        }
+        guard let current = currentURL ?? entryURL else { return }
+        let epoch = session.requestEpoch
+        let source = WebVPN.unwrap(current) ?? current
+        let destination = service == .payment ? source : await client.prepareBrowserURL(source)
+        guard session.requestEpoch == epoch, client.sessionGeneration == clientEpoch, !Task.isCancelled else { return }
+        webView.stopLoading(); error = nil
+        webView.load(URLRequest(url: destination))
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {

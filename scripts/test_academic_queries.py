@@ -93,7 +93,7 @@ class AcademicContracts(unittest.TestCase):
         grades = (ROOT/'NEU-Lumen/Features/Grades/GradesView.swift').read_text()
         self.assertNotIn('nativeDestination', navigation)
         self.assertIn('return .web(url)', navigation)
-        self.assertIn('NativeServicesCarousel(services: services)', services)
+        self.assertIn('NativeServicesCarousel(services: services, searching: !keyword.isEmpty)', services)
         self.assertEqual(services.count('path.append(.nativeService(service))'), 1)
         self.assertNotIn('AcademicCenterView()', grades)
         self.assertNotIn('AcademicCenterView()', profile.split('var body:',1)[1].split('.navigationDestination',1)[0])

@@ -21,6 +21,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var persistenceWarning: String?
     private var subjectSearch = ""
     private var advancedSearch = NativeMailSearch()
+    var hasSearch: Bool { !advancedSearch.parameters.isEmpty || !subjectSearch.isEmpty }
     private var boundEmail = ""
     private weak var session: SessionStore?
     private var ownerEpoch: UUID?
@@ -95,6 +96,12 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
             guard current, token == generation else { return }
             webView?.load(URLRequest(url: destination))
         }
+    }
+
+    func recoverAfterNetworkChange() async {
+        guard current else { return }
+        if loadingWeb || needsLogin { reloadLogin() }
+        else { await refresh() }
     }
 
     private func execute(command: String, start: Int = 0, includeFolders: Bool = false, messageID: String = "",

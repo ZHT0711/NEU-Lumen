@@ -1,5 +1,10 @@
 import Foundation
 
+let wifiPath = CampusNetworkPath(connected: true, interfaces: ["en0:true", "pdp_ip0:false"], gateways: ["192.0.2.1"], expensive: false, constrained: false)
+let cellPath = CampusNetworkPath(connected: true, interfaces: ["en0:false", "pdp_ip0:true"], gateways: ["192.0.2.1"], expensive: false, constrained: false)
+let otherWiFi = CampusNetworkPath(connected: true, interfaces: wifiPath.interfaces, gateways: ["192.0.2.2"], expensive: false, constrained: false)
+precondition(wifiPath != cellPath && wifiPath != otherWiFi, "同一可用网卡列表里的链路与网关变化必须触发恢复")
+
 // Native, offline Foundation tests. Compile with LoadState.swift and DataReliability.swift.
 var checks = 0
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) {

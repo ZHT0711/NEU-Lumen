@@ -28,6 +28,17 @@ struct AppRootView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if environment.session.phase == .loggedIn {
+                if !environment.session.networkAvailable {
+                    Label("网络已断开，连接恢复后自动重试", systemImage: "wifi.slash")
+                        .font(.caption).frame(maxWidth: .infinity).padding(8).background(.regularMaterial)
+                } else if environment.session.recoveringNetwork {
+                    HStack(spacing: 8) { ProgressView(); Text("正在恢复连接…") }
+                        .font(.caption).frame(maxWidth: .infinity).padding(8).background(.regularMaterial)
+                }
+            }
+        }
         .background { LiveActivityCoordinator() }
         .background { BrowserDownloadCoordinator() }
         .onOpenURL { url in
@@ -36,8 +47,12 @@ struct AppRootView: View {
             environment.pendingActivityURL = url
         }
         .task {
-            networkMonitor.start { environment.session.networkDidChange() }
+            networkMonitor.start { environment.session.networkDidChange(isConnected: $0) }
             await environment.session.restoreSession()
+        }
+        .task(id: environment.session.networkRevision) {
+            guard environment.session.networkRevision > 0 else { return }
+            await environment.repository.recoverAfterNetworkChange()
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .inactive || phase == .background { environment.session.persistWebSession() }

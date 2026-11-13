@@ -153,24 +153,31 @@ final class NativeAffairsStore {
     private(set) var error: String?
     private var page = 0
     private var owner: UUID?
+    private var request = UUID()
     func load(session: SessionStore, reset: Bool) async {
         let epoch = session.requestEpoch
         if owner != epoch { owner = epoch; items = []; page = 0; loaded = false; hasMore = true; loading = false; error = nil }
         guard session.phase == .loggedIn, !loading, reset || hasMore else { return }
-        loading = true; defer { if owner == epoch { loading = false } }
+        let token = UUID(); request = token
+        loading = true; defer { if owner == epoch, request == token { loading = false } }
         let target = reset ? 1 : page + 1
         do {
             let rows = try await session.client.fetchTodos(page: target, pageSize: 20)
-            guard owner == epoch, session.requestEpoch == epoch, !Task.isCancelled else { return }
+            guard owner == epoch, request == token, session.requestEpoch == epoch, !Task.isCancelled else { return }
             let previous = reset ? [] : items
             var seen = Set<String>()
             items = (previous + rows).filter { seen.insert($0.id).inserted }
             page = target; hasMore = rows.count == 20; loaded = true; error = nil
             session.persistWebSession()
         } catch {
-            guard owner == epoch, session.requestEpoch == epoch else { return }
+            guard owner == epoch, request == token, session.requestEpoch == epoch else { return }
             if !NetworkError.isCancellation(error) { self.error = NetworkError.from(error).message }
         }
+    }
+    func recoverAfterNetworkChange(session: SessionStore) async {
+        guard error != nil || loading else { return }
+        request = UUID(); loading = false
+        await load(session: session, reset: true)
     }
 }
 
@@ -216,6 +223,9 @@ struct NativeAffairsView: View {
             if active { await store.load(session: environment.session, reset: true) }
         }
         .refreshable { await store.load(session: environment.session, reset: true) }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if active { Task { await store.recoverAfterNetworkChange(session: environment.session) } }
+        }
         .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .affairs) } }
     }
 }
