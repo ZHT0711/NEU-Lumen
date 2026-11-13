@@ -498,11 +498,17 @@ func verifyLearningProfiles() {
     let a = profiles.identifier(account: "A", platform: .mooc)!
     let b = profiles.identifier(account: "B", platform: .mooc)!
     let cx = profiles.identifier(account: "A", platform: .chaoxing)!
+    let mail = profiles.identifier(account: "A", service: .mail)!
+    let otherMail = profiles.identifier(account: "B", service: .mail)!
+    precondition(Set([a, b, cx, mail, otherMail]).count == 5)
+    precondition(LearningBrowserProfiles(defaults: UserDefaults(suiteName: suite)!).identifier(account: "A", service: .mail) == mail)
     precondition(a != b && a != cx && b != cx)
     precondition(LearningBrowserProfiles(defaults: UserDefaults(suiteName: suite)!).identifier(account: "A", platform: .mooc) == a)
     precondition(profiles.identifier(account: "", platform: .mooc) == nil)
     precondition(profiles.identifier(account: "A", platform: .cg) == nil)
     profiles.retire(account: "A")
+    precondition(profiles.identifier(account: "A", service: .mail) != mail)
+    precondition(profiles.identifier(account: "B", service: .mail) == otherMail)
     precondition(profiles.identifier(account: "A", platform: .mooc) != a)
     precondition(profiles.identifier(account: "A", platform: .chaoxing) != cx)
     precondition(profiles.identifier(account: "B", platform: .mooc) == b)

@@ -263,6 +263,16 @@ class UIPreviewTests(unittest.TestCase):
         self.assertEqual(manifest['live_activity_layout'], coverage)
         self.assertIn('非系统灵动岛截屏/非真机', manifest['live_activity_preview']['notice'])
 
+    def test_system_island_requires_all_three_actual_expanded_cases(self):
+        path = self.path / 'system-island-checks.txt'
+        valid = path.read_text()
+        for invalid in ['PASS: generic flag only', valid.splitlines()[0], valid + '\n' + valid.splitlines()[0]]:
+            path.write_text(invalid)
+            with self.assertRaises(ValueError):
+                preview.package(self.path, self.env)
+        path.write_text(valid)
+        preview.package(self.path, self.env)
+
     def test_check_evidence_hash_cannot_change_after_packaging(self):
         manifest = preview.package(self.path, self.env)
         self.assertEqual(tuple(item['file'] for item in manifest['required_checks']), preview.CHECKS)

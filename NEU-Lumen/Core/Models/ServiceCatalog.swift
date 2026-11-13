@@ -1,5 +1,12 @@
 import Foundation
 
+extension PortalApp {
+    var serviceCategory: String {
+        let trimmed = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "其他服务" : trimmed
+    }
+}
+
 /// 分类来自门户数据，按应用数量降序排列；同数量时保持稳定顺序。
 struct ServiceCategory: Identifiable, Equatable {
     let name: String
