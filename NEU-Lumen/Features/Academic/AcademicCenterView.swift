@@ -1,61 +1,42 @@
 import SwiftUI
 
-/// 由现有服务 / 学习导航压栈；不自行创建 NavigationStack。
+/// 服务大厅横向胶囊进入的唯一学业工具首页。
 struct AcademicCenterView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var showOriginalWeb = false
     private var repo: PortalRepository { environment.repository }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                AcademicNotice(text: "按当前账号的正常教务权限读取。校历日期、周次、培养方案与修读进度使用官方只读接口；完整课程明细暂需网页同步。")
-                if environment.session.phase != .loggedIn {
-                    ContentUnavailableView("请先登录", systemImage: "person.crop.circle", description: Text("登录当前账号后才能读取个人教务信息。"))
-                } else {
-                    NavigationLink { AcademicCalendarView() } label: {
-                        AcademicEntryCard(title: "校历与周次", subtitle: "学期列表 · 学期起止日期 · 教务周次", icon: "calendar")
-                    }.buttonStyle(.plain)
-                    AcademicQuerySection(repo: repo, key: .terms) {
-                        Text(repo.academicTerms.first(where: { $0.current })?.name ?? "当前学期未标记")
-                            .font(.subheadline)
-                        Text("已读取 \(repo.academicTerms.count) 个学期；以教务 selected 字段为准。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    NavigationLink { AcademicPlanView() } label: {
-                        AcademicEntryCard(title: "培养计划", subtitle: "方案选择 · 官方修读进度 · 当前页面课程明细", icon: "list.bullet.rectangle.portrait")
-                    }.buttonStyle(.plain)
-                    AcademicQuerySection(repo: repo, key: .plans) {
-                        Text(repo.academicPlans.first(where: { $0.selected })?.name ?? "培养方案未标记默认项")
-                            .font(.subheadline)
-                        Text("已读取 \(repo.academicPlans.count) 个方案；未将成绩总学分当作培养要求。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Button("学校原始教务入口", systemImage: "globe") { showOriginalWeb = true }
-                    .buttonStyle(.bordered)
-                AcademicNotice(text: "原始入口仍是学校网页，不是完整原生功能。不会自动选课、报名或修改学校记录。")
-            }
-            .padding(16).padding(.bottom, 24)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(repo.academicTerms.first(where: { $0.current })?.name ?? "我的学业")
+                        .font(.title2.bold())
+                    Text("查看课表、成绩、校历和培养计划")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }.padding(.vertical, 8)
+                Button {
+                    environment.pendingActivityURL = URL(string: "neulumen://activity/learning?section=grades")
+                } label: {
+                    AcademicEntryCard(title: "成绩与绩点", subtitle: "学期成绩 · 学分 · 加权均分", icon: "chart.bar.doc.horizontal")
+                }.buttonStyle(.plain)
+                Button {
+                    environment.pendingActivityURL = URL(string: "neulumen://activity/course")
+                } label: {
+                    AcademicEntryCard(title: "我的课表", subtitle: "周课表 · 课程详情 · 个人日程", icon: "calendar.day.timeline.left")
+                }.buttonStyle(.plain)
+                NavigationLink { AcademicCalendarView() } label: {
+                    AcademicEntryCard(title: "校历与周次", subtitle: "学期日期 · 假期 · 教学周查询", icon: "calendar")
+                }.buttonStyle(.plain)
+                NavigationLink { AcademicPlanView() } label: {
+                    AcademicEntryCard(title: "培养计划", subtitle: "方案进度 · 课程模块 · 修读状态", icon: "list.bullet.rectangle.portrait")
+                }.buttonStyle(.plain)
+                Text("选课、考试报名及其他业务可通过右上角「学校原站」办理。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }.padding(16).padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("学业查询")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("刷新学业查询", systemImage: "arrow.clockwise") { Task { await reload(force: true) } }
-                    .disabled(repo.academicState(for: .terms) == .loading || repo.academicState(for: .plans) == .loading)
-            }
-        }
-        .task(id: environment.session.requestEpoch) { await reload(force: false) }
-        .refreshable { await reload(force: true) }
-        .sheet(isPresented: $showOriginalWeb) {
-            NavigationStack { PortalWebViewScreen(url: AcademicWebSyncSheet.entryURL) }
-        }
-    }
-
-    private func reload(force: Bool) async {
-        await repo.loadAcademicQuery(.terms, force: force)
-        await repo.loadAcademicQuery(.plans, force: force)
+        .navigationTitle("学业查询").navigationBarTitleDisplayMode(.inline)
+        .task(id: environment.session.requestEpoch) { await repo.loadAcademicQuery(.terms) }
     }
 }
 

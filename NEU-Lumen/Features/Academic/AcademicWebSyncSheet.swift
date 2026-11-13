@@ -4,6 +4,7 @@ import Observation
 
 /// 独立、临时网页同步窗口；不把网页壳描述为完整原生培养计划。
 struct AcademicWebSyncSheet: View {
+    var plan: AcademicPlan? = nil
     static let entryURL = URL(string: PortalClient.jwxtBase + "/jwapp/sys/homeapp/index.do")!
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.dismiss) private var dismiss
@@ -14,14 +15,16 @@ struct AcademicWebSyncSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                AcademicNotice(text: "正常认证后，手动进入获准的培养 / 学业课程表。同步只解析当前可见表格；不点击选课、报名、翻页或提交。此窗口 Cookie 不回写应用。")
+                AcademicNotice(text: plan.map { "打开培养计划课程表后，点击同步，将课程保存到「\($0.name)」。如有分页，请先在网页中加载所需课程。" }
+                    ?? "打开培养计划课程表后，点击同步。")
                     .padding(12)
                 if browser.loading { ProgressView().padding(.bottom, 8) }
                 if let message = syncError ?? browser.error {
                     Text(message).font(.footnote).foregroundStyle(.red).padding(12)
                         .accessibilityLabel("同步错误：\(message)")
                 }
-                if didSync { Text("已同步当前课程表到原生页面").font(.footnote).foregroundStyle(.secondary).padding(8) }
+                if didSync { Text("本页课程已保存。可继续翻页同步，完成后关闭。")
+                    .font(.footnote).foregroundStyle(.secondary).padding(8) }
                 AcademicWebCanvas(browser: browser)
                 HStack {
                     Button("后退", systemImage: "chevron.left") { browser.webView.goBack() }.disabled(!browser.canGoBack)
@@ -29,7 +32,7 @@ struct AcademicWebSyncSheet: View {
                     Button("重新加载", systemImage: "arrow.clockwise") { browser.webView.reload() }
                 }.padding(12)
             }
-            .navigationTitle("教务只读网页同步").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("同步培养计划").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -38,7 +41,7 @@ struct AcademicWebSyncSheet: View {
                             syncError = nil; didSync = false
                             do {
                                 let (snapshot, context) = try await browser.readCurrentPage(session: environment.session, repo: environment.repository)
-                                try environment.repository.applyAcademicPageSnapshot(snapshot, context: context)
+                                try environment.repository.applyAcademicPageSnapshot(snapshot, context: context, planID: plan?.id)
                                 didSync = true
                             } catch {
                                 if !NetworkError.isCancellation(error) { syncError = NetworkError.from(error).message }

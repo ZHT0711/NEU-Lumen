@@ -107,7 +107,7 @@ enum AcademicQueryPayload {
     case status(AcademicStudyStatus)
 }
 
-struct AcademicPageCourse: Identifiable, Equatable {
+struct AcademicPageCourse: Identifiable, Equatable, Codable {
     let id: String
     let name: String
     let code: String?
@@ -115,16 +115,22 @@ struct AcademicPageCourse: Identifiable, Equatable {
     let module: String?
     let studyStatus: String?
     let suggestedTerm: String?
+    var category: String? = nil
+    var hoursText: String? = nil
+    var scoreText: String? = nil
+    var assessment: String? = nil
 }
 
 /// 仅属于一次已验证账号的当前可见网页，不与某个方案自动关联，不声明完整培养计划。
-struct AcademicPageSnapshot {
+struct AcademicPageSnapshot: Codable {
     let account: String
     let title: String
     let sourceURL: URL
-    let courses: [AcademicPageCourse]
+    var courses: [AcademicPageCourse]
     let recognizedTables: Int
     let updatedAt: Date
+    /// 用户在同步窗口明确选择的保存方案，不冒充网页自动核实的方案标识。
+    var planID: String? = nil
 }
 
 enum AcademicQueryError: LocalizedError, Equatable {

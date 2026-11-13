@@ -213,7 +213,9 @@ struct LiveActivityContentState: Codable, Hashable {
 /// This exact geometry policy is used by the SwiftUI Layout, not a mock drawing.
 /// Intrinsic sizes come from sizeThatFits; tests can supply measured font sizes.
 enum LiveActivityLayoutMetrics {
-    static let expandedContentHeight: CGFloat = 130
+    static let expandedMaximumHeight: CGFloat = 160
+    static let expandedReservedHeight: CGFloat = 60
+    static let expandedContentHeight: CGFloat = expandedMaximumHeight - expandedReservedHeight
     static let gap: CGFloat = 8
     static let valueMinimumScale: CGFloat = 0.55
     struct MetricPlan: Equatable {

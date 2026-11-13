@@ -585,11 +585,12 @@ final class PortalClient {
     }
 
     /// 办事动态（在办事项），失败时由调用方降级为空。
-    func fetchTodos() async throws -> [TodoItem] {
+    func fetchTodos(page: Int = 1, pageSize: Int = 10) async throws -> [TodoItem] {
+        guard page > 0, (1...50).contains(pageSize) else { throw NetworkError(message: "办事列表分页参数无效") }
         let d = try await api("personal/frontend/task/apply", query: [
             URLQueryItem(name: "type", value: "all"),
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "pageSize", value: "10"),
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "pageSize", value: String(pageSize)),
         ])
         let list = try PortalEnvelope.list(d).compactMap { $0 as? [String: Any] }
         return list.map { t in
@@ -601,7 +602,8 @@ final class PortalClient {
                 node: nodes.last ?? "处理中",
                 percent: t.int("percent") ?? 0,
                 time: t.str("inst_created").split(separator: ".").first.map(String.init) ?? "",
-                url: destination.absoluteString
+                url: destination.absoluteString,
+                progressKnown: t.int("percent") != nil
             )
         }
     }

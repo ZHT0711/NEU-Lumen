@@ -127,7 +127,7 @@ class LiveActivityDataContracts(unittest.TestCase):
         shell = (ROOT / 'scripts/validate_ui.sh').read_text()
         self.assertIn('--live-activity-data-checks', shell)
         self.assertIn('live-activity-custom', shell)
-        self.assertEqual(len(preview.SCREENSHOTS), 33)
+        self.assertEqual(len(preview.SCREENSHOTS), 40)
         for kind in ['nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'assignments', 'planner', 'dayOverview', 'academicOverview', 'custom']:
             self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)
         self.assertIn('live-activity-layout-checks.txt', preview.CHECKS)

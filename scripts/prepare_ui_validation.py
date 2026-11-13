@@ -263,6 +263,10 @@ struct UIValidationRoot: View {
                 case "academic-center": NavigationStack { AcademicCenterView().nativeUIFixtureCaption("模拟器合成学业查询 · 非真实账号数据") }
                 case "academic-calendar": NavigationStack { AcademicCalendarView().nativeUIFixtureCaption("模拟器合成校历与周次 · 非学校实际安排") }
                 case "academic-plan": NavigationStack { AcademicPlanView().nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
+                case "native-payment": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
+                case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
+                case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
+                case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
                 case let token where token.hasPrefix("live-expanded-"):
                     LiveActivityExpandedPreview(token: String(token.dropFirst("live-expanded-".count)))
                 case "downloads":
@@ -296,6 +300,11 @@ struct UIValidationRoot: View {
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let downloadBase = URL(string: "http://127.0.0.1:8787")!
+            if let arg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--system-island=") }) {
+                await prepareSystemIsland(kind: String(arg.dropFirst("--system-island=".count)), manager: environment.liveActivityManager)
+                return
+            }
+
             if ProcessInfo.processInfo.arguments.contains("--academic-web-sync-checks") {
                 environment.session.seedScreenshotSession()
                 await runAcademicWebSyncChecks(environment)
@@ -362,7 +371,7 @@ struct UIValidationRoot: View {
                 environment.dynamicIslandStore.kind = screen == "live-activity-custom" ? .custom : .nextCourse
             }
             environment.repository.seedUIValidation()
-            if screen.hasPrefix("academic-") {
+            if screen.hasPrefix("academic-") || screen.hasPrefix("native-") {
                 do { try await seedAcademicUIValidation(environment) }
                 catch {
                     try? ("FAIL: " + error.localizedDescription).write(to: documents.appendingPathComponent(screen + "-screenshot.txt"), atomically: true, encoding: .utf8)
@@ -902,3 +911,43 @@ func runLiveActivityChecks(_ manager: DynamicIslandActivityManager) async {
     }
 }
 ''', encoding='utf-8')
+
+shutil.copyfile(root / "scripts/system_island_fixture.swift", destination / "NEU-Lumen/App/SystemIslandValidation.swift")
+
+# Explicitly synthetic service fixtures, applied only to this disposable Debug copy.
+def service_fixture(relative, signature, insertion, extension=''):
+    path = destination / relative
+    source = path.read_text(encoding='utf-8')
+    if source.count(signature) != 1:
+        raise RuntimeError(f'Native service fixture hook changed: {signature}')
+    path.write_text(source.replace(signature, signature + insertion) + extension, encoding='utf-8')
+
+service_fixture('NEU-Lumen/Core/Services/NativeMailStore.swift',
+                'func connect(session: SessionStore, apps: [PortalApp], server: URL? = nil) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-mail") { seedServiceScreenshot(); return }
+''', r'''
+extension NativeMailStore {
+    func seedServiceScreenshot() {
+        email = "synthetic@stu.neu.edu.cn"
+        folders = [NativeMailFolder(id: "1", name: "收件箱", total: 3, unread: 1),
+                   NativeMailFolder(id: "2", name: "已发送", total: 1, unread: 0)]
+        messages = [NativeMailMessage(id: "SYNTH-M-1", subject: "合成通知：图书馆预约提醒", sender: "合成图书馆通知", dateText: "今天 09:00", unread: true),
+                    NativeMailMessage(id: "SYNTH-M-2", subject: "合成邮件：本周校园活动", sender: "合成校园服务", dateText: "昨天 15:30", unread: false)]
+        loaded = true; loadingWeb = false; busy = false; hasMore = false
+    }
+}
+''')
+service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
+                'private func check(force: Bool) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-vpn") {
+            campus = false; ticket = true; checkedAt = Date(); return
+        }
+''')
+service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
+                'func load(session: SessionStore, reset: Bool) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-affairs") {
+            items = [TodoItem(title: "合成申请：在读证明", instance: "合成办事流水 SYNTH-001", node: "合成节点：审核中", percent: 50, time: "今天 09:00", url: "https://ehall.neu.edu.cn/"),
+                     TodoItem(title: "合成申请：场地预约", instance: "合成办事流水 SYNTH-002", node: "合成节点：待受理", percent: 0, time: "昨天 16:00", url: "https://ehall.neu.edu.cn/")]
+            loaded = true; hasMore = false; loading = false; return
+        }
+''')

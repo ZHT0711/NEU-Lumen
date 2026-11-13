@@ -44,13 +44,6 @@ struct GradesView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("学习")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        AcademicCenterView()
-                    } label: {
-                        Label("教务查询", systemImage: "graduationcap.fill")
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(section == "作业" ? platform.title : "教务网页", systemImage: "globe") {
                         if section == "作业" { showAssignmentWeb = true } else { showAcademicWeb = true }

@@ -52,9 +52,11 @@
 
 网页工具 → **下载管理**：下载原始 PDF 和网页附件，查看进度、预览、分享或存储到“文件”。“导出网页为 PDF”与原文件下载分开；下载按账号保存在本机，系统挂起后不保证继续。
 
-## 原生教务与实时活动
+## 原生服务与实时活动
 
-服务大厅／我的 → **教务查询**：原生校历、培养方案与学业信息。课程明细支持主动只读网页同步；没有读取到的日期、学分或课程不会补造。能力边界见 [教务说明](docs/academic-queries.md)。
+服务大厅 → **原生服务**：横向滑动切换教务、缴费、WebVPN、办事和邮箱，进入后也可左右切换页面。iOS 26 导航使用 Liquid Glass，兼顾减少透明度、增强对比度和动态字体。学校原版应用入口继续打开原站。
+
+培养计划支持分组、搜索、课程详情和按账号保存的分页同步；缴费显示账户与流水，办事显示在办进度，邮箱提供文件夹、搜索和原生阅读。支付确认、业务表单及复杂邮件内容使用学校页面。能力边界见 [原生服务说明](docs/native-services.md) 与 [教务说明](docs/academic-queries.md)。
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-center-light.png" width="245" alt="原生教务查询" />
@@ -62,7 +64,13 @@
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-plan-light.png" width="245" alt="原生培养计划（合成演示）" />
 </p>
 
-实时活动展开区支持课程、校园卡、网费、电量、作业、个人日程、今日概览、学业概览和自定义内容；窄屏或大字体按可用空间精简详情，点击可查看完整页面。
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-payment-light.png" width="245" alt="原生缴费账户（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-affairs-light.png" width="245" alt="原生办事进度（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-mail-light.png" width="245" alt="原生邮箱（合成演示）" />
+</p>
+
+实时活动展开区支持课程、校园卡、网费、电量、作业、个人日程、今日概览、学业概览和自定义内容；窄屏或大字体按可用空间精简详情，点击可查看完整页面。展开布局为系统顶部区域和传感器预留空间。
 
 以下是 **iPhone 模拟器中的生产共享组件布局验证**，不是系统灵动岛截屏或实体真机截图；使用合成数据。
 

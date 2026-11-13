@@ -21,7 +21,9 @@ SCREENSHOTS = (
 LIVE_KINDS = ('nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'assignments',
               'planner', 'dayOverview', 'academicOverview', 'custom')
 LIVE_SCREENSHOTS = tuple(f'live-expanded-{kind}-light.png' for kind in LIVE_KINDS) + ('live-expanded-ax-stale-light.png',)
+SYSTEM_ISLAND_SCREENSHOTS = tuple(f'system-island-{kind}.png' for kind in ('nextCourse', 'custom', 'electricBalance'))
 NATIVE_SCREENS = ('academic-center', 'academic-calendar', 'academic-plan')
+SERVICE_SCREENS = ('native-payment', 'native-vpn', 'native-affairs', 'native-mail')
 ACADEMIC_WEB_CHECK = 'academic-web-sync-checks.txt'
 ACADEMIC_WEB_CASES = ('same-account', 'wrong-account', 'spoofed-page-world',
                       'identity-changes-between-checks', 'account-epoch-rejects-old-snapshot')
@@ -30,18 +32,18 @@ ACADEMIC_IDENTITY_EVIDENCE = [
     for name, requests, accepted in zip(ACADEMIC_WEB_CASES, (2, 1, 1, 2), (True, False, False, False))
 ]
 LAYOUT_NEGATIVE_CONTROLS = ('negative-overlap-rejected', 'negative-oversize-rejected')
-SCREENSHOTS = SCREENSHOTS + LIVE_SCREENSHOTS + tuple(f'{screen}-light.png' for screen in NATIVE_SCREENS)
+SCREENSHOTS = SCREENSHOTS + SYSTEM_ISLAND_SCREENSHOTS + LIVE_SCREENSHOTS + tuple(f'{screen}-light.png' for screen in (*NATIVE_SCREENS, *SERVICE_SCREENS))
 LAYOUT_CHECK = 'live-activity-layout-checks.txt'
 LAYOUT_COVERAGE = {
     'shared_view_cases': 174, 'metric_layout_cases': 12, 'negative_controls': 2,
-    'widths_pt': [330, 350, 370], 'max_height_pt': 130, 'kinds': list(LIVE_KINDS),
+    'widths_pt': [330, 350, 370], 'max_height_pt': 100, 'expanded_max_height_pt': 160, 'reserved_height_pt': 60, 'kinds': list(LIVE_KINDS),
     'dynamic_types': ['large', 'accessibility3'], 'variants': ['fresh', 'stale', 'nil-metadata'],
     'timer_modes': ['system-Text', 'multi-day-string'],
 }
 CHECKS = ('browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
           'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
-          LAYOUT_CHECK, ACADEMIC_WEB_CHECK) + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
+          LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
 MANIFEST = 'ui-preview.json'
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
 
@@ -104,6 +106,11 @@ def check_info(directory):
         lines = text.splitlines()
         if not any(line.startswith('PASS:') for line in lines) or any(line.startswith('FAIL:') for line in lines):
             raise ValueError(f'UI check did not pass: {name}')
+        if name == 'system-island-checks.txt':
+            expected = [f'PASS: actual system expanded {kind}; title and metric visible above Settings; simulator synthetic data'
+                        for kind in ('nextCourse', 'custom', 'electricBalance')]
+            if lines != expected:
+                raise ValueError('Incomplete actual system expanded Island evidence')
         if name == ACADEMIC_WEB_CHECK:
             cases = [line[len('CASE: '):] for line in lines if line.startswith('CASE: ')]
             identities = [json.loads(line[len('IDENTITY: '):]) for line in lines if line.startswith('IDENTITY: ')]
@@ -125,7 +132,7 @@ def check_info(directory):
                 raise ValueError('Missing/duplicate actual hosting measurements')
             for line in cases:
                 fields = dict(field.split('=', 1) for field in line.split()[1:])
-                if (any(not 0 < float(fields[key]) <= 130.5 for key in ('intrinsic', 'fitted', 'content'))
+                if (any(not 0 < float(fields[key]) <= 100.5 for key in ('intrinsic', 'fitted', 'content'))
                         or int(fields['actual-bounds']) < 2):
                     raise ValueError('Invalid or overflowing actual hosting measurement')
         evidence.append({'file': name, 'sha256': hashlib.sha256(raw).hexdigest(), 'status': 'PASS'})
@@ -151,6 +158,8 @@ def package(directory, environment=None):
         'build_configuration': 'Debug simulator build from the same commit as the Release IPA',
         'required_checks': checks,
         'live_activity_layout': LAYOUT_COVERAGE,
+        'system_island_preview': {'screenshots': list(SYSTEM_ISLAND_SCREENSHOTS),
+            'source': 'SpringBoard ActivityKit expanded alert above Settings; OCR-confirmed title and metric; synthetic simulator data'},
         'live_activity_preview': {
             'screenshots': list(LIVE_SCREENSHOTS),
             'component': 'actual shared LiveActivityExpandedContent(state:isStale:)',
@@ -159,6 +168,7 @@ def package(directory, environment=None):
         },
         'native_preview': {
             'academic': 'actual AcademicCenterView / AcademicCalendarView / AcademicPlanView; explicit DEBUG seedAcademicPreview; synthetic only',
+            'services': 'actual NativeServiceHost / payment / VPN / affairs / mail views; disposable Debug synthetic fixtures only; no real account',
         },
         'screenshots': images,
     }

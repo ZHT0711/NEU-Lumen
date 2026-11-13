@@ -25,7 +25,12 @@ func seedAcademicUIValidation(_ environment: AppEnvironment) async throws {
     let page = AcademicPageSnapshot(account: account, title: "合成培养课程表 · 非真实账号数据",
         sourceURL: URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.html")!,
         courses: [AcademicPageCourse(id: "SYNTH-C-1", name: "合成课程：支持大字体多行展示",
-            code: "SYNTH-C-1", creditsText: "2.5", module: "合成基础模块", studyStatus: "已修读", suggestedTerm: "合成第一学期")],
+            code: "SYNTH-C-1", creditsText: "2.5", module: "合成基础模块", studyStatus: "已修读", suggestedTerm: "合成第一学期",
+            category: "合成必修", hoursText: "40", scoreText: "90", assessment: "合成考试"),
+            AcademicPageCourse(id: "SYNTH-C-2", name: "合成课程：程序设计基础",
+                code: "SYNTH-C-2", creditsText: "3", module: "合成专业模块", studyStatus: "在修", suggestedTerm: "合成第二学期", category: "合成必修"),
+            AcademicPageCourse(id: "SYNTH-C-3", name: "合成课程：校园通识",
+                code: "SYNTH-C-3", creditsText: "2", module: "合成通识模块", studyStatus: "未修", suggestedTerm: "合成第三学期", category: "合成选修")],
         recognizedTables: 1, updatedAt: now)
     #if DEBUG
     repo.seedAcademicPreview([

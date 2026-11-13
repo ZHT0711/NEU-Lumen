@@ -55,6 +55,7 @@ final class PortalRepository {
     private var academicRequests: [AcademicQueryKey: UUID] = [:]
     private var academicWaiters: [AcademicQueryKey: Set<UUID>] = [:]
     private var academicPageCache: AcademicPageSnapshot?
+    private var academicPlanPages: [String: AcademicPageSnapshot] = [:]
 
     private(set) var cgReport: CGAssignmentReport?
     private(set) var cgState: LoadState = .idle
@@ -235,6 +236,7 @@ final class PortalRepository {
         academicDates.removeAll()
         academicWarnings.removeAll()
         academicPageCache = nil
+        academicPlanPages = [:]
         cgRequestID = UUID()
         cgBrowser?.webView.stopLoading()
         cgBrowser = nil
@@ -840,6 +842,24 @@ final class PortalRepository {
         return academicPageCache
     }
 
+    func academicPageSnapshot(for planID: String) -> AcademicPageSnapshot? {
+        guard let context = requestContext, academicPlanPages[planID]?.account == context.account else { return nil }
+        return academicPlanPages[planID]
+    }
+
+    func restoreAcademicPlan(_ planID: String) {
+        guard let context = requestContext, academicPlanPages[planID] == nil else { return }
+        if let saved = AcademicPlanCacheStore(account: context.account, planID: planID).load() {
+            academicPlanPages[planID] = saved
+        }
+    }
+
+    func clearAcademicPlan(_ planID: String) throws {
+        guard let context = requestContext else { throw AcademicQueryError.accountMismatch }
+        try AcademicPlanCacheStore(account: context.account, planID: planID).clear()
+        academicPlanPages[planID] = nil
+    }
+
     func academicPayload(for key: AcademicQueryKey) -> AcademicQueryPayload? {
         guard requestContext != nil else { return nil }
         return academicCache[key]
@@ -931,13 +951,22 @@ final class PortalRepository {
     }
 
     /// 浏览器必须先核对官方 currentUser.userId，再带打开时的账号 / epoch / generation 回写。
-    func applyAcademicPageSnapshot(_ snapshot: AcademicPageSnapshot, context: RepositoryRequestContext) throws {
+    func applyAcademicPageSnapshot(_ snapshot: AcademicPageSnapshot, context: RepositoryRequestContext, planID: String? = nil) throws {
         try Task.checkCancellation()
         guard isCurrent(context), session.user?.sid == context.account,
               AcademicQueryPolicy.acceptsPageAccount(snapshot.account, expected: context.account) else {
             throw AcademicQueryError.accountMismatch
         }
-        academicPageCache = snapshot
+        var bound = snapshot
+        if let planID {
+            guard academicPlans.contains(where: { $0.id == planID }) else { throw AcademicQueryError.invalid("培养方案") }
+            bound.planID = planID
+            let previous = academicPlanPages[planID] ?? AcademicPlanCacheStore(account: context.account, planID: planID).load()
+            bound.courses = AcademicPlanPresentation.merge(previous?.courses ?? [], snapshot.courses)
+            try AcademicPlanCacheStore(account: context.account, planID: planID).save(bound)
+            academicPlanPages[planID] = bound
+        }
+        academicPageCache = bound
     }
 
     #if DEBUG
@@ -951,7 +980,13 @@ final class PortalRepository {
         academicDates = Dictionary(uniqueKeysWithValues: values.keys.map { ($0, updatedAt) })
         academicStates = Dictionary(uniqueKeysWithValues: values.keys.map { ($0, LoadState.loaded) })
         academicWarnings.removeAll()
-        if let page, page.account == context.account { academicPageCache = page }
+        if let page, page.account == context.account {
+            academicPageCache = page
+            if let plan = academicPlans.first(where: { $0.selected }) ?? academicPlans.first {
+                var bound = page; bound.planID = plan.id
+                academicPlanPages[plan.id] = bound
+            }
+        }
     }
     #endif
 

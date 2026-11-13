@@ -93,6 +93,8 @@ struct HomeView: View {
                     CardView()
                 case .academic:
                     AcademicCenterView()
+                case .nativeService(let service):
+                    NativeServiceHost(initial: service)
                 }
             }
         }

@@ -15,10 +15,19 @@ struct LearningBrowserProfiles {
 
     func identifier(account: String, platform: LearningPlatform) -> UUID? {
         guard !account.isEmpty, platform != .cg else { return nil }
+        return identifier(account: account, key: platform.rawValue)
+    }
+
+    func identifier(account: String, service: NativeCampusService) -> UUID? {
+        guard !account.isEmpty else { return nil }
+        return identifier(account: account, key: "service." + service.rawValue)
+    }
+
+    private func identifier(account: String, key: String) -> UUID {
         var profiles = defaults.dictionary(forKey: profilesKey) as? [String: [String: String]] ?? [:]
-        if let raw = profiles[account]?[platform.rawValue], let id = UUID(uuidString: raw) { return id }
+        if let raw = profiles[account]?[key], let id = UUID(uuidString: raw) { return id }
         let id = UUID()
-        profiles[account, default: [:]][platform.rawValue] = id.uuidString
+        profiles[account, default: [:]][key] = id.uuidString
         defaults.set(profiles, forKey: profilesKey)
         return id
     }

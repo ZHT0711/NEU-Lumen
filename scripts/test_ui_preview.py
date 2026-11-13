@@ -22,7 +22,7 @@ def png():
 
 def layout_marker():
     # Python test-only synthetic measurements; this is NOT evidence of a simulator run.
-    cases = [f'CASE: {key} intrinsic=130.0 fitted=130.0 content=120.0 actual-bounds=4'
+    cases = [f'CASE: {key} intrinsic=100.0 fitted=100.0 content=94.0 actual-bounds=4'
              for key in sorted(preview.layout_case_keys())]
     return '\n'.join(['PASS: unit-test synthetic layout marker',
                       'COVERAGE: ' + json.dumps(preview.LAYOUT_COVERAGE), *cases,
@@ -50,6 +50,9 @@ class UIPreviewTests(unittest.TestCase):
             (self.path / name).write_text('PASS: fixture checks\n')
         (self.path / preview.LAYOUT_CHECK).write_text(layout_marker())
         (self.path / preview.ACADEMIC_WEB_CHECK).write_text(academic_marker())
+        (self.path / 'system-island-checks.txt').write_text('\n'.join(
+            f'PASS: actual system expanded {kind}; title and metric visible above Settings; simulator synthetic data'
+            for kind in ('nextCourse', 'custom', 'electricBalance')))
         (self.path / 'simulator-device.json').write_text(json.dumps({'name': 'iPhone', 'runtime': 'iOS-test'}))
 
     def test_package_provenance_and_allowlist(self):
@@ -182,7 +185,7 @@ class UIPreviewTests(unittest.TestCase):
                 thread.join(timeout=5)
 
     def test_download_checks_and_twentieth_screenshot_are_required(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 33)
+        self.assertEqual(len(preview.SCREENSHOTS), 40)
         self.assertIn('downloads-light.png', preview.SCREENSHOTS)
         for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
                      'learning-save.txt', 'learning-restore.txt']:
@@ -213,10 +216,10 @@ class UIPreviewTests(unittest.TestCase):
         self.assertIn('contains("--screen=grades") ? "成绩" : "作业"', prepare)
         self.assertNotIn('bash scripts/validate_ui.sh\n          fi', workflow)
     def test_exact_new_snapshots_and_required_checks(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 33)
-        self.assertEqual(len(preview.CHECKS), 15)
-        self.assertEqual(len(set(preview.SCREENSHOTS)), 33)
-        self.assertEqual(len(set(preview.CHECKS)), 15)
+        self.assertEqual(len(preview.SCREENSHOTS), 40)
+        self.assertEqual(len(preview.CHECKS), 16)
+        self.assertEqual(len(set(preview.SCREENSHOTS)), 40)
+        self.assertEqual(len(set(preview.CHECKS)), 16)
         for kind in preview.LIVE_KINDS:
             self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)
         self.assertIn('live-expanded-ax-stale-light.png', preview.SCREENSHOTS)
@@ -250,7 +253,7 @@ class UIPreviewTests(unittest.TestCase):
                         valid.replace(json.dumps(coverage), json.dumps(bad_coverage)),
                         '\n'.join(valid.splitlines()[:-1]),
                         valid + '\n' + valid.splitlines()[-1],
-                        valid.replace('content=120.0', 'content=131.0', 1),
+                        valid.replace('content=94.0', 'content=131.0', 1),
                         valid.replace('actual-bounds=4', 'actual-bounds=0', 1)]:
             path.write_text(invalid)
             with self.assertRaises(ValueError):

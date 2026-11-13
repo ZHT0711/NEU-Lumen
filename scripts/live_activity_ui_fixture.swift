@@ -8,7 +8,7 @@ enum LiveActivityUIFixture {
                         "planner", "dayOverview", "academicOverview", "custom"]
     static let widths: [CGFloat] = [330, 350, 370]
     static let now = Date()
-    static let budget: CGFloat = 130
+    static let budget = LiveActivityLayoutMetrics.expandedContentHeight
     static let fonts: [(String, DynamicTypeSize)] = [("large", .large), ("accessibility3", .accessibility3)]
 
     static func state(_ kind: String) -> LiveActivityContentState {
@@ -107,12 +107,12 @@ struct LiveActivityExpandedPreview: View {
                     let kind = ax ? (index == 0 ? "custom" : index == 1 ? "nextCourse" : "academicOverview") : token
                     let stale = ax && index == 1
                     let state = ax && index == 2 ? LiveActivityUIFixture.missing(kind) : LiveActivityUIFixture.state(kind)
-                    Text("\(Int(width)) × 130pt 下区 · \(ax ? "AX3" : "标准字号") · \(stale ? "过期待更新" : index == 2 && ax ? "nil 元数据" : state.sourceTitle)")
+                    Text("\(Int(width)) × 100pt 下区 · \(ax ? "AX3" : "标准字号") · \(stale ? "过期待更新" : index == 2 && ax ? "nil 元数据" : state.sourceTitle)")
                         .font(.caption).foregroundStyle(.secondary)
                     LiveActivityExpandedContent(state: state, isStale: stale)
                         .environment(\.dynamicTypeSize, ax ? .accessibility3 : .large)
                         .environment(\.colorScheme, .dark)
-                        .frame(width: width, height: 130, alignment: .topLeading)
+                        .frame(width: width, height: LiveActivityUIFixture.budget, alignment: .topLeading)
                         .background(Color.black, in: RoundedRectangle(cornerRadius: 12))
                 }
             }.padding(8)
@@ -182,10 +182,10 @@ private func measuredActivity<Content: View>(_ content: Content, width: CGFloat,
     for (label, size) in [("intrinsic", intrinsic), ("fitted", fitted)] {
         try require(size.width.isFinite && size.height.isFinite && size.width > 0 && size.height > 0,
                     label + " invalid hosting size")
-        try require(size.width <= width + 0.5 && size.height <= 130.5,
-                    label + " exceeds 130pt lower-region budget: \(size)")
+        try require(size.width <= width + 0.5 && size.height <= LiveActivityUIFixture.budget + 0.5,
+                    label + " exceeds 100pt lower-region budget: \(size)")
     }
-    host.view.frame = CGRect(x: 0, y: 0, width: width, height: 130)
+    host.view.frame = CGRect(x: 0, y: 0, width: width, height: LiveActivityUIFixture.budget)
     host.view.setNeedsLayout(); host.view.layoutIfNeeded()
     // Preferences are delivered after real SwiftUI placement, not during synthetic calculations.
     for _ in 0..<30 {
@@ -200,12 +200,12 @@ private func measuredActivity<Content: View>(_ content: Content, width: CGFloat,
     let prefix = shared ? String(bodies.keys.first!.dropLast(5)) : "metric"
     try require(bounds[prefix + ".label"] != nil && bounds[prefix + ".value"] != nil,
                 "actual metric label/value Text placement probes missing")
-    let region = CGRect(x: -0.5, y: -0.5, width: width + 1, height: 131)
+    let region = CGRect(x: -0.5, y: -0.5, width: width + 1, height: LiveActivityUIFixture.budget + 1)
     for (key, rect) in bounds {
         try require(rect.origin.x.isFinite && rect.origin.y.isFinite && rect.width.isFinite && rect.height.isFinite,
                     "nonfinite rendered bounds: " + key)
         try require(rect.width > 0 && rect.height > 0 && region.contains(rect),
-                    "rendered bounds exceed 130pt (fixed parent must not hide overflow): \(key)=\(rect)")
+                    "rendered bounds exceed 100pt (fixed parent must not hide overflow): \(key)=\(rect)")
     }
     // Body is an ancestor. All other probes mark sibling rendered title, metric Text,
     // optional subtitle, individual detail cells, or footer (never overlapping ancestors).
@@ -280,11 +280,11 @@ func runLiveActivityLayoutChecks() async {
             lines.append("NEGATIVE-CONTROL: negative-overlap-rejected")
         }
         do {
-            _ = try await measuredActivity(Text("故意超过高度").frame(height: 131), width: 330,
+            _ = try await measuredActivity(Text("故意超过高度").frame(height: LiveActivityUIFixture.budget + 1), width: 330,
                 font: .large, container: container, name: "negative-oversize", shared: false)
-            throw NetworkError(message: "Height oracle accepted a real 131pt intrinsic view")
+            throw NetworkError(message: "Height oracle accepted a real oversized intrinsic view")
         } catch {
-            guard error.localizedDescription.contains("exceeds 130pt lower-region budget") else { throw error }
+            guard error.localizedDescription.contains("exceeds 100pt lower-region budget") else { throw error }
             negativeCount += 1
             lines.append("NEGATIVE-CONTROL: negative-oversize-rejected")
         }
@@ -292,7 +292,7 @@ func runLiveActivityLayoutChecks() async {
             throw NetworkError(message: "Incomplete real layout matrix")
         }
         let coverage: [String: Any] = ["shared_view_cases": sharedCount, "metric_layout_cases": metricCount,
-            "negative_controls": negativeCount, "widths_pt": [330, 350, 370], "max_height_pt": 130,
+            "negative_controls": negativeCount, "widths_pt": [330, 350, 370], "max_height_pt": 100, "expanded_max_height_pt": 160, "reserved_height_pt": 60,
             "kinds": LiveActivityUIFixture.kinds, "dynamic_types": ["large", "accessibility3"],
             "variants": ["fresh", "stale", "nil-metadata"], "timer_modes": ["system-Text", "multi-day-string"]]
         let json = String(data: try JSONSerialization.data(withJSONObject: coverage, options: [.sortedKeys]), encoding: .utf8)!

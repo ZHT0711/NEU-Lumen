@@ -5,10 +5,10 @@ enum AppDestination: Hashable {
     case web(URL)
     case card
     case academic
+    case nativeService(NativeCampusService)
 
-    /// 收藏、服务大厅使用同一路由；原生化入口仍保留各页的官网回退。
+    /// 门户应用和收藏始终使用学校提供的原始地址。
     static func service(_ app: PortalApp) -> AppDestination? {
-        if app.nativeDestination == .academic { return .academic }
         guard let url = URL(string: app.entryUrl()),
               ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
               url.host != nil, url.user == nil, url.password == nil else { return nil }

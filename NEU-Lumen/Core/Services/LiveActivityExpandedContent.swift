@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The widget AND simulator validation render this view. The 130pt lower region
-/// leaves approximately 30pt for the system camera/leading/trailing regions.
+/// Reserve 60pt of the full 160pt expanded island for the sensor/header and system margins.
+/// This is the lower content region, not the full system container.
 /// ViewThatFits drops lower-priority rows at larger text sizes; nothing is placed
 /// over the camera, offset outside a region, or hidden behind a clipping mask.
 struct LiveActivityExpandedContent: View {
@@ -16,9 +16,13 @@ struct LiveActivityExpandedContent: View {
                 .fixedSize(horizontal: false, vertical: true)
             content(detailLimit: 2, titleLines: 1, compact: true, footer: true)
                 .fixedSize(horizontal: false, vertical: true)
+            content(detailLimit: 2, titleLines: 1, compact: true, footer: false)
+                .fixedSize(horizontal: false, vertical: true)
             content(detailLimit: 0, titleLines: 1, compact: true, footer: false)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(maxHeight: LiveActivityLayoutMetrics.expandedContentHeight, alignment: .topLeading)
         .accessibilityElement(children: .contain)
@@ -29,7 +33,7 @@ struct LiveActivityExpandedContent: View {
         let hasFooterContent = isStale || state.updatedAt != .distantPast || state.progress?.isFinite == true
         return VStack(alignment: .leading, spacing: compact ? 4 : 5) {
             Text(state.displayTitle(isStale: isStale))
-                .font(compact ? .subheadline.weight(.semibold) : .headline)
+                .font(compact ? .system(size: 15, weight: .semibold) : .headline)
                 .lineLimit(titleLines)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -99,7 +103,7 @@ struct LiveActivityMetricRow: View {
     var body: some View {
         LiveActivityMetricLayout {
             Text(label)
-                .font(.caption2)
+                .font(compact ? .system(size: 11) : .caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -113,7 +117,7 @@ struct LiveActivityMetricRow: View {
                     Text(state.displayValue(isStale: isStale))
                 }
             }
-            .font(compact ? .caption.monospacedDigit().weight(.semibold) : .title3.monospacedDigit().weight(.semibold))
+            .font(compact ? .system(size: 17, weight: .semibold, design: .monospaced) : .title3.monospacedDigit().weight(.semibold))
             .foregroundStyle(liveActivityAccent(state.accent))
             .lineLimit(1)
             .minimumScaleFactor(LiveActivityLayoutMetrics.valueMinimumScale)

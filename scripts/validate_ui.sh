@@ -70,14 +70,14 @@ SERVER_PID=$!
 trap 'kill "$SERVER_PID" || true' EXIT
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom; do
+for SCREEN in home home-nanhu schedule services grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-vpn native-affairs native-mail; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN"
   sleep 3
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done
 
 # Actual production shared lower-region views, not a drawn Dynamic Island mock.
-# All widths are 330/350/370pt with 130pt lower regions; captions explicitly exclude system/device claims.
+# All widths are 330/350/370pt with 100pt lower regions; captions explicitly exclude system/device claims.
 for KIND in nextCourse cardBalance netBalance electricBalance assignments planner dayOverview academicOverview custom ax-stale; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=live-expanded-$KIND"
   sleep 3
@@ -208,4 +208,27 @@ grep -q "^PASS:" "$OUTPUT/live-activity-checks.txt"
 xcrun simctl launch "$SIM_ID" com.apple.Preferences
 sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
+# Capture the actual SpringBoard-expanded island, not the app-hosted preview.
+swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
+for KIND in nextCourse custom electricBalance; do
+  rm -f "$CONTAINER/Documents/system-island-ready.txt" "$CONTAINER/Documents/system-island-sent.txt"
+  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--system-island=$KIND"
+  for _ in $(seq 1 120); do
+    if [[ -f "$CONTAINER/Documents/system-island-ready.txt" ]]; then break; fi
+    sleep 0.25
+  done
+  grep -q "^READY:" "$CONTAINER/Documents/system-island-ready.txt"
+  xcrun simctl launch "$SIM_ID" com.apple.Preferences
+  for _ in $(seq 1 120); do
+    if [[ -f "$CONTAINER/Documents/system-island-sent.txt" ]]; then break; fi
+    sleep 0.1
+  done
+  cat "$CONTAINER/Documents/system-island-sent.txt"
+  grep -q "^PASS:" "$CONTAINER/Documents/system-island-sent.txt"
+  sleep 0.8
+  xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/system-island-$KIND.png"
+  "$PREVIEW/system-island-check" "$OUTPUT/system-island-$KIND.png" "$KIND" 2>&1 | tee -a "$OUTPUT/system-island-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
+  xcrun simctl terminate "$SIM_ID" edu.neu.lumen || true
+done
+
 python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"

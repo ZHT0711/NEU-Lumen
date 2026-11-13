@@ -44,14 +44,12 @@ for entry in ["https://jwxt.neu.edu.cn", "https://jwxt.neu.edu.cn/",
               "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do",
               "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/home/index.html?av=&contextPath=/jwapp"] {
     let official = routingApp(entry)
-    precondition(AppDestination.service(official) == .academic, "核实的官方首页进入原生教务")
-    precondition(official.nativeSymbol == "graduationcap.fill", "原生入口不下载外站图标")
+    precondition(AppDestination.service(official) == .web(URL(string: entry)!), "学校教务入口始终打开原网页")
 }
 for entry in ["https://jwxt.neu.edu.cn/jwapp/sys/registration/index.do",
               "http://jwxt.neu.edu.cn/", "https://jwxt.neu.edu.cn:8443/",
               "https://jwxt.neu.edu.cn.evil.example/", "https://legacy.example/教务"] {
     let external = routingApp(entry)
-    precondition(external.nativeDestination == nil, "不同功能、旧入口和外站不被重写")
     precondition(AppDestination.service(external) == .web(URL(string: external.entryUrl())!), "原网页入口仍可用")
 }
 precondition(AppDestination.service(routingApp("https://user:password@jwxt.neu.edu.cn/")) == nil,
@@ -59,7 +57,7 @@ precondition(AppDestination.service(routingApp("https://user:password@jwxt.neu.e
 precondition(AppDestination.service(routingApp("https://jwxt.neu.edu.cn/", mobile: "https://library.example/")) == .web(URL(string: "https://library.example/")!),
              "继续优先使用门户移动端地址，不按名称误路由")
 precondition(AppDestination.service(routingApp("", id: "")) == nil, "空地址和空应用 ID 不生成虚假入口")
-print("Native academic routing: 12 real production routing cases passed")
+print("Original portal routing: academic URLs, mobile URLs and favorites preserve school destinations")
 
 // 整周相同时间的课程曾经会互相打断合并。
 func occurrence(_ day: String, _ start: Int, _ end: Int, name: String = "高等数学", room: String = "A101",
@@ -173,3 +171,13 @@ let transferred = CookieJar(); transferred.absorb(jar.allCookies())
 precondition(transferred.headerFor(URL(string:"https://jwxt.neu.edu.cn/jwapp/api")!) == header, "WebKit Cookie 传递保留路径和属性")
 jar.clear(); precondition(jar.allCookies().isEmpty, "退出清除会话")
 print("Cookies: 7 checks passed")
+
+let nativePayment = NativeCampusService.payment
+precondition(NativeCampusService.allCases.count == 5)
+precondition(nativePayment.entryURL(apps: [routingApp("https://pay.neu.edu.cn.evil.example/",id:"62")]) == nativePayment.fallbackURL)
+precondition(nativePayment.entryURL(apps: [routingApp("https://pay.neu.edu.cn:8443/",id:"62")]) == nativePayment.fallbackURL)
+precondition(NativeCampusService.mail.owns(host: "mails.neu.edu.cn") && !NativeCampusService.mail.owns(host: "mails.neu.edu.cn.evil.example"))
+let mailRows = try NativeMailProtocol.messages([["id":"fixture-1","subject":"合成邮件","sender":"fixture@example.invalid","unread":false]])
+precondition(mailRows.count == 1 && mailRows[0].unread == false)
+do { _ = try NativeMailProtocol.messages([["id":"x"],["id":"x"]]); preconditionFailure("Duplicate mail IDs must fail") } catch { }
+print("Native services: original routes, verified hosts, five native services and Coremail decoder passed")

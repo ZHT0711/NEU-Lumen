@@ -288,8 +288,8 @@ for width in [CGFloat(220), 280, 330, 350, 370] {
 }
 precondition(LiveActivityLayoutMetrics.detailColumns(width: 330, accessibility: false) == 2)
 precondition(LiveActivityLayoutMetrics.detailColumns(width: 370, accessibility: true) == 1)
-precondition(LiveActivityLayoutMetrics.expandedContentHeight == 130)
-print("Live activity geometry: 100 real-policy width/label/timer plans are bounded, nonoverlapping; 130pt budget and accessibility reflow passed")
+precondition(LiveActivityLayoutMetrics.expandedContentHeight + LiveActivityLayoutMetrics.expandedReservedHeight == 160)
+print("Live activity geometry: 100 real-policy width/label/timer plans are bounded, nonoverlapping; 100pt lower-region / 160pt full-island budget and accessibility reflow passed")
 // END standalone presentation checks
 
 let detailedCourse = CourseOccurrence(date: date(12), slot: CourseSlot(weekday: 4,

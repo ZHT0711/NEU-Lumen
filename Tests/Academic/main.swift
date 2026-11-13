@@ -79,3 +79,37 @@ rejects("different page account") { _ = try AcademicPageReader.decode(fixtures["
 rejects("different source URL") { _ = try AcademicPageReader.decode(fixtures["page"]!, expectedAccount: "SYNTH-A", expectedSourceURL: URL(string:"https://example.invalid/jwapp/page")!) }
 rejects("unrecognized page not empty curriculum") { _ = try AcademicPageReader.decode(["error":"format"], expectedAccount:"SYNTH-A", expectedSourceURL:pageURL) }
 print("Academic Swift parser/policy: \(checks) checks passed (synthetic only)")
+
+func planCourse(_ code: String, status: String?, credits: String?, module: String = "基础", term: String = "第1学期") -> AcademicPageCourse {
+    AcademicPageCourse(id: "page-local-row-0", name: "课程" + code, code: code, creditsText: credits,
+        module: module, studyStatus: status, suggestedTerm: term, category: "必修", hoursText: "32", scoreText: nil, assessment: "考试")
+}
+let done = planCourse("A", status: "已通过", credits: "2.5")
+let pending = planCourse("B", status: "未完成", credits: "待定")
+let studying = planCourse("C", status: "重修中", credits: "0")
+let failed = planCourse("D", status: "未通过", credits: "3学分", module: "专业")
+expect(done.status == .completed && pending.status == .pending && failed.status == .failed, "negative states do not become passed")
+expect(studying.status == .inProgress && studying.credits == 0, "explicit zero credits and in-progress status")
+expect(pending.credits == nil, "unknown credits are not zero")
+let noState = planCourse("E", status: nil, credits: "1")
+expect(noState.status == .unknown, "missing completion does not imply passed")
+let merged = AcademicPlanPresentation.merge([done, pending], [studying, planCourse("A", status: "已完成", credits: "3")])
+expect(merged.count == 3 && Set(merged.map(\.id)).count == 3, "pagination merges and gives unique row IDs")
+expect(merged.first?.credits == 3, "new page updates an existing course")
+let grouped = AcademicPlanPresentation.groups([done,pending,studying,failed], query: "", status: nil, grouping: .module)
+expect(grouped.count == 2 && grouped.first?.unknownCredits == 1, "module summaries retain missing-credit counts")
+expect(AcademicPlanPresentation.groups([done,pending], query: "B", status: .pending, grouping: .term).first?.courses.count == 1,
+       "course search and status filter intersect")
+var savedPlan = page; savedPlan.planID = "SYNTH-PLAN-A"; savedPlan.courses = merged
+let cacheRoot = FileManager.default.temporaryDirectory.appendingPathComponent("academic-cache-" + UUID().uuidString, isDirectory: true)
+var planCache = AcademicPlanCacheStore(account: "SYNTH-A", planID: "SYNTH-PLAN-A"); planCache.directory = cacheRoot
+try planCache.save(savedPlan)
+expect(planCache.load()?.courses == merged, "course details survive disk round-trip")
+var otherAccount = AcademicPlanCacheStore(account: "SYNTH-B", planID: "SYNTH-PLAN-A"); otherAccount.directory = cacheRoot
+var otherPlan = AcademicPlanCacheStore(account: "SYNTH-A", planID: "SYNTH-PLAN-B"); otherPlan.directory = cacheRoot
+expect(otherAccount.load() == nil && otherPlan.load() == nil, "account and plan cache isolation")
+rejects("cannot bind another account") { try otherAccount.save(savedPlan) }
+try planCache.clear()
+expect(planCache.load() == nil, "clear removes only this plan snapshot")
+try FileManager.default.removeItem(at: cacheRoot)
+print("Academic plan browsing: status, credits, filtering, page merge and isolated persistent cache passed")

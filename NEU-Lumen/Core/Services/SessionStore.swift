@@ -460,7 +460,11 @@ final class SessionStore {
         credentialSaveError = nil
         if let learning = learningSessions { clearWebSession(learning) }
         if let user {
-            LearningBrowserProfiles(defaults: defaults).retire(account: user.sid.isEmpty ? user.uid : user.sid)
+            let account = user.sid.isEmpty ? user.uid : user.sid
+            for service in NativeCampusService.allCases {
+                clearWebSession(KeychainWebSessionStore(account: "service." + service.rawValue + "." + account))
+            }
+            LearningBrowserProfiles(defaults: defaults).retire(account: account)
             Task { await cleanRetiredLearningBrowsers() }
         }
         lastSavedLearningSession = nil

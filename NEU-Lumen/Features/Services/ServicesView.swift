@@ -72,6 +72,8 @@ struct ServicesView: View {
                     CardView()
                 case .academic:
                     AcademicCenterView()
+                case .nativeService(let service):
+                    NativeServiceHost(initial: service)
                 }
             }
         }
@@ -98,38 +100,16 @@ struct ServicesView: View {
 
     @ViewBuilder
     private var nativeStudyServices: some View {
-        if !favoritesOnly && (selectedCategory == nil || selectedCategory == "教学学习") {
-            let academicVisible = keyword.isEmpty || "教务 校历 培养计划 学业查询".localizedCaseInsensitiveContains(keyword)
-            if academicVisible {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("原生教务服务").font(.subheadline.bold())
-                    GlassCard {
-                        nativeServiceRow("教务查询", subtitle: "校历 · 培养计划 · 学业信息", icon: "graduationcap.fill", destination: .academic)
-                    }
+        if !favoritesOnly {
+            let services = NativeCampusService.allCases.filter {
+                keyword.isEmpty || ($0.title + $0.subtitle).localizedCaseInsensitiveContains(keyword)
+            }
+            if !services.isEmpty {
+                NativeServicesCarousel(services: services) { service in
+                    path.append(.nativeService(service))
                 }
             }
         }
-    }
-
-    private func nativeServiceRow(_ title: String, subtitle: String, icon: String, destination: AppDestination) -> some View {
-        Button { path.append(destination) } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon).font(.title3).foregroundStyle(AppTheme.accent)
-                    .frame(width: 32, height: 36).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("services.academic")
     }
 
     private var categoryChips: some View {

@@ -86,6 +86,18 @@ class AcademicContracts(unittest.TestCase):
         self.assertIn('environment.session.requestEpoch.uuidString', view)
         self.assertIn('暂不可原生读取', view)
 
+    def test_original_portal_routes_and_single_native_entry(self):
+        navigation = (ROOT/'NEU-Lumen/App/Navigation.swift').read_text()
+        services = (ROOT/'NEU-Lumen/Features/Services/ServicesView.swift').read_text()
+        profile = (ROOT/'NEU-Lumen/Features/Profile/ProfileView.swift').read_text()
+        grades = (ROOT/'NEU-Lumen/Features/Grades/GradesView.swift').read_text()
+        self.assertNotIn('nativeDestination', navigation)
+        self.assertIn('return .web(url)', navigation)
+        self.assertIn('NativeServicesCarousel(services: services)', services)
+        self.assertEqual(services.count('path.append(.nativeService(service))'), 1)
+        self.assertNotIn('AcademicCenterView()', grades)
+        self.assertNotIn('AcademicCenterView()', profile.split('var body:',1)[1].split('.navigationDestination',1)[0])
+
     def test_navigation_and_accessibility_contract(self):
         hub = (ROOT/'NEU-Lumen/Features/Academic/AcademicCenterView.swift').read_text()
         plan = (ROOT/'NEU-Lumen/Features/Academic/AcademicPlanView.swift').read_text()
@@ -94,7 +106,8 @@ class AcademicContracts(unittest.TestCase):
         self.assertIn('NavigationLink { AcademicPlanView()', hub)
         self.assertNotIn('academicMode: true', hub+plan+WEB)
         self.assertIn('accessibilityElement(children: .combine)', plan)
-        self.assertIn('需网页同步', plan)
+        self.assertIn('AcademicWebSyncSheet(plan: plan)', plan)
+        self.assertIn('repo.restoreAcademicPlan(id)', plan)
 
 if __name__ == '__main__':
     args = argparse.ArgumentParser()
@@ -107,6 +120,7 @@ if __name__ == '__main__':
     swift = shutil.which('swiftc')
     if swift:
         sources = [MODELS/'AcademicQueries.swift', MODELS/'AcademicQueryParser.swift', MODELS/'AcademicPageReader.swift',
+                   MODELS/'AcademicPlanPresentation.swift', CORE/'Persistence/AcademicPlanCacheStore.swift',
                    MODELS/'DataReliability.swift', CORE/'Support/LoadState.swift', ROOT/'Tests/Academic/main.swift']
         with tempfile.TemporaryDirectory(prefix='lumen-academic-') as tmp:
             binary = Path(tmp)/'academic-tests'

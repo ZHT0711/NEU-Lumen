@@ -29,7 +29,9 @@ enum AcademicPageReader {
             guard let name = AcademicQueryParser.scalar(row["name"]) else { throw AcademicQueryError.invalid("网页课程") }
             return AcademicPageCourse(id: "\(index)", name: name, code: AcademicQueryParser.scalar(row["code"]),
                 creditsText: AcademicQueryParser.scalar(row["creditsText"]), module: AcademicQueryParser.scalar(row["module"]),
-                studyStatus: AcademicQueryParser.scalar(row["studyStatus"]), suggestedTerm: AcademicQueryParser.scalar(row["suggestedTerm"]))
+                studyStatus: AcademicQueryParser.scalar(row["studyStatus"]), suggestedTerm: AcademicQueryParser.scalar(row["suggestedTerm"]),
+                category: AcademicQueryParser.scalar(row["category"]), hoursText: AcademicQueryParser.scalar(row["hoursText"]),
+                scoreText: AcademicQueryParser.scalar(row["scoreText"]), assessment: AcademicQueryParser.scalar(row["assessment"]))
         }
         return AcademicPageSnapshot(account: account, title: AcademicQueryParser.scalar(map["title"]) ?? "教务当前页面",
             sourceURL: source, courses: courses, recognizedTables: count, updatedAt: now)
@@ -82,7 +84,10 @@ enum AcademicPageReader {
     const names = {
         name:['课程名称','课程名'], code:['课程代码','课程号','课程编码'], creditsText:['学分','课程学分'],
         module:['课程模块','模块','模块名称','所属模块'], studyStatus:['修读状态','修读情况','完成情况'],
-        suggestedTerm:['建议学期','建议修读学期','开课学期']
+        suggestedTerm:['建议学期','建议修读学期','开课学期','修读学期','学期'],
+        category:['课程性质','课程属性','课程类别','必选修','课程类型'],
+        hoursText:['学时','总学时','课程学时'], scoreText:['成绩','总评成绩','最终成绩'],
+        assessment:['考核方式','考试方式']
     };
     const visible = el => {
         try {

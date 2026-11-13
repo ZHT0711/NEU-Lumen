@@ -99,6 +99,7 @@ struct TodoItem: Identifiable, Hashable {
     let percent: Int
     let time: String
     let url: String
+    var progressKnown = true
 
     var id: String { "\(title)|\(instance)|\(time)" }
 }

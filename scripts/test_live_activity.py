@@ -76,7 +76,8 @@ class ExpandedActivityContracts(unittest.TestCase):
         self.assertIn('ViewThatFits(in: .vertical)', shared)
         for limit in [6, 4, 2, 0]:
             self.assertIn(f'content(detailLimit: {limit}', shared)
-        self.assertIn('expandedContentHeight: CGFloat = 130', model)
+        self.assertIn('expandedMaximumHeight: CGFloat = 160', model)
+        self.assertIn('expandedReservedHeight: CGFloat = 60', model)
         self.assertIn('.frame(maxHeight: LiveActivityLayoutMetrics.expandedContentHeight', shared)
         self.assertIn('Text(timerInterval:', shared)
         self.assertIn('.lineLimit(1)', shared)

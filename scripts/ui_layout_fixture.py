@@ -5,13 +5,13 @@ import shutil
 # Exact replace hooks fail closed if the real component changes; no substitute view.
 HOOKS = (
     ('                .frame(maxWidth: .infinity, alignment: .leading)\n            if let subtitle',
-     '                .frame(maxWidth: .infinity, alignment: .leading)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit).title"))\n            if let subtitle'),
+     '                .frame(maxWidth: .infinity, alignment: .leading)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).title"))\n            if let subtitle'),
     ('Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)',
-     'Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)\n                    .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit).subtitle"))'),
+     'Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)\n                    .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).subtitle"))'),
     ('                .font(.caption2)\n                .lineLimit(1)\n                .minimumScaleFactor(0.8)',
-     '                .font(.caption2)\n                .lineLimit(1)\n                .minimumScaleFactor(0.8)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit).footer"))'),
+     '                .font(.caption2)\n                .lineLimit(1)\n                .minimumScaleFactor(0.8)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).footer"))'),
     ('        .frame(maxWidth: .infinity, alignment: .leading)\n    }\n}\n\nstruct LiveActivityMetricRow',
-     '        .frame(maxWidth: .infinity, alignment: .leading)\n        .environment(\\.liveActivityUIProbePrefix, "candidate-\\(detailLimit)")\n        .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit).body"))\n    }\n}\n\nstruct LiveActivityMetricRow'),
+     '        .frame(maxWidth: .infinity, alignment: .leading)\n        .environment(\\.liveActivityUIProbePrefix, "candidate-\\(detailLimit)-\\(footer)")\n        .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).body"))\n    }\n}\n\nstruct LiveActivityMetricRow'),
     ('    var compact = false\n',
      '    var compact = false\n    @Environment(\\.liveActivityUIProbePrefix) private var probePrefix\n'),
     ('                .minimumScaleFactor(0.8)\n            Group {',
