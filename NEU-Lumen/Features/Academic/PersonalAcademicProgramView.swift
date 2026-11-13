@@ -88,6 +88,8 @@ private struct PersonalAcademicProgramDetail: View {
     @State private var selected: AcademicProgramNode?
     @State private var query = ""
     @State private var zoom = 1.0
+    @State private var viewport = CGSize.zero
+    @State private var fitted = false
     @State private var showOutline = false
     @ScaledMetric(relativeTo: .body) private var nodeScale: CGFloat = 1
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -108,6 +110,7 @@ private struct PersonalAcademicProgramDetail: View {
                         Menu("展开与缩放", systemImage: "slider.horizontal.3") {
                             Button(showOutline ? "查看思维导图" : "查看层级大纲") { showOutline.toggle() }
                             if !showOutline {
+                                Button("适应屏幕") { fit(tree, size: viewport) }
                                 Button("展开全部") { collapsed = [] }
                                 Button("收起到平台") { collapsed = Set(tree.nodes.filter { $0.parentID != nil }.map(\.id)) }
                                 Button("恢复大小") { zoom = 1 }
@@ -135,7 +138,7 @@ private struct PersonalAcademicProgramDetail: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("培养方案详情").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) {
-            selected = nil; collapsed = []; query = ""
+            selected = nil; collapsed = []; query = ""; fitted = false
             showOutline = typeSize.isAccessibilitySize
             await store.load(session: environment.session, program: program)
             if let tree = store.tree { collapsed = Set(tree.nodes.filter(\.inherited).map(\.id)) }
@@ -153,7 +156,8 @@ private struct PersonalAcademicProgramDetail: View {
         let layout = AcademicProgramLayout(tree: tree, collapsed: collapsed, query: query)
         let width = CGFloat(layout.columns * 284 + 24) * nodeScale, height = CGFloat(layout.height + 24) * nodeScale
         let positions = Dictionary(uniqueKeysWithValues: layout.items.map { ($0.id, CGPoint(x: CGFloat($0.depth * 284 + 136) * nodeScale, y: CGFloat($0.y + 12) * nodeScale)) })
-        return ScrollView([.horizontal, .vertical]) {
+        return GeometryReader { geometry in
+          ScrollView([.horizontal, .vertical]) {
             if layout.items.isEmpty { ContentUnavailableView.search(text: query).frame(width: 320, height: 200) }
             else {
                 ZStack(alignment: .topLeading) {
@@ -173,7 +177,20 @@ private struct PersonalAcademicProgramDetail: View {
                     .scaleEffect(zoom, anchor: .topLeading)
                     .frame(width: width * zoom, height: height * zoom, alignment: .topLeading)
             }
+          }
+          .onChange(of: geometry.size, initial: true) { _, size in
+              viewport = size
+              if !fitted { fit(tree, size: size); fitted = true }
+          }
         }
+    }
+
+    private func fit(_ tree: AcademicProgramTree, size: CGSize) {
+        guard size.width > 0, size.height > 0 else { return }
+        let layout = AcademicProgramLayout(tree: tree, collapsed: collapsed, query: query)
+        let width = CGFloat(layout.columns * 284 + 24) * nodeScale
+        let height = CGFloat(layout.height + 24) * nodeScale
+        zoom = Double(max(0.4, min(1, min(size.width / width, size.height / height))))
     }
 
     private func outline(_ tree: AcademicProgramTree) -> some View {
