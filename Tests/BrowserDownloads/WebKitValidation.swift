@@ -327,6 +327,10 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     result = try await call("act", token: snapshot.token, action: submit.id, values: values)
     try require(result["error"] as? String == "stale", "consumed snapshot blocks duplicate actions")
     snapshot = try await read()
+    _ = try await web.evaluateJavaScript("document.querySelector('form').action='/changed-synthetic-destination'")
+    result = try await call("act", token: snapshot.token, action: submit.id)
+    try require(result["error"] as? String == "stale", "changed form destination invalidates confirmation")
+    snapshot = try await read()
     guard let order = snapshot.actions.first(where: { $0.title == "查看合成订单" }) else { throw NetworkError(message: "Missing order action") }
     _ = try await web.evaluateJavaScript("document.getElementById('amount').textContent='99.00'")
     result = try await call("act", token: snapshot.token, action: order.id)

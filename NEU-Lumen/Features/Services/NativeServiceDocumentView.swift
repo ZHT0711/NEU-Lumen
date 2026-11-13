@@ -112,7 +112,7 @@ struct NativeServiceDocumentView: View {
         } else if field.kind == "select" || field.kind == "radio" {
             Picker(title, selection: binding) {
                 if !field.options.contains(where: { $0.value == binding.wrappedValue }) { Text("请选择").tag(binding.wrappedValue) }
-                ForEach(field.options) { option in Text(option.title).tag(option.value) }
+                ForEach(Array(field.options.enumerated()), id: \.offset) { _, option in Text(option.title).tag(option.value) }
             }
         } else if field.kind == "textarea" {
             VStack(alignment: .leading) {

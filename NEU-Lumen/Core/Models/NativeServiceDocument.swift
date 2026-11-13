@@ -46,6 +46,9 @@ struct NativeServiceDocument: Decodable {
         el.getAttribute('placeholder') || el.getAttribute('title') || el.name || el.id,256);
     const text=el=>clean(el.innerText || el.textContent);
     const context=el=>clean(el.closest('tr,form,article,section')?.innerText,4096);
+    const actionState=el=>JSON.stringify([el.getAttribute('href'),el.getAttribute('onclick'),el.getAttribute('formaction'),
+        el.getAttribute('formmethod'),el.getAttribute('target'),el.getAttribute('type'),el.form?.action,el.form?.method,
+        el.getAttribute('aria-disabled')]);
     const currentValue=entry=>entry.kind==='radio'?entry.nodes.find(x=>x.checked)?.value || '':
         entry.kind==='checkbox'?String(entry.node.checked):String(entry.node.value);
     const docs=[];
@@ -63,7 +66,7 @@ struct NativeServiceDocument: Decodable {
         const selected=state.actions.get(actionID);
         if (command==='act' && (!selected || !selected.node.isConnected || !visible(selected.node) || selected.node.disabled ||
             clean(selected.node.innerText || selected.node.value || selected.node.getAttribute('aria-label'),256)!==selected.label ||
-            context(selected.node)!==selected.context)) return {error:'stale'};
+            context(selected.node)!==selected.context || actionState(selected.node)!==selected.signature)) return {error:'stale'};
         if (state.hidden.some(entry=>!entry.node.isConnected || entry.node.value!==entry.value)) return {error:'stale'};
         // Check the complete snapshot before writing any fields. Re-read after
         // page-side changes to avoid applying values to a changed order/form.
@@ -106,7 +109,8 @@ struct NativeServiceDocument: Decodable {
             el.dispatchEvent(new win.Event('change',{bubbles:true}));
         }
         if (command==='fill') return {filled:true};
-        if (state.hidden.some(entry=>!entry.node.isConnected || entry.node.value!==entry.value) || context(selected.node)!==selected.context)
+        if (state.hidden.some(entry=>!entry.node.isConnected || entry.node.value!==entry.value) ||
+            context(selected.node)!==selected.context || actionState(selected.node)!==selected.signature)
             return {error:'stale'};
         const el=selected.node;
         const form=el.form || el.closest('form');
@@ -133,7 +137,9 @@ struct NativeServiceDocument: Decodable {
             }
             if (fields.length>=200) { needsWeb=true; break; }
             if (kind==='radio' && radios.has(el)) continue;
+            if (kind==='radio' && !el.name) { needsWeb=true; continue; }
             const nodes=kind==='radio'?Array.from(doc.querySelectorAll('input[type=radio]')).filter(x=>x.name===el.name && x.form===el.form && visible(x)):null;
+            if (nodes && el.disabled && nodes.some(x=>!x.disabled)) continue;
             if (nodes) nodes.forEach(x=>radios.add(x));
             const id='f'+serial++, name=kind==='radio'?clean(el.closest('fieldset')?.querySelector('legend')?.textContent || el.name || label(el),256):label(el);
             if (!name) { needsWeb=true; continue; }
@@ -143,7 +149,7 @@ struct NativeServiceDocument: Decodable {
             const entry={node:el,nodes,kind,disabled:el.disabled,readOnly:el.readOnly};
             entry.original=currentValue(entry);
             state.fields.set(id,entry);
-            fields.push({id,label:name,kind,value:entry.original,required:!!el.required,readOnly:!!(el.disabled||el.readOnly),options});
+            fields.push({id,label:name,kind,value:entry.original,required:nodes?nodes.some(x=>x.required):!!el.required,readOnly:!!(el.disabled||el.readOnly),options});
         }
         for (const table of doc.querySelectorAll('table')) {
             if (!visible(table) || table.querySelector('table')) continue;
@@ -155,11 +161,11 @@ struct NativeServiceDocument: Decodable {
             if (tables.length>=30) { needsWeb=true; break; }
         }
         for (const el of doc.querySelectorAll('a[href],button,input[type=submit],input[type=button],[role=button]')) {
-            if (!visible(el) || el.disabled || el.closest('form')?.querySelector('input[type=password]')) continue;
+            if (!visible(el) || el.disabled || el.getAttribute('aria-disabled')==='true' || el.closest('form')?.querySelector('input[type=password]')) continue;
             const title=clean(el.innerText || el.value || el.getAttribute('aria-label'),256);
             if (!title) continue;
             const id='a'+serial++;
-            state.actions.set(id,{node:el,label:title,context:context(el)});
+            state.actions.set(id,{node:el,label:title,context:context(el),signature:actionState(el)});
             actions.push({id,title,context:context(el)});
             if (actions.length>=200) { needsWeb=true; break; }
         }
