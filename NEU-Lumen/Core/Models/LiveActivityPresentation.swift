@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 /// Small, source-neutral rows. Optional timing flag keeps older JSON decodable.
 struct LiveActivityDetail: Codable, Hashable {

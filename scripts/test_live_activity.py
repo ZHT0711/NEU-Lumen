@@ -94,7 +94,7 @@ class ExpandedActivityContracts(unittest.TestCase):
         source = source.split('\n', 1)[1]
         with tempfile.TemporaryDirectory() as directory:
             main = Path(directory) / 'main.swift'
-            main.write_text('import Foundation\n' + source)
+            main.write_text('import Foundation\n#if canImport(CoreGraphics)\nimport CoreGraphics\n#endif\n' + source)
             binary = Path(directory) / 'presentation-tests'
             built = subprocess.run([shutil.which('swiftc'), '-swift-version', '5', '-warnings-as-errors',
                                     str(ROOT / 'NEU-Lumen/Core/Models/LiveActivityPresentation.swift'),

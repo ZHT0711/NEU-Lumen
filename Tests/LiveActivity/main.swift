@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 // Native regression of the Foundation-only selection/template/statistics policy.
 NSTimeZone.default = TimeZone(secondsFromGMT: 0)!
