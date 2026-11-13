@@ -29,6 +29,7 @@ final class SessionStore {
     private var keepSession = false
     private var learningSessionGeneration: UUID?
     private var learningSessionAccount: String?
+    private var lastSavedLearningSession: SavedWebSession?
     private var recoveryTask: Task<Bool, Never>?
     private var lastNetworkRecovery = Date.distantPast
     private var lastForegroundValidation = Date.distantPast
@@ -307,8 +308,23 @@ final class SessionStore {
         guard learningSessionGeneration != client.sessionGeneration || learningSessionAccount != store.account else { return }
         learningSessionGeneration = client.sessionGeneration
         learningSessionAccount = store.account
+        lastSavedLearningSession = nil
         guard let saved = store.load(), user?.isSameAccount(as: saved.user) == true else { return }
         client.restoreLearningCookies(saved.restoredCookies())
+    }
+
+    func learningBrowserIdentifier(for platform: LearningPlatform) -> UUID? {
+        guard phase == .loggedIn, let user else { return nil }
+        return LearningBrowserProfiles(defaults: defaults).identifier(
+            account: user.sid.isEmpty ? user.uid : user.sid, platform: platform)
+    }
+
+    func cleanRetiredLearningBrowsers() async {
+        #if canImport(WebKit)
+        if #available(iOS 17.0, macOS 14.0, *) {
+            await LearningBrowserProfiles(defaults: defaults).cleanRetiredStores()
+        }
+        #endif
     }
 
     /// 作业平台登录态按门户账号保存在本机，即使未勾选门户的保持登录也可恢复。
@@ -317,8 +333,11 @@ final class SessionStore {
         let cookies = client.browserCookies().filter { cookie in
             LearningPlatform.allCases.contains { $0.ownsCookie(cookie) }
         }
+        let snapshot = SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent, cookies: cookies)
+        guard snapshot != lastSavedLearningSession else { return }
         do {
-            try store.save(SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent, cookies: cookies))
+            try store.save(snapshot)
+            lastSavedLearningSession = snapshot
             sessionSaveError = nil
         } catch { sessionSaveError = NetworkError.from(error).message }
     }
@@ -440,6 +459,11 @@ final class SessionStore {
         sessionSaveError = nil
         credentialSaveError = nil
         if let learning = learningSessions { clearWebSession(learning) }
+        if let user {
+            LearningBrowserProfiles(defaults: defaults).retire(account: user.sid.isEmpty ? user.uid : user.sid)
+            Task { await cleanRetiredLearningBrowsers() }
+        }
+        lastSavedLearningSession = nil
         sessionEpoch = UUID()
         recoveryTask?.cancel()
         recoveryTask = nil

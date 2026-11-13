@@ -34,7 +34,9 @@ final class LearningWebReader {
         report.accountKey = accountKey
         let currentCookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         guard signature(currentCookies) == identity, !Task.isCancelled else { throw CancellationError() }
+        let existing = Set(currentCookies.map(SavedWebSession.Cookie.init))
         for cookie in http.cookies.allCookies() {
+            guard !existing.contains(SavedWebSession.Cookie(cookie)) else { continue }
             if let origin = URL(string: "https://" + cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))), platform.accepts(origin) {
                 await webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
             }

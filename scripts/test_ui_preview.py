@@ -165,7 +165,8 @@ class UIPreviewTests(unittest.TestCase):
     def test_download_checks_and_twentieth_screenshot_are_required(self):
         self.assertEqual(len(preview.SCREENSHOTS), 20)
         self.assertIn('downloads-light.png', preview.SCREENSHOTS)
-        for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt']:
+        for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
+                     'learning-save.txt', 'learning-restore.txt']:
             self.assertIn(name, preview.CHECKS)
             path = self.path / name
             path.write_text('FAIL: download regression\n')

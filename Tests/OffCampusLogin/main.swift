@@ -489,6 +489,34 @@ precondition(!learningRestoreClient.browserCookies().contains { $0.name == "NTES
 precondition(learningRestoreClient.browserCookies().contains { $0.name == "wengine_vpn_ticket" && $0.value == "current-ticket" })
 print("CG opaque IDs and details, expected problem counts, campus inference and per-account partial learning report merge passed")
 
+@MainActor
+func verifyLearningProfiles() {
+    let suite = "learning-profiles-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let profiles = LearningBrowserProfiles(defaults: defaults)
+    let a = profiles.identifier(account: "A", platform: .mooc)!
+    let b = profiles.identifier(account: "B", platform: .mooc)!
+    let cx = profiles.identifier(account: "A", platform: .chaoxing)!
+    precondition(a != b && a != cx && b != cx)
+    precondition(LearningBrowserProfiles(defaults: UserDefaults(suiteName: suite)!).identifier(account: "A", platform: .mooc) == a)
+    precondition(profiles.identifier(account: "", platform: .mooc) == nil)
+    precondition(profiles.identifier(account: "A", platform: .cg) == nil)
+    profiles.retire(account: "A")
+    precondition(profiles.identifier(account: "A", platform: .mooc) != a)
+    precondition(profiles.identifier(account: "A", platform: .chaoxing) != cx)
+    precondition(profiles.identifier(account: "B", platform: .mooc) == b)
+}
+verifyLearningProfiles()
+let unorderedSnapshot = SavedWebSession(user: user, userAgent: "fixture", cookies: [learningCookie, otherCookie])
+precondition(unorderedSnapshot == SavedWebSession(user: user, userAgent: "fixture", cookies: [otherCookie, learningCookie]),
+             "WebKit cookie order must not trigger repeated Keychain writes")
+precondition(unorderedSnapshot != SavedWebSession(user: user, userAgent: "fixture", cookies: [otherCookie]),
+             "Deleting a platform cookie must change the persistence snapshot")
+let renewedLearningCookie = HTTPCookie(properties: [.name: learningCookie.name, .value: "renewed", .domain: learningCookie.domain, .path: "/"])!
+precondition(unorderedSnapshot != SavedWebSession(user: user, userAgent: "fixture", cookies: [otherCookie, renewedLearningCookie]))
+print("Learning profiles: durable IDs, account/platform isolation, logout rotation and cookie snapshot deduplication passed")
+
 let legacyCourseJSON = Data(#"{"id":"1","termID":"2","title":"课程","url":"https://i.chaoxing.com/"}"#.utf8)
 let legacyCourse = try JSONDecoder().decode(LearningCourse.self, from: legacyCourseJSON)
 precondition(legacyCourse.progress == nil && legacyCourse.deadline == nil)

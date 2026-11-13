@@ -18,12 +18,12 @@ final class CookieJar {
     }
 
     /// 只在逗号后确实开始 name=value 时拆分，不截断 Expires 中的日期。
+    private static let setCookieSeparator = try! NSRegularExpression(pattern: #",(?=\s*[^\s=;,]+\s*=)"#)
     static func splitSetCookie(_ raw: String) -> [String] {
-        let regex = try! NSRegularExpression(pattern: #",(?=\s*[^\s=;,]+\s*=)"#)
         let range = NSRange(raw.startIndex..., in: raw)
         var result: [String] = []
         var start = raw.startIndex
-        for match in regex.matches(in: raw, range: range) {
+        for match in setCookieSeparator.matches(in: raw, range: range) {
             guard let comma = Range(match.range, in: raw) else { continue }
             result.append(String(raw[start..<comma.lowerBound]).trimmingCharacters(in: .whitespaces))
             start = comma.upperBound

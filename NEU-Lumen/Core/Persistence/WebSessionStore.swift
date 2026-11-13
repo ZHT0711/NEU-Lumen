@@ -3,8 +3,8 @@ import Security
 
 /// 会话 Cookie 也可能没有 Expires；主动保存它们才能跨进程恢复网页登录。
 /// 不修改学校给定的有效期，服务器明确要求重登时即清除快照。
-struct SavedWebSession: Codable {
-    struct Cookie: Codable {
+struct SavedWebSession: Codable, Equatable {
+    struct Cookie: Codable, Hashable {
         let name: String
         let value: String
         let domain: String
@@ -37,7 +37,9 @@ struct SavedWebSession: Codable {
 
     init(user: PortalUser, userAgent: String, cookies: [HTTPCookie]) {
         self.user = user; self.userAgent = userAgent
-        self.cookies = cookies.map(Cookie.init)
+        self.cookies = cookies.sorted {
+            [$0.domain, $0.path, $0.name].lexicographicallyPrecedes([$1.domain, $1.path, $1.name])
+        }.map(Cookie.init)
     }
 
     func restoredCookies(now: Date = Date()) -> [HTTPCookie] {

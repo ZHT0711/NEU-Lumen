@@ -13,6 +13,7 @@ struct PortalWebViewScreen: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var browser = PortalBrowser()
     @State private var syncError: String?
     @State private var isSyncingCard = false
@@ -41,6 +42,7 @@ struct PortalWebViewScreen: View {
                     .frame(height: 2)
             }
             PortalWebView(browser: browser)
+                .id(ObjectIdentifier(browser.webView))
                 .ignoresSafeArea(.container, edges: .bottom)
                 .overlay {
                     if let error = browser.error {
@@ -128,6 +130,9 @@ struct PortalWebViewScreen: View {
         .onDisappear {
             browser.close()
             Task { await browser.saveSession() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { Task { await browser.saveSession() } }
         }
     }
 
@@ -327,7 +332,7 @@ struct BrowserSharedFile: Identifiable {
 @MainActor
 @Observable
 final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
-    let webView: WKWebView
+    private(set) var webView: WKWebView
     var currentURL: URL?
     var title = ""
     var progress = 0.0
@@ -361,13 +366,16 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var provisionalUnsafeMethod = false
     @ObservationIgnored private var documentUnsafeMethod = false
 
-    override init() {
+    init(websiteDataStore: WKWebsiteDataStore = .nonPersistent()) {
         let config = WKWebViewConfiguration()
-        // 每个浏览器仅使用当前账号的 Cookie，关闭后不保留到下一个账号。
-        config.websiteDataStore = .nonPersistent()
+        config.websiteDataStore = websiteDataStore
         config.defaultWebpagePreferences.preferredContentMode = .mobile
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
+        observeWebView()
+    }
+
+    private func observeWebView() {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -395,6 +403,21 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         ]
     }
 
+    private func useLearningProfile(_ identifier: UUID) {
+        guard webView.configuration.websiteDataStore.identifier != identifier else { return }
+        observations.removeAll()
+        let previous = webView
+        previous.stopLoading()
+        previous.navigationDelegate = nil
+        previous.uiDelegate = nil
+        let configuration = previous.configuration
+        configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: identifier)
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.scrollView.contentInset = previous.scrollView.contentInset
+        webView.scrollView.verticalScrollIndicatorInsets = previous.scrollView.verticalScrollIndicatorInsets
+        observeWebView()
+    }
+
     func start(_ url: URL, client: PortalClient, session: SessionStore? = nil) async {
         guard !started else {
             webView.configuration.websiteDataStore.httpCookieStore.add(self)
@@ -410,13 +433,28 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         }
         downloadScope = BrowserDownloadStore.shared.scope
         learningPlatform = LearningPlatform.allCases.first { $0.accepts(WebVPN.unwrap(url) ?? url) }
+        if let learningPlatform, let identifier = session?.learningBrowserIdentifier(for: learningPlatform) {
+            useLearningProfile(identifier)
+        }
+        Task { await session?.cleanRetiredLearningBrowsers() }
         session?.restoreLearningSession()
         clientEpoch = client.sessionGeneration
         webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
         let destination = await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
-        for cookie in client.browserCookies() { await store.setCookie(cookie) }
+        if let learningPlatform, webView.configuration.websiteDataStore.isPersistent {
+            let existing = await store.allCookies()
+            guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
+            // Durable WebKit cookies may have renewed after the last Keychain snapshot.
+            client.absorbBrowserCookies(existing.filter(learningPlatform.ownsCookie))
+            let saved = Set(existing.map(SavedWebSession.Cookie.init))
+            for cookie in client.browserCookies() where learningPlatform.ownsCookie(cookie) {
+                if !saved.contains(SavedWebSession.Cookie(cookie)) { await store.setCookie(cookie) }
+            }
+        } else {
+            for cookie in client.browserCookies() { await store.setCookie(cookie) }
+        }
         guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
         store.add(self)
         entryURL = destination

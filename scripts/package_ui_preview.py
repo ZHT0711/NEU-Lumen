@@ -19,7 +19,8 @@ SCREENSHOTS = (
     'live-activity-dark.png', 'profile-dark.png', 'downloads-light.png',
 )
 CHECKS = ('browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
-          'session-save.txt', 'session-restore.txt', 'live-activity-checks.txt', 'live-activity-data-checks.txt')
+          'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
+          'live-activity-checks.txt', 'live-activity-data-checks.txt')
 MANIFEST = 'ui-preview.json'
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
 

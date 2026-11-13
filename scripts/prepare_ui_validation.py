@@ -210,6 +210,11 @@ with session_source.open("a", encoding="utf-8") as stream:
     stream.write('''
 // Only in the disposable simulator screenshot copy; no authentication or persistence.
 extension SessionStore {
+    func seedLearningValidationSession(account: String) {
+        user = PortalUser(uid: account, name: "Fixture", sid: account, identity: "", department: "", email: "", avatarUrl: "")
+        phase = .loggedIn
+    }
+
     func seedScreenshotSession() {
         user = DemoData.user
         phase = .loggedIn
@@ -280,6 +285,16 @@ struct UIValidationRoot: View {
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             let downloadBase = URL(string: "http://127.0.0.1:8787")!
+            if ProcessInfo.processInfo.arguments.contains("--learning-save-check") ||
+                ProcessInfo.processInfo.arguments.contains("--learning-restore-check") {
+                let save = ProcessInfo.processInfo.arguments.contains("--learning-save-check")
+                let output = documents.appendingPathComponent(save ? "learning-save.txt" : "learning-restore.txt")
+                do {
+                    try await verifyLearningProcessRestart(save: save, base: downloadBase)
+                    try "PASS: MOOC/Chaoxing localStorage, IndexedDB and session cookies across process restart; account/platform isolation and logout rotation".write(to: output, atomically: true, encoding: .utf8)
+                } catch { try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8) }
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--download-checks") {
                 let output = documents.appendingPathComponent("download-checks.txt")
                 do {
@@ -591,6 +606,8 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
 # Real WebKit download checks live outside the Release source tree.
 shutil.copyfile(root / "Tests/BrowserDownloads/WebKitValidation.swift",
                 destination / "NEU-Lumen/App/BrowserDownloadValidation.swift")
+shutil.copyfile(root / "Tests/Learning/PersistenceValidation.swift",
+                destination / "NEU-Lumen/App/LearningPersistenceValidation.swift")
 fixtures = destination / "fixtures"
 fixtures.mkdir(exist_ok=True)
 (fixtures / "index.html").write_text('''<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>校园网页功能验证</title><style>body{font:17px -apple-system;padding:24px;color:#213060;background:#f3f5fb}h1{font-size:28px}a{display:block;background:white;border-radius:16px;padding:18px;margin:14px 0;color:#3553a2;text-decoration:none}small{color:#6d7487}</style><small>NEU · 校园浏览器</small><h1>更顺手的校园网页</h1><p>查找、缩放、分享和下载，都在手边。</p><a id="popup" target="_blank" href="second.html">打开新窗口链接 ↗</a><a id="download" download="campus-guide.txt" href="download.txt">下载校园指南 ↓</a><p>下方工具栏提供前进、后退、刷新与分享。</p></html>''', encoding="utf-8")

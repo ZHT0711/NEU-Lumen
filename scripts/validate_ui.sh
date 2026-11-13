@@ -47,7 +47,7 @@ python3 "$ROOT/scripts/check_live_activity_bundle.py" "$APP_PATH"
 xcrun simctl install "$SIM_ID" "$APP_PATH"
 CONTAINER="$(xcrun simctl get_app_container "$SIM_ID" edu.neu.lumen data)"
 # Per-run markers must not survive from a previous simulator launch/run.
-for CHECK in browser-checks download-checks download-save download-restore download-screenshot session-save session-restore live-activity-checks live-activity-data-checks; do
+for CHECK in browser-checks download-checks download-save download-restore download-screenshot session-save session-restore learning-save learning-restore live-activity-checks live-activity-data-checks; do
   rm -f "$CONTAINER/Documents/$CHECK.txt"
 done
 python3 "$ROOT/scripts/ui_fixture_server.py" "$PREVIEW/fixtures" > "$OUTPUT/server.log" 2>&1 &
@@ -135,6 +135,17 @@ cat "$OUTPUT/live-activity-data-checks.txt"
 python3 -c 'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_text().startswith("PASS:")' "$OUTPUT/live-activity-data-checks.txt"
 
 # 真正终止并重新启动 App，验证 iOS Keychain 跨进程保存与清除会话。
+for STAGE in save restore; do
+  xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--learning-${STAGE}-check"
+  for _ in $(seq 1 60); do
+    if [[ -f "$CONTAINER/Documents/learning-${STAGE}.txt" ]]; then break; fi
+    sleep 1
+  done
+  cp "$CONTAINER/Documents/learning-${STAGE}.txt" "$OUTPUT/learning-${STAGE}.txt"
+  cat "$OUTPUT/learning-${STAGE}.txt"
+  grep -q "^PASS:" "$OUTPUT/learning-${STAGE}.txt"
+done
+
 for STAGE in save restore; do
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--session-${STAGE}-check"
   for _ in $(seq 1 30); do
