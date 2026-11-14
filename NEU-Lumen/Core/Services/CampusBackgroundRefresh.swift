@@ -80,14 +80,24 @@ final class CampusBackgroundRefresh {
         let started = Date()
         await repository.ensureLoadedForCurrentUser()
         session.restoreLearningSession()
+        // Publish each completed source while the OS lease is still available.
+        // A slow/expired learning reader must not gate already-fetched portal data.
+        let applyAvailable: @MainActor () async -> Void = {
+            guard !Task.isCancelled, session.phase == .loggedIn, session.requestEpoch == epoch,
+                  store.accountKey == CampusReminderStore.key(account) else { return }
+            await store.apply(repository.reminderSnapshot(preferences: store.preferences))
+        }
         var jobs: [Task<Void, Never>] = [Task { @MainActor in
-            await repository.prepareReminderData(preferences: preferences, background: true)
+            await repository.prepareReminderData(preferences: preferences, background: true, onUpdate: applyAvailable)
         }]
         if preferences.backgroundLearning, preferences.allows(.assignment),
            let saved = KeychainWebSessionStore(account: "learning." + account).load(), saved.user.isSameAccount(as: user) {
             let cookies = saved.restoredCookies()
             for platform in LearningPlatform.allCases where cookies.contains(where: platform.ownsCookie) {
-                jobs.append(Task { @MainActor in await repository.loadAssignments(platform, force: true) })
+                jobs.append(Task { @MainActor in
+                    await repository.loadAssignments(platform, force: true)
+                    await applyAvailable()
+                })
             }
         }
         if preferences.backgroundMail, preferences.allows(.mail) {
@@ -102,7 +112,7 @@ final class CampusBackgroundRefresh {
         } onCancel: { requests.forEach { $0.cancel() } }
         guard !Task.isCancelled, session.phase == .loggedIn, session.requestEpoch == epoch,
               store.accountKey == CampusReminderStore.key(account) else { return false }
-        await store.apply(repository.reminderSnapshot(preferences: preferences))
+        await applyAvailable()
         guard !Task.isCancelled else { return false }
         let updated = [repository.gradesUpdatedAt, repository.cardUpdatedAt, repository.netUpdatedAt,
             repository.electricUpdatedAt, repository.todosUpdatedAt, repository.newsUpdatedAt,

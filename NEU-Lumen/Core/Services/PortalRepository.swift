@@ -1753,7 +1753,8 @@ extension PortalRepository {
         return output
     }
 
-    func prepareReminderData(preferences: CampusReminderPreferences, background: Bool = false) async {
+    func prepareReminderData(preferences: CampusReminderPreferences, background: Bool = false,
+                             onUpdate: (@MainActor () async -> Void)? = nil) async {
         await ensureLoadedForCurrentUser()
         guard hasCurrentReminderAccount, preferences.enabled, !Task.isCancelled else { return }
         var work: [Task<Void, Never>] = []
@@ -1763,22 +1764,42 @@ extension PortalRepository {
                 for _ in 0..<3 {
                     guard !Task.isCancelled else { return }
                     await self.loadDisplayWeek(starting: week, force: background)
+                    await onUpdate?()
                     week = Calendar.current.date(byAdding: .day, value: 7, to: week)!
                 }
             })
         }
-        if preferences.allows(.balance) { work.append(Task { @MainActor in await self.loadCardOverview(force: background) }) }
+        if preferences.allows(.balance) {
+            work.append(Task { @MainActor in
+                await self.loadCardOverview(force: background)
+                await onUpdate?()
+            })
+        }
         if preferences.allows(.exam) {
             work.append(Task { @MainActor in
                 await self.loadAcademicQuery(.terms, force: background)
                 guard !Task.isCancelled, let term = self.academicTerms.first(where: { $0.current }) ?? self.academicTerms.first else { return }
                 await self.loadAcademicExams(term: term.code, force: background)
+                await onUpdate?()
             })
         }
-        if preferences.allows(.grades) { work.append(Task { @MainActor in await self.loadGrades(force: background) }) }
-        if preferences.allows(.affairs) || preferences.allows(.news) { work.append(Task { @MainActor in await self.refreshHome(force: background) }) }
+        if preferences.allows(.grades) {
+            work.append(Task { @MainActor in
+                await self.loadGrades(force: background)
+                await onUpdate?()
+            })
+        }
+        if preferences.allows(.affairs) || preferences.allows(.news) {
+            work.append(Task { @MainActor in
+                await self.refreshHome(force: background)
+                await onUpdate?()
+            })
+        }
         if preferences.systemEvents {
-            work.append(Task { @MainActor in await self.systemCalendar.refresh(start: Date(), end: Date().addingTimeInterval(14 * 86400)) })
+            work.append(Task { @MainActor in
+                await self.systemCalendar.refresh(start: Date(), end: Date().addingTimeInterval(14 * 86400))
+                await onUpdate?()
+            })
         }
         let requests = work
         await withTaskCancellationHandler {
