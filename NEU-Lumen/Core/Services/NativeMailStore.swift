@@ -21,7 +21,12 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var persistenceWarning: String?
     private var subjectSearch = ""
     private var advancedSearch = NativeMailSearch()
+    private var listedSearch = NativeMailSearch()
+    private var listedFolder = ""
+    private var bodyCache: [String: NativeMailBody] = [:]
+    private var bodyOrder: [String] = []
     var hasSearch: Bool { !advancedSearch.parameters.isEmpty || !subjectSearch.isEmpty }
+    var searchCriteria: NativeMailSearch { advancedSearch }
     private var boundEmail = ""
     private weak var session: SessionStore?
     private var ownerEpoch: UUID?
@@ -107,7 +112,8 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func execute(command: String, start: Int = 0, includeFolders: Bool = false, messageID: String = "",
-                         messageIDs: [String] = [], attributes: [String: Any] = [:], composeKind: String = "normal") async throws -> [String: Any] {
+                         messageIDs: [String] = [], attributes: [String: Any] = [:], composeKind: String = "normal",
+                         attachmentID: String = "", attachmentName: String = "") async throws -> [String: Any] {
         guard current, let view = webView, let url = view.url, let user = session?.user else {
             throw NetworkError(message: "请先登录学校邮箱")
         }
@@ -125,6 +131,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
             "searchText": subjectSearch,
             "searchFields": advancedSearch.parameters, "messageIDs": messageIDs, "attributes": attributes,
             "composeKind": composeKind,
+            "attachmentID": attachmentID, "attachmentName": attachmentName,
         ], in: nil, contentWorld: Self.world)
         // Coremail changes its SPA fragment while initializing; only a document
         // navigation or account change invalidates this isolated-world response.
@@ -139,6 +146,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
             if failure == "operation" { throw NetworkError(message: "学校邮箱未确认操作成功，请刷新核对邮件状态") }
             needsLogin = true
             messages = []; folders = []; loaded = false; email = ""; verifiedPage = nil
+            bodyCache = [:]; bodyOrder = []
             if failure == "binding" {
                 bindingCandidate = try NativeMailProtocol.identity(result)
                 messages = []; folders = []; loaded = false
@@ -153,17 +161,38 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func refresh(reset: Bool = true, search: String? = nil, advanced: NativeMailSearch? = nil) async {
-        guard current, !busy, !loadingWeb, reset || hasMore else { return }
+        guard current, !busy, !loadingWeb, reset || hasMore, !Task.isCancelled else { return }
         busy = true
         let token = UUID(); currentOperation = token
         defer { if currentOperation == token { busy = false; currentOperation = nil } }
         if let search { subjectSearch = search.trimmingCharacters(in: .whitespacesAndNewlines) }
         if let advanced { advancedSearch = advanced; subjectSearch = advanced.subject }
+        advancedSearch.subject = subjectSearch
+        advancedSearch = advancedSearch.normalized
+        subjectSearch = advancedSearch.subject
+        let sameQuery = loaded && listedFolder == folderID && listedSearch == advancedSearch
+        let replacing = reset || !sameQuery
+        let targetCount = replacing && sameQuery ? max(20, nextStart) : 20
+        if !sameQuery { messages = []; loaded = false; nextStart = 0; hasMore = false }
         do {
-            let raw = try await execute(command: "list", start: reset ? 0 : nextStart, includeFolders: folders.isEmpty || reset)
-            guard current, currentOperation == token else { return }
-            let rows = try NativeMailProtocol.messages(raw["messages"])
-            if let folderRows = raw["folders"] as? [[String: Any]], !folderRows.isEmpty {
+            // Refresh the same loaded window atomically. Closing a reader or a
+            // school editor must not collapse several pages back to twenty rows.
+            var cursor = replacing ? 0 : nextStart
+            var incoming: [NativeMailMessage] = []
+            var latestFolders: [[String: Any]]?
+            var more = false
+            repeat {
+                let raw = try await execute(command: "list", start: cursor, includeFolders: incoming.isEmpty && (folders.isEmpty || replacing))
+                guard current, currentOperation == token, !Task.isCancelled else { return }
+                let rows = try NativeMailProtocol.messages(raw["messages"])
+                guard raw["folderID"] as? String == folderID else { throw NetworkError(message: "邮箱文件夹已变化，请重新选择后查询") }
+                if let values = raw["folders"] as? [[String: Any]], !values.isEmpty { latestFolders = values }
+                let next = raw["nextStart"] as? Int ?? cursor + rows.count
+                more = raw["hasMore"] as? Bool ?? false
+                guard !more || next > cursor else { throw NetworkError(message: "学校邮箱分页未前进，请重新同步") }
+                incoming += rows; cursor = next
+            } while replacing && more && incoming.count < targetCount
+            if let folderRows = latestFolders {
                 var seen = Set<String>()
                 folders = folderRows.compactMap { row in
                     guard let id = row["id"] as? String, let name = row["name"] as? String, seen.insert(id).inserted else { return nil }
@@ -171,10 +200,9 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
                 }
             }
             var seen = Set<String>()
-            messages = ((reset ? [] : messages) + rows).filter { seen.insert($0.id).inserted }
-            folderID = raw["folderID"] as? String ?? folderID
-            nextStart = raw["nextStart"] as? Int ?? (reset ? rows.count : nextStart + rows.count)
-            hasMore = raw["hasMore"] as? Bool ?? false; loaded = true; error = nil; lastRefresh = Date()
+            messages = ((replacing ? [] : messages) + incoming).filter { seen.insert($0.id).inserted }
+            nextStart = cursor; hasMore = more; loaded = true; error = nil; lastRefresh = Date()
+            listedFolder = folderID; listedSearch = advancedSearch
             if reset, folderID == "1", !hasSearch {
                 await CampusReminderStore.shared.recordMail(account: ownerAccount, messages: messages, unread: folders.first { $0.id == "1" }?.unread)
             }
@@ -185,7 +213,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func selectFolder(_ folder: NativeMailFolder) async {
-        guard !busy else { return }
+        guard !busy, folder.id != folderID else { return }
         folderID = folder.id; subjectSearch = ""; messages = []; loaded = false
         advancedSearch = NativeMailSearch()
         await refresh()
@@ -227,7 +255,8 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         await persist(); await refresh()
     }
 
-    func read(_ message: NativeMailMessage) async throws -> NativeMailBody {
+    func read(_ message: NativeMailMessage, force: Bool = false) async throws -> NativeMailBody {
+        if current, verifiedPage == pageGeneration, !force, let cached = bodyCache[message.id] { return cached }
         guard current, !busy else { throw NetworkError(message: "邮箱正在同步，请稍后打开邮件") }
         busy = true
         let token = UUID(); currentOperation = token
@@ -235,10 +264,35 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         let raw = try await execute(command: "read", messageID: message.id)
         guard current, currentOperation == token, let row = raw["body"] as? [String: Any],
               let id = row["id"] as? String, id == message.id else { throw CancellationError() }
-        return NativeMailBody(id: id, subject: (row["subject"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? message.subject,
+        let attachments = (row["attachments"] as? [[String: Any]] ?? []).compactMap { value -> NativeMailBody.Attachment? in
+            guard let id = value["id"] as? String, let name = value["name"] as? String else { return nil }
+            return .init(id: id, name: name, size: (value["size"] as? NSNumber)?.int64Value, downloadable: value["downloadable"] as? Bool ?? false)
+        }
+        let links = (row["links"] as? [[String: Any]] ?? []).compactMap { value -> NativeMailBody.BodyLink? in
+            guard let text = value["url"] as? String, let url = URL(string: text),
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.user == nil, url.password == nil,
+                  url.host != nil else { return nil }
+            return .init(title: value["title"] as? String ?? url.host ?? text, url: url)
+        }
+        let result = NativeMailBody(id: id, subject: (row["subject"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? message.subject,
             sender: (row["sender"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? message.sender,
             text: row["text"] as? String ?? "此邮件暂未提供可读取正文，请在学校邮箱查看。",
-            attachments: row["attachments"] as? [String] ?? [])
+            recipients: row["recipients"] as? String ?? "", cc: row["cc"] as? String ?? "",
+            dateText: NativeMailProtocol.dateText(row["date"]), attachments: attachments, links: links)
+        bodyCache[id] = result
+        bodyOrder.removeAll { $0 == id }; bodyOrder.append(id)
+        while bodyOrder.count > 12 { bodyCache.removeValue(forKey: bodyOrder.removeFirst()) }
+        return result
+    }
+
+    func download(_ attachment: NativeMailBody.Attachment, from messageID: String) async throws {
+        guard current, !busy, !loadingWeb, attachment.downloadable,
+              bodyCache[messageID]?.attachments.contains(attachment) == true else { throw NetworkError(message: "请先重新读取邮件，再下载附件") }
+        busy = true
+        let token = UUID(); currentOperation = token
+        defer { if currentOperation == token { busy = false; currentOperation = nil } }
+        let result = try await execute(command: "download", messageID: messageID, attachmentID: attachment.id, attachmentName: attachment.name)
+        guard current, currentOperation == token, result["downloadRequested"] as? Bool == true else { throw CancellationError() }
     }
 
     func showWebMail(messageID: String? = nil, compose: Bool = false, reply: String? = nil) async {
@@ -286,6 +340,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         bindingCandidate = nil; error = nil; lastSaved = nil; subjectSearch = ""; folderID = "1"; nextStart = 0; hasMore = false
         verifiedPage = nil; pageGeneration = UUID(); lastRefresh = nil; persistenceWarning = nil
         advancedSearch = NativeMailSearch()
+        listedSearch = NativeMailSearch(); listedFolder = ""; bodyCache = [:]; bodyOrder = []
     }
 
     func readInBackground(session: SessionStore, apps: [PortalApp]) async -> Bool {

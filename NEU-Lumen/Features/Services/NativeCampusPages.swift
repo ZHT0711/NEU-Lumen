@@ -7,9 +7,18 @@ struct NativePaymentView: View {
     @State private var web: NativeServiceWebLink?
     @State private var room = ""
     @State private var roomOwner: UUID?
+    @State private var paymentBrowsers: [URL: PortalBrowser] = [:]
+    @State private var billQuery = ""
+    @State private var billFilter: PaymentBillFilter = .all
+    @State private var selectedBill: CardBill?
     @FocusState private var roomFocused: Bool
     private var repo: PortalRepository { environment.repository }
     private var hasUnsavedRoom: Bool { ElectricRoomKey.normalize(room) != repo.electricRoomCode }
+    private var filteredBills: [CardBill] { NativePaymentPresentation.bills(repo.cardBills, matching: billQuery, filter: billFilter) }
+    private var isCurrentMonth: Bool {
+        let current = NativePaymentPresentation.currentMonth()
+        return repo.billsYear == current.year && repo.billsMonth == current.month
+    }
     var body: some View {
         Form {
             Section("缴费服务") {
@@ -54,25 +63,56 @@ struct NativePaymentView: View {
                 ServiceLoadNotice(state: repo.electricState)
                 if let warning = repo.electricWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
                 if let date = repo.electricUpdatedAt { Text("上次成功查询 " + date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                Button("缴纳电费", systemImage: "bolt.fill") { web = NativeServiceWebLink(url: CampusPaymentEntry.electricity) }
+                Button("缴纳电费", systemImage: "bolt.fill") { openPaymentURL(CampusPaymentEntry.electricity) }
                     .disabled(hasUnsavedRoom)
                 if !repo.electricRoomCode.isEmpty {
                     Text("缴费时沿用房间码 \(repo.electricRoomCode)，学校表单仍可修改。").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Section("校园卡本月流水") {
-                if repo.cardBills.isEmpty { Text("尚无已读取的本月流水").foregroundStyle(.secondary) }
-                ForEach(repo.cardBills.prefix(12)) { bill in
-                    HStack(alignment: .top) {
+            Section("校园卡月流水") {
+                HStack {
+                    Button { Task { await repo.shiftBillsMonth(-1) } } label: { Image(systemName: "chevron.left") }
+                        .accessibilityLabel("上个月").disabled(repo.billsState == .loading)
+                    Spacer()
+                    Text("\(String(repo.billsYear)) 年 \(repo.billsMonth) 月").font(.headline).monospacedDigit()
+                    Spacer()
+                    Button { Task { await repo.shiftBillsMonth(1) } } label: { Image(systemName: "chevron.right") }
+                        .accessibilityLabel("下个月").disabled(isCurrentMonth || repo.billsState == .loading)
+                }.buttonStyle(.borderless)
+                if !isCurrentMonth {
+                    Button("回到本月") {
+                        let current = NativePaymentPresentation.currentMonth()
+                        Task { await repo.loadBills(year: current.year, month: current.month) }
+                    }
+                }
+                TextField("搜索交易、地点、日期或金额", text: $billQuery)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                Picker("交易类型", selection: $billFilter) {
+                    ForEach(PaymentBillFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
+                }.pickerStyle(.segmented)
+                if repo.billsState == .loaded, filteredBills.isEmpty {
+                    Text(repo.cardBills.isEmpty ? "该月没有流水记录" : "没有匹配的流水记录").foregroundStyle(.secondary)
+                }
+                ForEach(filteredBills) { bill in
+                    Button { selectedBill = bill } label: { HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(bill.subject).font(.subheadline)
+                            Text(bill.subject).font(.subheadline).foregroundStyle(.primary)
                             Text(bill.timeText).font(.caption).foregroundStyle(.secondary)
+                            if !bill.station.isEmpty { Text(bill.station).font(.caption).foregroundStyle(.secondary) }
                         }
                         Spacer()
                         Text(money(bill.amount)).monospacedDigit().foregroundStyle(bill.isRecharge ? Color.green : Color.primary)
-                    }
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    } }.buttonStyle(.plain)
                 }
-                Button("刷新本月流水", systemImage: "arrow.clockwise") { Task { await loadBills() } }
+                if repo.billsState == .loaded {
+                    Text("显示 \(filteredBills.count) 笔，共读取 \(repo.cardBills.count) 笔").font(.caption).foregroundStyle(.secondary)
+                }
+                if repo.billTruncated { Label("该月记录较多，学校本次返回可能不完整", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
+                if let warning = repo.billsWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+                if let updated = repo.billsUpdatedAt { Text("上次成功查询 " + updated.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                Button("刷新所选月份", systemImage: "arrow.clockwise") { Task { await loadBills(force: true) } }
+                    .disabled(repo.billsState == .loading)
                 ServiceLoadNotice(state: repo.billsState)
             }
         }
@@ -80,6 +120,9 @@ struct NativePaymentView: View {
             guard active else { return }
             await repo.ensureLoadedForCurrentUser()
             if roomOwner != environment.session.requestEpoch {
+                for browser in paymentBrowsers.values { browser.close() }
+                paymentBrowsers = [:]; web = nil; selectedBill = nil
+                billQuery = ""; billFilter = .all
                 room = repo.electricRoomCode
                 roomOwner = environment.session.requestEpoch
             }
@@ -89,8 +132,24 @@ struct NativePaymentView: View {
         .onChange(of: repo.electricRoomCode) { previous, current in
             if room.isEmpty || ElectricRoomKey.normalize(room) == previous { room = current }
         }
-        .refreshable { await repo.loadCardOverview(force: true); await loadBills() }
-        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .payment) } }
+        .refreshable { await repo.loadCardOverview(force: true); await loadBills(force: true) }
+        .sheet(item: $web) { item in
+            NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .payment, retainedBrowser: paymentBrowsers[item.url]) }
+        }
+        .sheet(item: $selectedBill) { bill in
+            NavigationStack {
+                Form {
+                    LabeledContent("交易", value: bill.subject)
+                    LabeledContent("时间", value: bill.timeText)
+                    LabeledContent("金额", value: money(bill.amount))
+                    LabeledContent("交易后余额", value: bill.balanceAfter.map { money($0) } ?? "学校未提供")
+                    if !bill.station.isEmpty { LabeledContent("交易地点", value: bill.station) }
+                    if let fee = bill.fee { LabeledContent("手续费", value: money(fee)) }
+                }.textSelection(.enabled).privacySensitive()
+                    .navigationTitle("流水详情").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { selectedBill = nil } } }
+            }
+        }
     }
     private func money(_ value: Double?) -> String { value.map { $0.formatted(.currency(code: "CNY")) } ?? "未读取" }
     private func queryRoom() {
@@ -102,11 +161,14 @@ struct NativePaymentView: View {
     }
     private func openPayment(path: String? = nil) {
         let entry = NativeCampusService.payment.entryURL(apps: repo.apps)
-        web = NativeServiceWebLink(url: path.flatMap { URL(string: $0, relativeTo: entry)?.absoluteURL } ?? entry)
+        openPaymentURL(path.flatMap { URL(string: $0, relativeTo: entry)?.absoluteURL } ?? entry)
     }
-    private func loadBills() async {
-        let now = Date(), calendar = Calendar.current
-        await repo.loadBills(year: calendar.component(.year, from: now), month: calendar.component(.month, from: now))
+    private func openPaymentURL(_ url: URL) {
+        if paymentBrowsers[url] == nil { paymentBrowsers[url] = PortalBrowser() }
+        web = NativeServiceWebLink(url: url)
+    }
+    private func loadBills(force: Bool = false) async {
+        await repo.loadBills(year: repo.billsYear, month: repo.billsMonth, force: force)
     }
 }
 
@@ -119,17 +181,20 @@ struct NativeVPNView: View {
     @State private var checkedAt: Date?
     @State private var web: NativeServiceWebLink?
     @State private var query = ""
+    @State private var owner: UUID?
+    @State private var checkRequest = UUID()
     private var resources: [PortalApp] {
         environment.repository.apps.filter { app in
-            guard let host = URL(string: app.entryUrl())?.host?.lowercased(), host == "neu.edu.cn" || host.hasSuffix(".neu.edu.cn") else { return false }
-            return query.isEmpty || app.name.localizedCaseInsensitiveContains(query)
+            guard let url = URL(string: app.entryUrl()), WebVPN.shouldProxyBrowserURL(url) else { return false }
+            let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            return keyword.isEmpty || [app.name, app.desc, app.category].contains { $0.localizedCaseInsensitiveContains(keyword) }
         }
     }
     var body: some View {
         Form {
             Section("访问状态") {
-                LabeledContent("网络", value: campus.map { $0 ? "校园网络可达" : "使用校外访问" } ?? "尚未检测")
-                LabeledContent("WebVPN 认证", value: ticket ? "会话已建立" : "尚未建立")
+                LabeledContent("网络", value: environment.session.networkAvailable ? (campus.map { $0 ? "校园网络可达" : "使用校外访问" } ?? "尚未检测") : "网络已断开")
+                LabeledContent("WebVPN 认证", value: ticket ? "已保存学校会话" : "未读取到学校会话")
                 if let checkedAt { LabeledContent("检测时间", value: checkedAt.formatted(date: .omitted, time: .shortened)) }
                 if busy { ProgressView("正在检测网络…") }
                 Button("重新检测", systemImage: "arrow.clockwise") { Task { await check(force: true) } }.disabled(busy)
@@ -140,7 +205,13 @@ struct NativeVPNView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("校内资源") {
-                TextField("搜索校内应用", text: $query)
+                HStack {
+                    TextField("搜索校内应用", text: $query).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    if !query.isEmpty {
+                        Button("清除搜索", systemImage: "xmark.circle.fill") { query = "" }
+                            .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
+                    }
+                }
                 if resources.isEmpty { Text("没有匹配的资源").foregroundStyle(.secondary) }
                 ForEach(resources) { app in
                     Button {
@@ -149,25 +220,34 @@ struct NativeVPNView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
+            if owner != environment.session.requestEpoch {
+                owner = environment.session.requestEpoch; checkRequest = UUID()
+                campus = nil; ticket = false; checkedAt = nil; query = ""; web = nil; busy = false
+            }
             guard active else { return }
-            await environment.repository.loadAppsIfNeeded()
+            _ = await environment.repository.loadAppsIfNeeded()
             await check(force: false)
         }
         .refreshable { await check(force: true) }
+        .onChange(of: environment.session.networkRevision) { _, _ in
+            if active { Task { await check(force: true) } }
+        }
         .sheet(item: $web, onDismiss: { Task { await check(force: false) } }) { item in
             NavigationStack { PortalWebViewScreen(url: item.url) }
         }
     }
     private func check(force: Bool) async {
-        guard !busy, environment.session.phase == .loggedIn else { return }
-        busy = true; defer { busy = false }
+        guard !busy || force, environment.session.phase == .loggedIn else { return }
+        let request = UUID(); checkRequest = request
+        busy = true; defer { if checkRequest == request { busy = false } }
         let epoch = environment.session.requestEpoch
         let client = environment.session.client
         if force { client.invalidateAccessRoute() }
         await client.prepareAccess()
         let reachable = await client.isCampusNet()
-        guard epoch == environment.session.requestEpoch, !Task.isCancelled else { return }
+        guard epoch == environment.session.requestEpoch, checkRequest == request, !Task.isCancelled else { return }
         campus = reachable; ticket = client.hasWebVPNTicket; checkedAt = Date()
         environment.session.persistWebSession()
     }
@@ -183,30 +263,53 @@ final class NativeAffairsStore {
     private var page = 0
     private var owner: UUID?
     private var request = UUID()
+    private var retryReset = true
+    private(set) var updatedAt: Date?
+
+    func bind(to epoch: UUID) {
+        guard owner != epoch else { return }
+        owner = epoch; request = UUID(); items = []; page = 0
+        loaded = false; hasMore = true; loading = false; error = nil; updatedAt = nil
+        retryReset = true
+    }
+
     func load(session: SessionStore, reset: Bool) async {
         let epoch = session.requestEpoch
-        if owner != epoch { owner = epoch; items = []; page = 0; loaded = false; hasMore = true; loading = false; error = nil }
+        bind(to: epoch)
         guard session.phase == .loggedIn, !loading, reset || hasMore else { return }
         let token = UUID(); request = token
+        retryReset = reset
         loading = true; defer { if owner == epoch, request == token { loading = false } }
-        let target = reset ? 1 : page + 1
         do {
-            let rows = try await session.client.fetchTodos(page: target, pageSize: 20)
+            // Refresh every loaded page as one transaction, retaining the expanded
+            // list and the last successful results if any page fails.
+            let first = reset ? 1 : page + 1
+            let last = reset ? max(1, page) : first
+            var received: [TodoItem] = []
+            var finalPage = first
+            var more = false
+            for target in first...last {
+                let rows = try await session.client.fetchTodos(page: target, pageSize: 20)
+                guard owner == epoch, request == token, session.requestEpoch == epoch, !Task.isCancelled else { return }
+                received += rows; finalPage = target; more = rows.count == 20
+                if !more { break }
+            }
             guard owner == epoch, request == token, session.requestEpoch == epoch, !Task.isCancelled else { return }
             let previous = reset ? [] : items
             var seen = Set<String>()
-            items = (previous + rows).filter { seen.insert($0.id).inserted }
-            page = target; hasMore = rows.count == 20; loaded = true; error = nil
+            items = (previous + received).filter { seen.insert($0.id).inserted }
+            page = finalPage; hasMore = more; loaded = true; error = nil; updatedAt = Date()
             session.persistWebSession()
         } catch {
             guard owner == epoch, request == token, session.requestEpoch == epoch else { return }
             if !NetworkError.isCancellation(error) { self.error = NetworkError.from(error).message }
         }
     }
+    func retry(session: SessionStore) async { await load(session: session, reset: retryReset) }
     func recoverAfterNetworkChange(session: SessionStore) async {
         guard error != nil || loading else { return }
         request = UUID(); loading = false
-        await load(session: session, reset: true)
+        await retry(session: session)
     }
 }
 
@@ -228,7 +331,15 @@ struct NativeAffairsView: View {
                 TextField("搜索事项或处理节点", text: $query)
             }
             Section("我的在办事项") {
-                if let error = store.error { Text(error).font(.footnote).foregroundStyle(.red) }
+                if let error = store.error {
+                    Text(error).font(.footnote).foregroundStyle(.orange)
+                    Button("重新读取办事进度") { Task { await store.retry(session: environment.session) } }
+                        .disabled(store.loading)
+                    if !store.items.isEmpty { Text("已保留上次读取的事项和分页。 ").font(.caption).foregroundStyle(.secondary) }
+                }
+                if let updatedAt = store.updatedAt {
+                    Text("更新于 " + updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                }
                 if store.loaded && visible.isEmpty { ContentUnavailableView("暂无匹配事项", systemImage: "checklist") }
                 ForEach(visible) { item in
                     Button {
@@ -248,14 +359,21 @@ struct NativeAffairsView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
-            if active { await store.load(session: environment.session, reset: true) }
+            store.bind(to: environment.session.requestEpoch)
+            if active, !store.loaded { await store.load(session: environment.session, reset: true) }
+        }
+        .onChange(of: environment.session.requestEpoch) { _, epoch in
+            store.bind(to: epoch); query = ""; web = nil
         }
         .refreshable { await store.load(session: environment.session, reset: true) }
         .onChange(of: environment.session.networkRevision) { _, _ in
             if active { Task { await store.recoverAfterNetworkChange(session: environment.session) } }
         }
-        .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .affairs) } }
+        .sheet(item: $web, onDismiss: {
+            if active { Task { await store.load(session: environment.session, reset: true) } }
+        }) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .affairs) } }
     }
 }
 

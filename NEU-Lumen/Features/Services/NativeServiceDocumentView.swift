@@ -14,6 +14,7 @@ struct NativeServiceDocumentView: View {
     @State private var confirmedAction: NativeServiceDocument.Action?
     @State private var request = UUID()
     @State private var fieldRevisions: [String: UUID] = [:]
+    @State private var choiceQueries: [String: String] = [:]
     private static let world = WKContentWorld.world(name: "NEULumen.ServiceDocument")
 
     var body: some View {
@@ -73,13 +74,17 @@ struct NativeServiceDocumentView: View {
             }
         }
         .disabled(busy)
+        .scrollDismissesKeyboard(.interactively)
         .privacySensitive()
         .task(id: String(browser.isLoading) + (browser.currentURL?.absoluteString ?? "") + environment.session.requestEpoch.uuidString) {
-            document = nil; values = [:]; pendingAction = nil; confirmedAction = nil; fieldRevisions = [:]
+            document = nil; values = [:]; pendingAction = nil; confirmedAction = nil; fieldRevisions = [:]; choiceQueries = [:]
             if !browser.isLoading { await read() }
         }
         .refreshable { await read(preservingEdits: true) }
-        .onDisappear { fieldRevisions = [:] }
+        .onDisappear {
+            browser.saveNativeFormDraft(document: document, values: values)
+            fieldRevisions = [:]
+        }
         .task {
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
@@ -128,17 +133,44 @@ struct NativeServiceDocumentView: View {
         })
         let title = field.label + (field.required ? " *" : "")
         if field.readOnly {
-            LabeledContent(title, value: field.value).textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                LabeledContent(title, value: displayValue(field)).textSelection(.enabled)
+                if let hint = field.hint { Text(hint).font(.caption).foregroundStyle(.secondary) }
+            }
         } else if ["checkbox", "toggle"].contains(field.kind) {
             Toggle(title, isOn: Binding(get: { binding.wrappedValue == "true" }, set: { binding.wrappedValue = String($0) }))
         } else if field.kind == "choice" {
             VStack(alignment: .leading, spacing: 6) {
                 LabeledContent(title, value: field.value.isEmpty ? "请选择" : field.value)
-                if field.options.isEmpty {
+                if field.expanded != true {
                     Button("选择\(field.label)", systemImage: "chevron.down") { Task { await open(field) } }
                 } else {
+                    if field.search != nil {
+                        let key = field.key ?? field.id
+                        let query = Binding(get: { choiceQueries[key] ?? field.search ?? "" }, set: { choiceQueries[key] = $0 })
+                        HStack {
+                            TextField("查找\(field.label)", text: query)
+                                .submitLabel(.search).autocorrectionDisabled()
+                                .onSubmit { Task { await control(field, command: "filter", value: query.wrappedValue) } }
+                            Button("查找") { Task { await control(field, command: "filter", value: query.wrappedValue) } }
+                        }
+                    }
+                    if field.options.isEmpty {
+                        Text("学校暂未提供匹配选项").font(.caption).foregroundStyle(.secondary)
+                    }
                     ForEach(Array(field.options.enumerated()), id: \.offset) { _, option in
-                        Button(option.title) { queueUpdate(field, value: option.value) }
+                        Button { queueUpdate(field, value: option.value) } label: {
+                            HStack {
+                                Text(option.title)
+                                Spacer()
+                                if option.selected == true { Image(systemName: "checkmark") }
+                            }
+                        }
+                        .accessibilityValue(option.selected == true ? "已选" : "未选")
+                    }
+                    Button("完成选择", systemImage: "checkmark.circle") { Task { await control(field, command: "close") } }
+                    if field.multiple == true {
+                        Text("可选择多项，完成后更新关联条件。").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -177,11 +209,16 @@ struct NativeServiceDocumentView: View {
                 Text(title).font(.subheadline)
                 TextEditor(text: binding).frame(minHeight: 100)
             }
+        } else if field.commit == "page" {
+            HStack {
+                TextField(title, text: binding).keyboardType(.asciiCapableNumberPad)
+                Button("跳转") { queueUpdate(field, value: binding.wrappedValue) }
+            }
         } else {
             TextField(title, text: binding, prompt: Text(field.kind == "date" ? "YYYY-MM-DD" : title))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .keyboardType(field.kind == "number" ? .decimalPad : field.kind == "email" ? .emailAddress : .default)
+                .keyboardType(keyboard(for: field))
         }
     }
 
@@ -220,11 +257,15 @@ struct NativeServiceDocumentView: View {
             let raw = try await execute(command: "read")
             let result = try JSONDecoder().decode(NativeServiceDocument.self, from: JSONSerialization.data(withJSONObject: raw))
             guard request == token else { return }
+            let cachedDrafts = browser.takeNativeFormDraft(for: result)
+            let sameFormIdentity = document.map { NativeFormDraftCache().matchesContext($0, result) } ?? false
             document = result
             values = Dictionary(uniqueKeysWithValues: result.fields.map { field in
-                let draft = field.key.flatMap { drafts[$0] }
+                let canKeepQuery = service == .academic && field.queryField == true
+                let localDraft = (sameFormIdentity || canKeepQuery) ? field.key.flatMap { drafts[$0] } : nil
+                let draft = localDraft ?? cachedDrafts[field.id]
                 let valid = draft.map { value in
-                    !["select", "radio"].contains(field.kind) || field.options.contains { $0.value == value }
+                    !field.readOnly && (!["select", "radio", "choice"].contains(field.kind) || field.options.contains { $0.value == value })
                 } ?? false
                 return (field.id, valid ? draft! : field.value)
             })
@@ -234,6 +275,16 @@ struct NativeServiceDocumentView: View {
             guard request == token, !NetworkError.isCancellation(error) else { return }
             document = nil; values = [:]; self.error = NetworkError.from(error).message
         }
+    }
+
+    private func keyboard(for field: NativeServiceDocument.Field) -> UIKeyboardType {
+        if field.kind == "email" { return .emailAddress }
+        if field.kind == "tel" { return .phonePad }
+        if field.kind == "url" { return .URL }
+        let name = field.label + " " + (field.key ?? "")
+        if field.kind == "number" || name.range(of: "金额|费额|充值金额|amount|money|price", options: [.regularExpression, .caseInsensitive]) != nil { return .decimalPad }
+        if name.range(of: "房间码|房间号|寝室号|学号|工号|roomCode|roomNo|studentNo", options: [.regularExpression, .caseInsensitive]) != nil { return .asciiCapableNumberPad }
+        return .default
     }
 
     private func selectedValues(_ text: String) -> Set<String> {
@@ -260,11 +311,13 @@ struct NativeServiceDocumentView: View {
     private func dateValue(_ text: String, kind: String) -> Date? { dateFormatter(kind: kind).date(from: text) }
     private func dateText(_ date: Date, kind: String) -> String { dateFormatter(kind: kind).string(from: date) }
 
-    private func open(_ field: NativeServiceDocument.Field) async {
+    private func open(_ field: NativeServiceDocument.Field) async { await control(field, command: "open") }
+
+    private func control(_ field: NativeServiceDocument.Field, command: String, value: String? = nil) async {
         guard !busy else { return }
         busy = true
         do {
-            _ = try await execute(command: "open", actionID: field.id, fieldValues: [:])
+            _ = try await execute(command: command, actionID: field.id, fieldValues: value.map { [field.id: $0] } ?? [:])
             try await Task.sleep(for: .milliseconds(150))
             await read(preservingEdits: true)
         } catch {

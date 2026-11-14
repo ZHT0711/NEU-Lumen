@@ -134,9 +134,10 @@ struct HomeView: View {
                             .frame(width: 42, height: 42)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 3) {
-                            NEUCalligraphy()
+                            NEUCalligraphy(width: 88)
                             Text("NORTHEASTERN UNIVERSITY")
-                                .font(.system(size: 8, weight: .semibold)).tracking(1)
+                                .font(.system(size: 6, weight: .semibold)).tracking(0.5)
+                                .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         Spacer(minLength: 0)
                         Text("1923")

@@ -103,7 +103,10 @@ final class PortalRepository {
     private(set) var cardBills: [CardBill] = []
     private(set) var billTruncated = false
     private(set) var billsState: LoadState = .idle
+    private(set) var billsWarning: String?
+    private(set) var billsUpdatedAt: Date?
     private var billsCache: [String: [CardBill]] = [:]
+    private var billsDates: [String: Date] = [:]
     private var truncatedCache: [String: Bool] = [:]
     private var billsRequestID = UUID()
     private(set) var netInfo: NetUsageInfo?
@@ -273,6 +276,9 @@ final class PortalRepository {
         cardUpdatedAt = nil
         cardBills = []
         billsCache.removeAll()
+        billsDates.removeAll()
+        billsWarning = nil
+        billsUpdatedAt = nil
         truncatedCache.removeAll()
         netInfo = nil
         netUpdatedAt = nil
@@ -1236,6 +1242,11 @@ final class PortalRepository {
         billsYear = year
         billsMonth = month
         let key = "\(year)-\(month)"
+        // Never label another month's rows with the newly selected month.
+        cardBills = billsCache[key] ?? []
+        billTruncated = truncatedCache[key] ?? false
+        billsUpdatedAt = billsDates[key]
+        billsWarning = nil
         if !force, let cached = billsCache[key] {
             cardBills = cached
             billTruncated = truncatedCache[key] ?? false
@@ -1261,6 +1272,10 @@ final class PortalRepository {
             truncatedCache[key] = result.truncated
             cardBills = result.bills
             billTruncated = result.truncated
+            let updated = Date()
+            billsDates[key] = updated
+            billsUpdatedAt = updated
+            billsWarning = nil
             billsState = .loaded
         } catch {
             guard generation == accountGeneration, requestID == billsRequestID else { return }
@@ -1269,6 +1284,7 @@ final class PortalRepository {
             } else if billsCache[key] == nil {
                 billsState = .failed(NetworkError.from(error).message)
             } else {
+                billsWarning = "本次查询失败，显示所选月份上次结果：" + NetworkError.from(error).message
                 billsState = .loaded
             }
         }

@@ -148,7 +148,7 @@ struct CardView: View {
                     }
 
                     switch repo.billsState {
-                    case .idle, .loading:
+                    case .idle where repo.cardBills.isEmpty, .loading where repo.cardBills.isEmpty:
                         HStack {
                             Spacer()
                             ProgressView()
@@ -159,7 +159,8 @@ struct CardView: View {
                         ErrorStateView(message: message) {
                             Task { await repo.loadBills(year: repo.billsYear, month: repo.billsMonth, force: true) }
                         }
-                    case .loaded:
+                    case .loaded, .loading, .idle:
+                        if repo.billsState == .loading { ProgressView("正在刷新所选月份…").font(.caption) }
                         let spends = repo.daySpends()
                         Chart(spends) { day in
                             BarMark(
@@ -202,6 +203,10 @@ struct CardView: View {
                     }
                 }
                 .padding(14)
+            }
+            if let warning = repo.billsWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+            if let updated = repo.billsUpdatedAt {
+                Text("上次成功查询：" + updated.formatted(date: .abbreviated, time: .shortened)).font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -408,7 +413,7 @@ struct BillRow: View {
                     .font(.subheadline.bold())
                     .monospacedDigit()
                     .foregroundStyle(bill.isRecharge ? Color.green : .primary)
-                Text("余额 \(String(format: "%.2f", bill.balanceAfter))")
+                Text(bill.balanceAfter.map { "余额 " + String(format: "%.2f", $0) } ?? "余额未提供")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

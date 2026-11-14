@@ -13,12 +13,12 @@ struct CardBill: Identifiable, Hashable {
     let timeText: String
     let subject: String
     let amount: Double
-    let fee: Double
-    let balanceAfter: Double
+    let fee: Double?
+    let balanceAfter: Double?
     let station: String
 
     var id: String {
-        "\(timeText)|\(subject)|\(amount)|\(balanceAfter)|\(station)"
+        "\(timeText)|\(subject)|\(amount)|\(balanceAfter.map { String($0) } ?? "unknown")|\(station)"
     }
 
     var isRecharge: Bool { amount > 0 }

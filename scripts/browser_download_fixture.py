@@ -30,7 +30,7 @@ def fixture_pdf():
 
 
 PDF = fixture_pdf()
-STATS = {'document': 0, 'post': 0, 'post_get': 0}
+STATS = {'document': 0, 'post': 0, 'post_get': 0, 'resume_get': 0, 'resume_post': 0, 'resume_post_get': 0}
 LOCK = threading.Lock()
 
 
@@ -58,6 +58,24 @@ def handle_download_fixture(handler, method):
         return ('dl-fixture=ready' in handler.headers.get('Cookie', '') and
                 ref.netloc == handler.headers.get('Host') and ref.path == '/dl/index')
 
+    if path == '/dl/mail/coremail/XT/index.jsp':
+        return send('''<!doctype html><meta charset="utf-8"><title>Native mail fixture</title>
+            <script>var X={s:'SYNTH-MAIL-TOKEN-ONLY'};</script><p>Synthetic mailbox only</p>''',
+            headers=[('Set-Cookie', 'mail-fixture=ready; Path=/dl/mail/coremail/; HttpOnly; SameSite=Lax')])
+    if path == '/dl/mail/coremail/s/json':
+        if method != 'GET':
+            return send('GET required', status=405)
+        query = parse_qs(parsed.query)
+        expected = {'sid': 'SYNTH-MAIL-TOKEN-ONLY', 'func': 'mbox:getMessageData',
+                    'mid': 'SYNTH-MAIL-1', 'part': '2', 'mode': 'download'}
+        reference = urlsplit(handler.headers.get('Referer', ''))
+        if (any(query.get(key) != [value] for key, value in expected.items()) or
+                'mail-fixture=ready' not in handler.headers.get('Cookie', '') or
+                reference.netloc != handler.headers.get('Host') or reference.path != '/dl/mail/coremail/XT/index.jsp'):
+            return send('Missing synthetic mailbox identity or browser session', status=403)
+        return send(b'NEU-Lumen native mail attachment', 'application/octet-stream',
+                    headers=[('Content-Disposition', 'attachment; filename="synthetic-mail.bin"')])
+
     if path == '/dl/index':
         encoded = base64.b64encode(PDF).decode()
         html = f'''<!doctype html><meta name="viewport" content="width=device-width"><title>Download fixture</title>
@@ -72,6 +90,28 @@ def handle_download_fixture(handler, method):
         <a id="blobPDF" download="blob.pdf">blob PDF</a>
         <script>document.getElementById('blobPDF').href=URL.createObjectURL(new Blob([Uint8Array.from(atob('{encoded}'),c=>c.charCodeAt(0))],{{type:'application/pdf'}}));</script>'''
         return send(html, headers=[('Set-Cookie', 'dl-fixture=ready; Path=/dl/; HttpOnly; SameSite=Lax')])
+    if path in ['/dl/resume-get', '/dl/resume-post']:
+        if method == 'POST':
+            handler.rfile.read(int(handler.headers.get('Content-Length', '0')))
+        with LOCK:
+            STATS['resume_get' if path.endswith('get') else 'resume_post' if method == 'POST' else 'resume_post_get'] += 1
+        title = 'Resumable GET fixture' if path.endswith('get') else 'Interrupted POST fixture'
+        chunks = [f'<!doctype html><title>{title}</title><input id="retained-draft" value="">'.encode()]
+        chunks += [b'<!--' + b'x' * 8192 + b'-->' for _ in range(32)]
+        chunks += [b'<p id="complete">Synthetic completed document</p>']
+        handler.send_response(200)
+        handler.send_header('Content-Type', 'text/html; charset=utf-8')
+        handler.send_header('Content-Length', str(sum(map(len, chunks))))
+        handler.send_header('Cache-Control', 'no-store')
+        handler.end_headers()
+        try:
+            for chunk in chunks:
+                handler.wfile.write(chunk)
+                handler.wfile.flush()
+                time.sleep(0.025)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        return True
     if path == '/dl/reference':
         return send(PDF, 'application/pdf')
     if path == '/dl/stats':

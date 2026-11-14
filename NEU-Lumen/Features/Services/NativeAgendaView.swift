@@ -104,7 +104,7 @@ struct NativeAgendaView: View {
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
             if active { Task { await refreshSystem() } }
         }
-        .onChange(of: environment.session.requestEpoch) { _, _ in selected = nil; systemItem = nil; completing = nil; managing = false }
+        .onChange(of: environment.session.requestEpoch) { _, _ in selected = nil; systemItem = nil; completing = nil; managing = false; adding = false }
         .onChange(of: environment.session.networkRevision) { _, _ in
             if active, case .failed = repo.displayWeekState(starting: sunday) { Task { await refresh(force: true) } }
         }

@@ -104,6 +104,7 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
     try await loadIndex()
     _ = try await browser.webView.evaluateJavaScript("document.getElementById('post').submit()")
     try await wait { browser.isCurrentPDF && !browser.isLoading && browser.webView.url?.path == "/dl/post" }
+    try require(!browser.reloadReadOnlyDocument(), "automatic code refresh must not replay a POST document")
     before = Set(store.records.map(\.id))
     browser.downloadCurrentFile()
     try require(browser.showsDownloadNotice && browser.downloadNotice.contains("POST"), "POST must show safe prompt")
@@ -180,7 +181,68 @@ func verifyBrowserDownloads(browser: PortalBrowser, client: PortalClient, base: 
     restored.activate(account: "restart-fixture")
     try require(restored.records.first?.state == .interrupted, "fresh store interrupts unfinished manifest")
     try require(!FileManager.default.fileExists(atPath: partialURL.path), "restart removes partial bytes")
+    try await verifyRetainedBrowserReads(client: client, base: base)
     print("PASS: real WKDownload attachments, inline extensionless PDF/cookie/Referer/raw bytes, POST, blob/data, duplicate filenames, cancellation, failure, close, account switch, logout, restart recovery")
+}
+
+@MainActor
+private func verifyRetainedBrowserReads(client: PortalClient, base: URL) async throws {
+    let retained = PortalBrowser()
+    defer { retained.close() }
+    func require(_ condition: Bool, _ message: String) throws {
+        if !condition { throw NetworkError(message: "Retained payment browser: " + message) }
+    }
+    func wait(_ condition: () -> Bool) async throws {
+        for _ in 0..<400 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        throw NetworkError(message: "Retained payment document did not reach the expected loading state")
+    }
+    func counts() async throws -> [String: Int] {
+        let (data, _) = try await URLSession.shared.data(from: base.appendingPathComponent("dl/stats"))
+        return try JSONDecoder().decode([String: Int].self, from: data)
+    }
+    let get = base.appendingPathComponent("dl/resume-get")
+    let early = PortalBrowser()
+    defer { early.close() }
+    await early.start(get, client: client)
+    early.close() // Before WebKit necessarily delivers its first navigation callback.
+    try await Task.sleep(for: .milliseconds(80))
+    await early.start(get, client: client)
+    try await wait { early.title == "Resumable GET fixture" && !early.webView.isLoading && !early.isLoading }
+    early.close()
+    await retained.start(get, client: client)
+    try await wait { retained.title == "Resumable GET fixture" && retained.webView.isLoading }
+    retained.close()
+    try await Task.sleep(for: .milliseconds(80))
+    await retained.start(get, client: client)
+    try await wait { retained.title == "Resumable GET fixture" && !retained.webView.isLoading && !retained.isLoading }
+    let complete = try await retained.webView.evaluateJavaScript("!!document.getElementById('complete')") as? Bool
+    try require(complete == true, "closing the first GET mid-load must resume and finish when reopened")
+    let first = try await counts()
+    try require((first["resume_get"] ?? 0) >= 2, "the interrupted GET was requested again")
+    _ = try await retained.webView.evaluateJavaScript("document.getElementById('retained-draft').value='SYNTH-UNSUBMITTED-EDIT'")
+    retained.close()
+    await retained.start(get, client: client)
+    try await Task.sleep(for: .milliseconds(100))
+    let saved = try await retained.webView.evaluateJavaScript("document.getElementById('retained-draft').value") as? String
+    let reopened = try await counts()
+    try require(saved == "SYNTH-UNSUBMITTED-EDIT" && reopened["resume_get"] == first["resume_get"], "completed form reentry preserves edits without another request")
+
+    var post = URLRequest(url: base.appendingPathComponent("dl/resume-post"))
+    post.httpMethod = "POST"
+    post.httpBody = Data("synthetic=only".utf8)
+    post.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+    retained.webView.load(post)
+    try await wait { retained.title == "Interrupted POST fixture" && retained.webView.isLoading }
+    retained.close()
+    try await Task.sleep(for: .milliseconds(80))
+    await retained.start(get, client: client)
+    try await Task.sleep(for: .milliseconds(150))
+    let final = try await counts()
+    try require(final["resume_post"] == 1 && final["resume_post_get"] == 0, "interrupted POST must never be replayed or converted to GET")
+    print("PASS: retained browser interrupted GET recovery, completed form draft preservation and no POST replay")
 }
 
 // Call in TWO separate simulator launches. Terminate the first process immediately
@@ -438,5 +500,157 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     try require(result["filled"] as? Bool == true, "school custom row checkbox uses its own handler")
     snapshot = try await read()
     try require(snapshot.fields.first(where: { $0.label == "选择合成教室" })?.value == "true", "custom checkbox state reads back")
+    // Structure mirrors the observed EMAP-FQ/jqxGrid controls, with synthetic data only.
+    let emapHTML = #"""
+    <!doctype html><meta charset="utf-8"><title>Synthetic EMAP classroom</title>
+    <style>[role=combobox]{display:inline-block;min-width:150px;min-height:30px} .jqx-grid{margin-top:20px}td,[role=columnheader]{padding:8px}a{display:inline-block;padding:8px;cursor:pointer}</style>
+    <article><div id="synthetic-search" class="emap-FQ-container">
+      <div class="emap-FQ-filter-group"><div class="emap-FQ-label">学校校区</div><div class="emap-FQ-input-warp">
+        <div id="jqxWidgetSynthetic" role="combobox" class="jqx-widget jqx-dropdownlist-state-normal" data-name="XXXQDM" data-caption="学校校区" aria-owns="listBoxjqxWidgetSynthetic">
+          <div id="dropdownlistContentjqxWidgetSynthetic">请选择...</div><input type="hidden" value="">
+          <div id="listBoxjqxWidgetSynthetic" hidden><div id="filterinnerListBoxjqxWidgetSynthetic"><input placeholder="请查找"></div>
+            <div role="option" id="synthetic-campus-a" aria-selected="false"><span class="chkbox"></span>合成甲校区</div>
+            <div role="option" id="synthetic-campus-b" aria-selected="false"><span class="chkbox"></span>合成乙校区</div>
+          </div>
+        </div>
+      </div></div>
+      <div class="emap-FQ-filter-group"><div class="emap-FQ-label">教学楼</div><select data-name="JXLDM" data-caption="教学楼" id="synthetic-building"><option value="">请先选择校区</option></select></div>
+      <div class="emap-FQ-filter-group"><div class="emap-FQ-label">教室名称</div><input data-name="JASMC" data-caption="教室名称" id="synthetic-keyword" oninput="document.getElementById('synthetic-summary').textContent=this.value"></div>
+      <div class="emap-FQ-filter-group"><div class="emap-FQ-label">空闲日期</div><div xtype="date-local" data-name="KXRQ" data-caption="空闲日期" class="bhtc-input-group"><input bh-form-role="dateTimeInput" type="text" value="2026-11-14"></div></div>
+      <span id="synthetic-summary"></span><a class="bh-btn bh-btn-primary" emap-role="FQ-search-btn">搜索</a>
+      <a class="bh-btn" data-action="synthetic-write">合成申请</a>
+    </div>
+    <div id="synthetic-grid" role="grid" class="jqx-grid"><div id="columntablesynthetic-grid"><div role="columnheader">教室名称</div><div role="columnheader">空闲时间</div></div>
+      <div><table id="tablesynthetic-grid"><tbody><tr role="row"><td role="gridcell">尚未查询</td><td role="gridcell">未知</td></tr></tbody></table></div>
+      <div class="jqx-grid-pager"><div class="bh-pager">
+        <a pager-flag="home"><i></i></a><a pager-flag="prev"><i></i></a><a pager-flag="next"><i></i></a><a pager-flag="end"><i></i></a>
+        <span class="bh-pager-num">1-10 总记录数 20</span><span class="bh-pager-no">总页数 2</span><input pager-flag="gotoPage" value="1">
+      </div></div>
+    </div></article>
+    <script>
+    window.syntheticQueries=0;window.syntheticWrites=0;
+    const campus=document.getElementById('jqxWidgetSynthetic'),popup=document.getElementById('listBoxjqxWidgetSynthetic');
+    campus.addEventListener('click',event=>{
+      if(event.target.closest('[role=option]') || event.target.matches('input'))return;
+      popup.hidden=!popup.hidden;
+      if(popup.hidden)campus.dispatchEvent(new Event('close'));
+    });
+    for(const option of popup.querySelectorAll('[role=option]'))option.addEventListener('click',()=>{
+      option.setAttribute('aria-selected',option.getAttribute('aria-selected')!=='true');
+      const selected=Array.from(popup.querySelectorAll('[aria-selected=true]'));
+      document.getElementById('dropdownlistContentjqxWidgetSynthetic').textContent=selected.map(x=>x.textContent).join('、')||'请选择...';
+      campus.querySelector('input[type=hidden]').value=selected.map(x=>x.id).join(',');
+    });
+    popup.querySelector('input').addEventListener('keyup',event=>{
+      for(const option of popup.querySelectorAll('[role=option]'))option.hidden=!option.textContent.includes(event.target.value);
+    });
+    campus.addEventListener('close',()=>setTimeout(()=>{
+      document.getElementById('synthetic-building').innerHTML='<option value="synthetic-building-a">合成教学楼</option>';
+    },400));
+    document.querySelector('[emap-role=FQ-search-btn]').addEventListener('click',()=>{
+      window.syntheticQueries++;
+      document.querySelector('#tablesynthetic-grid tbody').innerHTML='<tr role="row"><td role="gridcell">合成A101</td><td role="gridcell">08:30-10:10</td></tr>';
+    });
+    document.querySelector('[data-action=synthetic-write]').addEventListener('click',()=>window.syntheticWrites++);
+    for(const action of document.querySelectorAll('a[pager-flag]'))action.addEventListener('click',()=>{
+      document.querySelector('.bh-pager-num').textContent='11-20 总记录数 20';
+      document.querySelector('[pager-flag=gotoPage]').value='2';
+      document.querySelector('#tablesynthetic-grid tbody').innerHTML='<tr role="row"><td role="gridcell">合成B201</td><td role="gridcell">10:30-12:10</td></tr>';
+    });
+    document.querySelector('[pager-flag=gotoPage]').addEventListener('keyup',event=>{
+      if(event.keyCode===13)document.querySelector('.bh-pager-num').textContent='跳转到第'+event.target.value+'页';
+    });
+    </script>
+    """#
+    let emapURL = URL(string: "/jwapp/sys/kxjas/*default/index.do#/kxjscxxs", relativeTo: base)!
+    web.loadHTMLString(emapHTML, baseURL: emapURL)
+    for _ in 0..<200 {
+        if web.title == "Synthetic EMAP classroom" && !web.isLoading { break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    snapshot = try await read()
+    guard let schoolCampus = snapshot.fields.first(where: { $0.label == "学校校区" }),
+          let schoolDate = snapshot.fields.first(where: { $0.label == "空闲日期" }) else { throw NetworkError(message: "Missing EMAP data-caption labels") }
+    try require(schoolDate.kind == "date", "EMAP date wrapper labels its otherwise unnamed inner input")
+    try require(snapshot.tables.first?.headers == ["教室名称", "空闲时间"], "jqxGrid outer header DIVs label the inner HTML table")
+    try require(Set(snapshot.actions.filter { $0.query == true }.map(\.title)).isSuperset(of: ["搜索", "首页", "上一页", "下一页", "末页"]), "delegated EMAP search and icon-only pager anchors are native actions")
+    try require(snapshot.fields.contains(where: { $0.label == "跳转页码" && $0.commit == "page" }), "school page jump input has a meaningful label")
+    result = try await call("open", token: snapshot.token, action: schoolCampus.id)
+    try require(result["opened"] as? Bool == true, "open real-shape EMAP dropdown")
+    snapshot = try await read()
+    guard let multiCampus = snapshot.fields.first(where: { $0.label == "学校校区" }) else { throw NetworkError(message: "Missing EMAP campus choices") }
+    try require(multiCampus.expanded == true && multiCampus.multiple == true && multiCampus.search != nil && multiCampus.options.count == 2, "EMAP multi-select exposes selected state, filtering and explicit completion")
+    result = try await call("change", token: snapshot.token, action: multiCampus.id, values: [multiCampus.id: "synthetic-campus-a"])
+    try require(result["filled"] as? Bool == true, "select EMAP campus using school handlers")
+    snapshot = try await read()
+    guard let selectedCampus = snapshot.fields.first(where: { $0.label == "学校校区" }) else { throw NetworkError(message: "Missing selected EMAP campus") }
+    try require(selectedCampus.options.first(where: { $0.value == "synthetic-campus-a" })?.selected == true && selectedCampus.expanded == true, "multi-select stays open and reads checked options")
+    result = try await call("filter", token: snapshot.token, action: selectedCampus.id, values: [selectedCampus.id: "甲"])
+    try require(result["filtered"] as? Bool == true, "native option search uses school's filter input")
+    snapshot = try await read()
+    guard let filteredCampus = snapshot.fields.first(where: { $0.label == "学校校区" }) else { throw NetworkError(message: "Missing filtered EMAP campus") }
+    try require(filteredCampus.options.count == 1 && filteredCampus.options.first?.title == "合成甲校区", "native options follow school-filtered rendered choices")
+    result = try await call("close", token: snapshot.token, action: filteredCampus.id)
+    try require(result["closed"] as? Bool == true, "complete EMAP multi-selection through school close event")
+    _ = try await read()
+    try await Task.sleep(for: .milliseconds(550))
+    result = try await call("watch")
+    try require(result["changed"] as? Bool == true, "school close-triggered building response is observed")
+    snapshot = try await read()
+    try require(snapshot.fields.first(where: { $0.label == "教学楼" })?.options.first?.value == "synthetic-building-a", "close-triggered dependent building appears natively")
+    guard let schoolQuery = snapshot.actions.first(where: { $0.title == "搜索" }),
+          let schoolKeyword = snapshot.fields.first(where: { $0.label == "教室名称" }) else { throw NetworkError(message: "Missing EMAP query") }
+    result = try await call("act", token: snapshot.token, action: schoolQuery.id, values: [schoolKeyword.id: "合成"])
+    try require(result["activated"] as? Bool == true, "query accepts user edits even when school live filter summary changes")
+    snapshot = try await read()
+    try require(snapshot.tables.first?.rows.first == ["合成A101", "08:30-10:10"], "EMAP search result retains its real column labels")
+    guard let nextPage = snapshot.actions.first(where: { $0.title == "下一页" }) else { throw NetworkError(message: "Missing semantic school pager") }
+    result = try await call("act", token: snapshot.token, action: nextPage.id)
+    try require(result["activated"] as? Bool == true, "semantic pager still clicks the original school icon anchor")
+    snapshot = try await read()
+    try require(snapshot.tables.first?.rows.first?.first == "合成B201" && snapshot.notices.contains("11-20 总记录数 20"), "EMAP next-page result and record range read back")
+    guard let pageNumber = snapshot.fields.first(where: { $0.commit == "page" }) else { throw NetworkError(message: "Missing page jump") }
+    result = try await call("change", token: snapshot.token, action: pageNumber.id, values: [pageNumber.id: "1"])
+    try require(result["filled"] as? Bool == true, "native page jump updates school field and Enter handler")
+    snapshot = try await read()
+    try require(snapshot.notices.contains("跳转到第1页"), "school page-jump key handler runs")
+    let draftIdentity = snapshot.draftIdentity
+    try require(draftIdentity?.isEmpty == false, "draft identity is an opaque nonempty token")
+    snapshot = try await read()
+    try require(snapshot.draftIdentity == draftIdentity, "unchanged documents and hidden state preserve the draft identity")
+    _ = try await web.evaluateJavaScript("document.querySelector('input[type=hidden]').value='SYNTH-CHANGED-ORDER'")
+    result = try await call("watch")
+    try require(result["changed"] as? Bool == true, "hidden-only order changes are observable without exposing their values")
+    snapshot = try await read()
+    try require(snapshot.draftIdentity != draftIdentity, "hidden order value changes invalidate native drafts")
+    let rotatedIdentity = snapshot.draftIdentity
+    _ = try await web.evaluateJavaScript("document.querySelector('input[type=hidden]').replaceWith(document.querySelector('input[type=hidden]').cloneNode(true))")
+    snapshot = try await read()
+    try require(snapshot.draftIdentity != rotatedIdentity, "replaced hidden nodes invalidate drafts even when their value is unchanged")
+    _ = try await web.evaluateJavaScript(#"""
+    document.body.insertAdjacentHTML('beforeend','<div data-name="RANGE"><input id="range-start" type="date" value="2026-11-14"><input id="range-end" type="date" value="2026-11-15"></div><div id="unnamed-range" data-name="UNNAMED" data-caption="日期区间"><input type="date" value="2026-11-14"><input type="date" value="2026-11-15"></div><input data-name="STABLE" data-caption="合成控件" id="jqxWidgetabc123" value="合成值">');
+    """#)
+    snapshot = try await read()
+    guard let rangeStart = snapshot.fields.first(where: { $0.key?.hasSuffix(":RANGE:range-start") == true }),
+          let rangeEnd = snapshot.fields.first(where: { $0.key?.hasSuffix(":RANGE:range-end") == true }) else { throw NetworkError(message: "Missing compound date range controls") }
+    try require(rangeStart.key != rangeEnd.key, "shared data-name never aliases distinct date controls")
+    result = try await call("change", token: snapshot.token, action: rangeEnd.id, values: [rangeEnd.id: "2026-11-20"])
+    try require(result["filled"] as? Bool == true, "native end-date editing targets its own field")
+    var rangeValues = try await web.evaluateJavaScript("[document.getElementById('range-start').value,document.getElementById('range-end').value]") as? [String]
+    try require(rangeValues == ["2026-11-14", "2026-11-20"], "editing the end date leaves the start date unchanged")
+    snapshot = try await read()
+    let unnamed = snapshot.fields.filter { $0.key?.contains(":UNNAMED:") == true }
+    try require(unnamed.count == 2 && Set(unnamed.compactMap(\.key)).count == 2, "unnamed compound inputs use distinct stable group ordinals")
+    result = try await call("change", token: snapshot.token, action: unnamed[1].id, values: [unnamed[1].id: "2026-11-21"])
+    try require(result["filled"] as? Bool == true, "unnamed second control remains individually editable")
+    rangeValues = try await web.evaluateJavaScript("Array.from(document.querySelectorAll('#unnamed-range input')).map(el=>el.value)") as? [String]
+    try require(rangeValues == ["2026-11-14", "2026-11-21"], "unnamed end-date editing does not change its sibling")
+    snapshot = try await read()
+    let stableKey = snapshot.fields.first(where: { $0.label == "合成控件" })?.key
+    _ = try await web.evaluateJavaScript("document.getElementById('jqxWidgetabc123').id='jqxWidgetdef456'")
+    snapshot = try await read()
+    try require(stableKey != nil && snapshot.fields.first(where: { $0.label == "合成控件" })?.key == stableKey, "random jqxWidget ID regeneration preserves the semantic field identity")
+    let counts = try await web.evaluateJavaScript("[window.syntheticQueries,window.syntheticWrites]") as? [Int]
+    try require(counts == [1, 0], "EMAP read-only validation never invokes a business write")
     print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
 }

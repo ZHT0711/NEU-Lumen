@@ -618,6 +618,26 @@ final class PortalClient {
         return try NativeAffairsCatalogParser.guide(await affairsPage(service.guideURL))
     }
 
+    /// Protected guide diagrams use the same account cookies and selected route as their guide.
+    func fetchAffairsGuideImage(_ url: URL, referer: URL) async throws -> Data {
+        guard NativeAffairsCatalogParser.schoolURL(referer.absoluteString) == referer,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              url.user == nil, url.password == nil, url.host != nil else {
+            throw NetworkError(message: "办事图示地址无效")
+        }
+        await prepareAccess()
+        let response = try await http.get(browserDestination(for: url), extraHeaders: [
+            "Accept": "image/avif,image/webp,image/*,*/*;q=0.8",
+            "Referer": browserDestination(for: referer).absoluteString,
+        ])
+        let mime = response.headers.first { String(describing: $0.key).lowercased() == "content-type" }.map { String(describing: $0.value).lowercased() } ?? ""
+        guard response.status == 200, mime.hasPrefix("image/"), !response.body.isEmpty,
+              response.body.count <= 8_000_000 else {
+            throw NetworkError(message: "办事图示暂未读取成功，请重试或在学校页面查看")
+        }
+        return response.body
+    }
+
     private func affairsPage(_ url: URL) async throws -> String {
         guard NativeAffairsCatalogParser.schoolURL(url.absoluteString) == url else {
             throw NetworkError(message: "办事服务地址无效")
@@ -1380,8 +1400,8 @@ final class PortalClient {
                 let isRecharge = subject.contains("充值") || subject.contains("转账") || subject.contains("补助")
                 if amount > 0 && !isRecharge { amount = -amount }
                 if amount < 0 && isRecharge { amount = abs(amount) }
-                let fee = parseMoney(value(columns == nil ? 3 : index("手续费"))) ?? 0
-                let balanceAfter = parseMoney(value(columns == nil ? 4 : index("余额"))) ?? 0
+                let fee = parseMoney(value(columns == nil ? 3 : index("手续费")))
+                let balanceAfter = parseMoney(value(columns == nil ? 4 : index("余额")))
                 let time = PortalDate.dateTime(normalizeBillTime(timeText))
                 out.append(CardBill(
                     time: time,

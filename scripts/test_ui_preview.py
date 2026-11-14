@@ -111,6 +111,8 @@ class UIPreviewTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         destination = self.path / 'generated-project'
         subprocess.run([sys.executable, str(root / 'scripts/prepare_ui_validation.py'), str(destination)], check=True, capture_output=True)
+        # Chinese identity labels must survive real HTTP loading without a charset header.
+        self.assertIn('<meta charset="utf-8">', (destination / 'fixtures/ecode.html').read_text(encoding='utf-8'))
         session = 'NEU-Lumen/Core/Services/SessionStore.swift'
         repository = 'NEU-Lumen/Core/Services/PortalRepository.swift'
         self.assertNotIn('seedScreenshotSession', (root / session).read_text())

@@ -311,6 +311,9 @@ precondition(parsedBills[1].amount == 1234.56 && parsedBills[1].balanceAfter == 
 precondition(parsedBills.allSatisfy { $0.time != nil })
 let legacyBills = try PortalClient.parseBillTable("<table><tr><td>2026-10-01 12:00</td><td>消费</td><td>3.50</td><td>0</td><td>0</td></tr></table>")
 precondition(legacyBills.count == 1 && legacyBills[0].amount == -3.5)
+precondition(legacyBills[0].balanceAfter == 0 && legacyBills[0].fee == 0, "学校明确返回的零余额与手续费应保留")
+let missingBillFacts = try PortalClient.parseBillTable("<table><tr><th>日期</th><th>交易类型</th><th>金额</th></tr><tr><td>2026-10-01 12:00</td><td>消费</td><td>3.50</td></tr></table>")
+precondition(missingBillFacts.count == 1 && missingBillFacts[0].balanceAfter == nil && missingBillFacts[0].fee == nil, "学校未提供余额与手续费不能显示成零")
 let emptyBills = try PortalClient.parseBillTable("<p>共 0 条记录</p>")
 precondition(emptyBills.isEmpty)
 for invalid in ["<html>Service unavailable</html>", reorderedBills.replacingOccurrences(of: "￥ 5.00 元", with: "***")] {

@@ -59,6 +59,11 @@ wait_ui_marker() {
   done
   if [[ ! -f "$CONTAINER/Documents/$NAME" ]]; then
     echo "Missing current simulator check: $NAME" >&2
+    xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/failed-${NAME%.txt}.png" || true
+    if [[ -f "$CONTAINER/Documents/ecode-diagnostics.txt" ]]; then
+      cp "$CONTAINER/Documents/ecode-diagnostics.txt" "$OUTPUT/ecode-diagnostics.txt"
+      cat "$OUTPUT/ecode-diagnostics.txt"
+    fi
     exit 1
   fi
   cp "$CONTAINER/Documents/$NAME" "$OUTPUT/$NAME"

@@ -8,6 +8,22 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 
 class NativeServicesTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('swiftc'), 'Swift compiler is unavailable')
+    def test_affairs_atomic_refresh_and_exact_retry(self):
+        source=(ROOT/'NEU-Lumen/Features/Services/NativeCampusPages.swift').read_text(encoding='utf-8')
+        store='import Foundation\nimport Observation\n@MainActor @Observable\nfinal class NativeAffairsStore {'+source.split('final class NativeAffairsStore {',1)[1].split('\nstruct NativeAffairsView:',1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)
+            (path/'NativeAffairsStore.swift').write_text(store,encoding='utf-8')
+            executable=path/'native-affairs-tests'
+            result=subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(path/'NativeAffairsStore.swift'),
+                                   str(ROOT/'Tests/NativeAffairs/main.swift'),'-o',str(executable)],
+                                  capture_output=True,text=True,encoding='utf-8')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertNotRegex(result.stdout+result.stderr,r'(?im)\bwarning:')
+            result=subprocess.run([str(executable)],capture_output=True,text=True,encoding='utf-8')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
     def test_electricity_room_prefill(self):
         result=subprocess.run(['node',str(ROOT/'Tests/Learning/electricity-prefill.mjs')],capture_output=True,text=True,encoding='utf-8')
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)

@@ -3,7 +3,7 @@ import SwiftUI
 /// The exact calligraphy pixels from the official logo already used in README.
 /// Clip only the emblem on the left; keep the complete height and original aspect ratio.
 struct NEUCalligraphy: View {
-    var width: CGFloat = 142
+    var width: CGFloat = 104
     private var scale: CGFloat { width / 215 }
     var body: some View {
         Image("NEULogo")

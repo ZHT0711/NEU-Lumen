@@ -355,6 +355,7 @@ struct UIValidationRoot: View {
                     try await verifyBrowserDownloads(browser: testBrowser, client: environment.session.client, base: downloadBase)
                     try await verifyNativeServiceDocument(browser: testBrowser, base: downloadBase)
                     try await verifyECodeDocument(browser: testBrowser, base: downloadBase)
+                    try await verifyNativeMailReader(client: environment.session.client, base: downloadBase)
                     try "PASS: real WKDownload original PDF bytes, cookies/Referer, POST safety, blob/data, duplicate names, progress, cancel/failure, browser close, account isolation and manifest recovery".write(to: output, atomically: true, encoding: .utf8)
                 } catch {
                     try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
@@ -671,6 +672,8 @@ func runBrowserChecks(_ browser: PortalBrowser, client: PortalClient) async {
 # Real WebKit download checks live outside the Release source tree.
 shutil.copyfile(root / "Tests/BrowserDownloads/WebKitValidation.swift",
                 destination / "NEU-Lumen/App/BrowserDownloadValidation.swift")
+shutil.copyfile(root / "Tests/NativeMail/WebKitValidation.swift",
+                destination / "NEU-Lumen/App/NativeMailValidation.swift")
 shutil.copyfile(root / "Tests/Learning/PersistenceValidation.swift",
                 destination / "NEU-Lumen/App/LearningPersistenceValidation.swift")
 fixtures = destination / "fixtures"
@@ -1054,7 +1057,7 @@ service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
 # The actual production e-code reader and view run against an explicitly synthetic
 # local canvas. This page is not a usable QR credential and never enters the IPA.
 shutil.copyfile(root / 'Tests/ECode/WebKitValidation.swift', destination / 'NEU-Lumen/App/ECodeValidation.swift')
-(fixtures / 'ecode.html').write_text('''<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>合成 e码通</title></head>
+(fixtures / 'ecode.html').write_text('''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>合成 e码通</title></head>
 <body><h1>合成 e码通 · 非有效校园凭证</h1><p>学号：20250001</p><p>姓名：合成学子</p>
 <canvas id="qrcode" width="240" height="240"></canvas><script>
 const c=document.getElementById('qrcode'),x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,240,240);
@@ -1077,6 +1080,12 @@ ecode_hook = '        .privacySensitive()'
 if ecode_source.count(ecode_hook) != 1:
     raise RuntimeError('E-code screenshot marker hook changed')
 ecode_source = ecode_source.replace(ecode_hook, ecode_hook + '''
+        .onChange(of: document?.state) { _, state in
+            if ProcessInfo.processInfo.arguments.contains("--screen=native-ecode") {
+                let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ecode-diagnostics.txt")
+                try? ("state=" + (state ?? "nil") + "; message=" + (message ?? "nil") + "; loading=" + String(browser.isLoading)).write(to: output, atomically: true, encoding: .utf8)
+            }
+        }
         .onChange(of: image != nil) { _, ready in
             if ready, ProcessInfo.processInfo.arguments.contains("--screen=native-ecode") {
                 let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ecode-screenshot.txt")

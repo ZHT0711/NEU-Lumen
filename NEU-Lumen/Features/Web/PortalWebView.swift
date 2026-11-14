@@ -11,6 +11,7 @@ struct PortalWebViewScreen: View {
     var cgMode = false
     var learningPlatform: LearningPlatform?
     var cardQuery: String?
+    var retainedBrowser: PortalBrowser?
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
@@ -148,6 +149,7 @@ struct PortalWebViewScreen: View {
             Text("网页使用定位、相机、麦克风或运动传感器时会请求授权。若已拒绝应用权限，可在系统设置中重新允许。校园乐跑请开启定位服务并允许精确位置，返回后刷新网页，再允许该网站使用位置。")
         }
         .task {
+            if let retainedBrowser { browser = retainedBrowser }
             await browser.start(url, client: environment.session.client, session: environment.session, service: nativeService)
             if let cardQuery {
                 do { try await browser.openCardQuery(cardQuery) }
@@ -401,6 +403,11 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var electricityResumeAttempted = false
     @ObservationIgnored private var electricityPrefillTask: Task<Void, Never>?
     @ObservationIgnored private var electricityPrefillStatus = "unavailable"
+    @ObservationIgnored private var nativeFormDraft = NativeFormDraftCache()
+    @ObservationIgnored private var nativeDocumentContext: (token: String, url: URL, epoch: UUID)?
+    @ObservationIgnored private var navigationGeneration = UUID()
+    @ObservationIgnored private var suspendedRead: (request: URLRequest, generation: UUID)?
+    @ObservationIgnored private var isClosed = false
     private static let electricityWorld = WKContentWorld.world(name: "NEULumen.ElectricityRoom")
 
     override init() {
@@ -456,11 +463,32 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     }
 
     func start(_ url: URL, client: PortalClient, session: SessionStore? = nil, service: NativeCampusService? = nil) async {
+        // The first task can be cancelled while importing cookies, before WebKit
+        // receives any request. A later presentation must be able to initialize it.
+        if started, entryURL == nil { started = false }
         guard !started else {
+            if let session {
+                guard session.phase == .loggedIn, session.requestEpoch == downloadSessionEpoch,
+                      client.sessionGeneration == clientEpoch else {
+                    nativeFormDraft.clear()
+                    error = "登录状态已更新，请关闭页面后重新进入。"
+                    return
+                }
+            }
+            isClosed = false
             webView.configuration.websiteDataStore.httpCookieStore.add(self)
+            if let suspended = suspendedRead, suspended.generation == navigationGeneration {
+                suspendedRead = nil
+                pendingDocumentRequest = nil
+                provisionalUnsafeMethod = false
+                error = nil
+                isLoading = true
+                webView.load(suspended.request)
+            }
             return
         }
         started = true
+        isClosed = false
         self.client = client
         self.session = session
         let source = WebVPN.unwrap(url) ?? url
@@ -529,6 +557,21 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     func reload() {
         error = nil
         if webView.url != nil { webView.reload() } else { goToEntry() }
+    }
+
+    func saveNativeFormDraft(document: NativeServiceDocument?, values: [String: String]) {
+        guard let document, let session, session.phase == .loggedIn,
+              session.requestEpoch == downloadSessionEpoch,
+              let context = nativeDocumentContext, context.token == document.token,
+              context.epoch == session.requestEpoch, context.url == webView.url else { return }
+        nativeFormDraft.save(document: document, values: values, url: context.url, epoch: context.epoch)
+    }
+
+    func takeNativeFormDraft(for document: NativeServiceDocument) -> [String: String] {
+        guard let session, session.phase == .loggedIn, session.requestEpoch == downloadSessionEpoch,
+              let url = webView.url else { nativeFormDraft.clear(); return [:] }
+        nativeDocumentContext = (document.token, url, session.requestEpoch)
+        return nativeFormDraft.take(for: document, url: url, epoch: session.requestEpoch)
     }
 
     /// Automatic consumers may only reload a completed, confirmed GET document.
@@ -648,6 +691,11 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         error = nil
+        let interrupted = isClosed ? suspendedRead : nil
+        navigationGeneration = UUID()
+        suspendedRead = interrupted.map { ($0.request, navigationGeneration) }
+        nativeFormDraft.clear()
+        nativeDocumentContext = nil
         electricityPrefillTask?.cancel()
         electricityPrefillNotice = nil
     }
@@ -754,6 +802,22 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     }
 
     func close() {
+        isClosed = true
+        // Retain an interrupted read, never a submission or a completed form.
+        // In particular, a POST -> GET redirect chain remains unsafe to replay.
+        let initialReadPending = entryURL != nil && webView.url == nil && documentResponseURL == nil && documentRequest == nil
+        if webView.isLoading || initialReadPending { suspendedRead = nil }
+        if webView.isLoading || initialReadPending, !provisionalUnsafeMethod {
+            let request: URLRequest?
+            if let pendingDocumentRequest { request = pendingDocumentRequest }
+            else if !documentUnsafeMethod, let documentRequest { request = documentRequest }
+            else if documentResponseURL == nil, let entryURL { request = URLRequest(url: entryURL) }
+            else { request = nil }
+            if let request, (request.httpMethod ?? "GET").uppercased() == "GET",
+               let scheme = request.url?.scheme?.lowercased(), ["http", "https"].contains(scheme) {
+                suspendedRead = (request, navigationGeneration)
+            }
+        }
         webView.stopLoading()
         electricityPrefillTask?.cancel()
         electricityPrefillTask = nil

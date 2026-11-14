@@ -14,6 +14,7 @@ struct NativeMailMessage: Identifiable, Hashable {
     let dateText: String
     let unread: Bool?
     var flagged: Bool? = nil
+    var attached: Bool? = nil
 }
 
 struct NativeMailSearch: Equatable {
@@ -23,6 +24,14 @@ struct NativeMailSearch: Equatable {
     var unreadOnly = false
     var attachedOnly = false
     var flaggedOnly = false
+
+    var normalized: Self {
+        var result = self
+        result.subject = String(subject.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        result.from = String(from.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        result.to = String(to.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        return result
+    }
 
     var parameters: [String: Any] {
         var result: [String: Any] = [:]
@@ -50,11 +59,26 @@ enum NativeMailMutation {
 }
 
 struct NativeMailBody: Identifiable {
+    struct Attachment: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let size: Int64?
+        let downloadable: Bool
+    }
+    struct BodyLink: Identifiable {
+        let title: String
+        let url: URL
+        var id: String { url.absoluteString }
+    }
     let id: String
     let subject: String
     let sender: String
     let text: String
-    let attachments: [String]
+    let recipients: String
+    let cc: String
+    let dateText: String
+    let attachments: [Attachment]
+    let links: [BodyLink]
 }
 
 enum NativeMailProtocol {
@@ -82,7 +106,8 @@ enum NativeMailProtocol {
             }
             return NativeMailMessage(id: id, subject: String((row["subject"] as? String ?? "无主题").prefix(1024)),
                 sender: String((row["sender"] as? String ?? "未提供发件人").prefix(1024)),
-                dateText: dateText(row["date"]), unread: row["unread"] as? Bool, flagged: row["flagged"] as? Bool)
+                dateText: dateText(row["date"]), unread: row["unread"] as? Bool, flagged: row["flagged"] as? Bool,
+                attached: row["attached"] as? Bool)
         }
     }
 
@@ -168,17 +193,51 @@ enum NativeMailProtocol {
             if (await getIdentity()!==email) throw new Error('identity');
             return {email,updated:true};
         }
-        if (command==='read') {
+        if (command==='read' || command==='download') {
             if (typeof messageID!=='string'||!messageID||messageID.length>512) throw new Error('format');
             const data=await rpc('read',{mid:messageID,mboxa:'',sid});
-            const mail=data.mail || {};
-            let content=clean(mail.content || mail.text || '',1000000)
-                .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,'')
-                .replace(/<br\s*\/?\s*>|<\/(?:p|div|tr|h[1-6])>/gi,'\n').replace(/<[^>]*>/g,'');
+            const mail=data.mail || {}, info=data.mailInfo || {};
+            const attachments=(Array.isArray(mail.attachments)?mail.attachments:[]).slice(0,100).map((a,index)=>{
+                const part=typeof a.part==='string'||typeof a.part==='number'?String(a.part):'';
+                const downloadable=a.type==='internal' && /^\d{1,6}(?:\.\d{1,6}){0,12}$/.test(part) &&
+                    (!a.mid || a.mid===messageID) && !a.deleted && !a.inlined && !mail.smimeStatus && !data.mailCipherEncrypted;
+                const size=typeof a.size==='number' || (typeof a.size==='string' && /^\d+$/.test(a.size))?Number(a.size):NaN;
+                return {id:part?'part:'+part+':'+index:String(index),name:clean(a.displayName || a.name || a.filename || '附件',512),
+                    size:Number.isSafeInteger(size) && size>=0?size:null,downloadable,part};
+            });
+            if(command==='download') {
+                const selected=attachments.find(a=>a.id===attachmentID && a.name===attachmentName);
+                if(!selected || !selected.downloadable) throw new Error('format');
+                if(await getIdentity()!==email) throw new Error('identity');
+                // The school's X.157e8.js internal attachment URL, with the session
+                // kept inside this isolated world. WebKit owns the authenticated transfer.
+                const url=new URL('s/json',root);
+                for(const [key,value] of Object.entries({sid,func:'mbox:getMessageData',mid:messageID,part:selected.part,mode:'download'})) url.searchParams.set(key,value);
+                const anchor=document.createElement('a'); anchor.href=url.href; anchor.download=selected.name;
+                anchor.hidden=true; document.body.appendChild(anchor);
+                try { anchor.click(); } finally { anchor.remove(); }
+                return {email,downloadRequested:true};
+            }
+            const html=clean(mail.content || mail.text || '',1000000)
+                .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,'');
+            const decode=value=>{const node=document.createElement('textarea');node.innerHTML=value;return node.value;};
+            const links=[];
+            for(const match of html.matchAll(/<a\b[^>]*\bhref\s*=\s*(["'])([\s\S]*?)\1[^>]*>([\s\S]*?)<\/a>/gi)) {
+                try { const url=new URL(decode(match[2]));
+                    if(!['http:','https:'].includes(url.protocol) || url.username || url.password || url.href.length>4096 || links.some(x=>x.url===url.href))continue;
+                    links.push({title:clean(decode(match[3].replace(/<[^>]*>/g,'')),512) || url.hostname,url:url.href});
+                    if(links.length>=50)break;
+                } catch {}
+            }
+            let content=html
+                .replace(/<li\b[^>]*>/gi,'\n• ').replace(/<br\s*\/?\s*>|<\/(?:p|div|tr|li|h[1-6])>/gi,'\n').replace(/<[^>]*>/g,'');
             const decoder=document.createElement('textarea'); decoder.innerHTML=content; content=decoder.value;
             if (await getIdentity()!==email) throw new Error('identity');
             return {email,body:{id:messageID,subject:clean(mail.subject,1024),sender:address(mail.from),text:content,
-                attachments:(mail.attachments||[]).slice(0,100).map(a=>clean(a.name||a.filename||'附件',512))}};
+                recipients:address(mail.to || info.to),cc:address(mail.cc || info.cc),
+                date:mail.sentDate || info.sentDate || mail.receivedDate || info.receivedDate || '',
+                unread:typeof info.flags?.read==='boolean'?!info.flags.read:null,
+                attachments:attachments.map(({part,...attachment})=>attachment),links}};
         }
         let folders=[];
         if (includeFolders) {
@@ -210,7 +269,8 @@ enum NativeMailProtocol {
         return {email,folders,folderID:selected,nextStart:start+rows.length,hasMore:rows.length>=20,
             messages:rows.map(m=>({id:clean(m.id,512),subject:clean(m.subject || '无主题',1024),sender:address(m.from || m.sender),
                 date:m.receivedDate || m.sentDate || '',unread:typeof m.flags?.read==='boolean'?!m.flags.read:null,
-                flagged:typeof m.flags?.flagged==='boolean'?m.flags.flagged:null}))};
+                flagged:typeof m.flags?.flagged==='boolean'?m.flags.flagged:null,
+                attached:typeof m.flags?.attached==='boolean'||typeof m.flags?.linkAttached==='boolean'?!!(m.flags.attached||m.flags.linkAttached):null}))};
     } catch (error) { return {error:error.name==='AbortError'||error.name==='TypeError'?'network':['identity','format','operation'].includes(error.message)?error.message:'login'}; }
     """#
 }
