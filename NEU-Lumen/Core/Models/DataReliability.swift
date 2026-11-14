@@ -8,6 +8,34 @@ struct CampusNetworkPath: Equatable, Sendable {
     let constrained: Bool
 }
 
+enum CampusAccessProbe {
+    static func accepts(url: URL, status: Int, headers: [AnyHashable: Any], body: Data) -> Bool {
+        guard ["ecard.neu.edu.cn", "jwxt.neu.edu.cn"].contains(url.host?.lowercased() ?? ""), (200..<400).contains(status) else { return false }
+        if (300..<400).contains(status) {
+            guard let location = headers.first(where: { String(describing: $0.key).lowercased() == "location" })?.value as? String,
+                  let target = URL(string: location, relativeTo: url)?.absoluteURL, target.host == url.host else { return false }
+            return url.host == "ecard.neu.edu.cn" ? target.path.lowercased().hasPrefix("/selflogin/") : target.path.hasPrefix("/jwapp/")
+        }
+        let text = String(decoding: body.prefix(200_000), as: UTF8.self).lowercased()
+        if ["access denied", "forbidden", "仅限校内", "仅供校内", "仅用于我校师生在校外登录", "访问被拒绝", "checking your browser", "cf-chl-", "captive portal"].contains(where: text.contains) { return false }
+        if url.host == "ecard.neu.edu.cn" {
+            return text.contains("selflogin/login.aspx") || text.contains("txtoddfare") ||
+                ((text.contains("一卡通") || text.contains("校园卡")) && (text.contains("__viewstate") || text.contains("selflogin")))
+        }
+        return text.contains("/jwapp/") && ["homeapp", "emap", "wis_config", "教务"].contains(where: text.contains)
+    }
+}
+
+enum CampusTransportRetry {
+    static func allows(method: String?, error: Error, userCancelled: Bool, connectionReplaced: Bool) -> Bool {
+        guard !userCancelled, ["GET", "HEAD"].contains((method ?? "GET").uppercased()) else { return false }
+        let value = error as NSError
+        guard value.domain == NSURLErrorDomain else { return false }
+        if value.code == URLError.Code.cancelled.rawValue { return connectionReplaced }
+        return [URLError.Code.networkConnectionLost, .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].map(\.rawValue).contains(value.code)
+    }
+}
+
 /// A business request is owned by an identity epoch, not by the latest visible user.
 /// Session recovery may renew transport cookies without changing this identity epoch.
 struct RepositoryRequestContext: Equatable {

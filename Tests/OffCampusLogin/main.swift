@@ -103,10 +103,11 @@ func requestBody(_ request: URLRequest) -> String {
 final class MockPortalProtocol: URLProtocol {
     static var handle: ((URLRequest) -> (Int, [String: String], String))!
     static var failure: Error?
+    static var failureForRequest: ((URLRequest) -> Error?)?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        if let failure = Self.failure { client?.urlProtocol(self, didFailWithError: failure); return }
+        if let failure = Self.failureForRequest?(request) ?? Self.failure { client?.urlProtocol(self, didFailWithError: failure); return }
         let (status, headers, text) = Self.handle(request)
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -846,3 +847,74 @@ MockPortalProtocol.handle = { _ in
 do { _ = try await contentClient.fetchUserInfo(); preconditionFailure("退出后不能接受旧网络响应") }
 catch { precondition(!contentClient.hasLoginSession) }
 print("Homepage API links and logout generation: detail links, relative task links and late-cookie isolation passed")
+
+let academicMenuConfig = URLSessionConfiguration.ephemeral
+academicMenuConfig.protocolClasses = [MockPortalProtocol.self]
+let academicMenuClient = PortalClient(http: HTTPClient(configuration: academicMenuConfig))
+academicMenuClient.absorbCookies([ticket]); academicMenuClient.adoptGatewayTicket()
+var menuIdentityReads = 0, menuReads = 0, examReads = 0
+var changeMenuIdentity = false
+MockPortalProtocol.handle = { request in
+    let url = WebVPN.unwrap(request.url!) ?? request.url!
+    precondition(request.httpMethod == "GET", "Academic menu/exam queries must not write")
+    if url.path.hasSuffix("/currentUser.do") {
+        menuIdentityReads += 1
+        let account = changeMenuIdentity && menuIdentityReads.isMultiple(of: 2) ? "another-account" : "20260042"
+        return (200, [:], "{\"code\":0,\"datas\":{\"userId\":\"\(account)\",\"userType\":\"1\"}}")
+    }
+    if url.path.hasSuffix("/menus.do") {
+        menuReads += 1
+        precondition(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "userType" }?.value == "1")
+        return (200, [:], #"{"code":0,"datas":[{"menuId":"plan","menuName":"合成培养方案","appName":"pyfagl","menuCode":"pyfacxcd"}]}"#)
+    }
+    if url.path.hasSuffix("/schoolCalendars.do") {
+        return (200, [:], #"{"code":0,"datas":[{"itemCode":"synthetic-term","itemName":"合成学期","selected":true}]}"#)
+    }
+    if url.path.hasSuffix("/exams.do") {
+        examReads += 1
+        precondition(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "termCode" }?.value == "synthetic-term")
+        return (200, [:], #"{"code":0,"datas":[{"taskId":"synthetic","courseDesc":"合成考试","examDate":"2026-12-01","startTime":"14:00","examPlace":"A101"}]}"#)
+    }
+    return (200, [:], "<html>student</html>")
+}
+let permittedMenus = try await academicMenuClient.fetchAcademicServiceDirectory(expectedAccount: "20260042")
+let permittedExams = try await academicMenuClient.fetchAcademicExams(termCode: "synthetic-term", expectedAccount: "20260042")
+precondition(permittedMenus.count == 1 && permittedExams.count == 1 && menuIdentityReads == 4 && menuReads == 1 && examReads == 1)
+changeMenuIdentity = true; menuIdentityReads = 0
+do {
+    _ = try await academicMenuClient.fetchAcademicServiceDirectory(expectedAccount: "20260042")
+    preconditionFailure("Directory must reject an identity change after reading")
+} catch AcademicQueryError.accountMismatch { }
+print("Academic complete role directory/exams: routed GETs, role/term parameters and before/after identity checks passed")
+
+let roamingHTTPConfig = URLSessionConfiguration.ephemeral
+roamingHTTPConfig.protocolClasses = [MockPortalProtocol.self]
+let roamingHTTP = HTTPClient(configuration: roamingHTTPConfig)
+roamingHTTP.cookies.absorbRaw(URL(string: "https://personal.neu.edu.cn/")!, "SESS_ID=preserved-mobile-cookie; Path=/; Secure")
+var transportAttempts = 0
+MockPortalProtocol.failureForRequest = { request in
+    transportAttempts += 1
+    return transportAttempts == 1 ? URLError(.networkConnectionLost) : nil
+}
+MockPortalProtocol.handle = { request in
+    precondition(request.value(forHTTPHeaderField: "Cookie")?.contains("preserved-mobile-cookie") == true)
+    return (200, [:], "mobile read recovered")
+}
+let mobileRead = try await roamingHTTP.get(URL(string: "https://personal.neu.edu.cn/read")!)
+precondition(mobileRead.status == 200 && transportAttempts == 2 && roamingHTTP.cookies.headerFor(URL(string: "https://personal.neu.edu.cn/")!) != nil)
+transportAttempts = 0
+MockPortalProtocol.failureForRequest = { _ in transportAttempts += 1; return URLError(.networkConnectionLost) }
+do {
+    _ = try await roamingHTTP.postForm(URL(string: "https://personal.neu.edu.cn/synthetic-action")!, fields: ["id":"synthetic"])
+    preconditionFailure("Failed POST must not be replayed")
+} catch { precondition(transportAttempts == 1) }
+MockPortalProtocol.failureForRequest = nil
+MockPortalProtocol.handle = { _ in
+    roamingHTTP.resetTransport(networkChanged: true)
+    return (200, ["Set-Cookie":"late_mobile=stale; Path=/; Secure"], "old network response")
+}
+do {
+    _ = try await roamingHTTP.get(URL(string: "https://personal.neu.edu.cn/late")!)
+    preconditionFailure("Old network response must be rejected")
+} catch { precondition(roamingHTTP.cookies.headerFor(URL(string: "https://personal.neu.edu.cn/")!)?.contains("late_mobile") != true) }
+print("Mobile transport: one safe read retry, fresh pool with retained cookies, no POST replay and discarded late-network cookies passed")

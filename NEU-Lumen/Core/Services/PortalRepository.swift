@@ -31,8 +31,11 @@ final class PortalRepository {
     private(set) var hotSearch: [String] = []
     private(set) var homeState: LoadState = .idle
     private(set) var usedOfflineFallback = false
+    private(set) var todosUpdatedAt: Date?
+    private(set) var newsUpdatedAt: Date?
 
     private var weekCache: [Date: [CourseOccurrence]] = [:]
+    private var weekUpdatedAt: [Date: Date] = [:]
     private(set) var weekStates: [Date: LoadState] = [:]
     private var weekTasks: [Date: Task<Void, Never>] = [:]
     private var weekRequests: [Date: UUID] = [:]
@@ -56,6 +59,15 @@ final class PortalRepository {
     private var academicWaiters: [AcademicQueryKey: Set<UUID>] = [:]
     private var academicPageCache: AcademicPageSnapshot?
     private var academicPlanPages: [String: AcademicPageSnapshot] = [:]
+    private(set) var academicServices: [AcademicServiceItem] = []
+    private(set) var academicServicesState: LoadState = .idle
+    private(set) var academicServicesError: String?
+    private var academicServicesRequest = UUID()
+    private var academicExamCache: [String: [AcademicExam]] = [:]
+    private var academicExamStates: [String: LoadState] = [:]
+    private var academicExamDates: [String: Date] = [:]
+    private var academicExamErrors: [String: String] = [:]
+    private var academicExamRequests: [String: UUID] = [:]
 
     private(set) var cgReport: CGAssignmentReport?
     private(set) var cgState: LoadState = .idle
@@ -217,8 +229,12 @@ final class PortalRepository {
         appsLoaded = false
         news = []
         todos = []
+        todosUpdatedAt = nil; newsUpdatedAt = nil
+        academicServices = []; academicServicesState = .idle; academicServicesError = nil; academicServicesRequest = UUID()
+        academicExamCache = [:]; academicExamStates = [:]; academicExamDates = [:]; academicExamErrors = [:]; academicExamRequests = [:]
         hotSearch = []
         weekCache.removeAll()
+        weekUpdatedAt.removeAll()
         for task in weekTasks.values { task.cancel() }
         weekTasks.removeAll()
         weekRequests.removeAll()
@@ -421,11 +437,12 @@ final class PortalRepository {
         if let value = cardsValue { dataCards = value }
         if let value = newsValue {
             news = value
+            newsUpdatedAt = Date()
             newsRevision += 1
             newsThumbnails = newsThumbnails.filter { !$0.value.isEmpty }
             anySuccess = true
         } else if news.isEmpty { news = DemoData.news }
-        if let value = todoValue { todos = value }
+        if let value = todoValue { todos = value; todosUpdatedAt = Date() }
         if let value = hotValue { hotSearch = value }
         else if hotSearch.isEmpty { hotSearch = DemoData.hotSearch }
 
@@ -435,12 +452,12 @@ final class PortalRepository {
     }
 
     func dataCardURL(_ card: DataCard) -> URL {
+        if card.name.contains("电费") || card.name.contains("电量") { return CampusPaymentEntry.electricity }
         if let url = PortalLink.resolve(card.destination) { return url }
         if card.name.contains("卡") && (card.name.contains("余额") || card.name.contains("补助")) { return URL(string: PortalClient.serviceCard)! }
         let terms: [String]
         if card.name.contains("图书") || card.name.contains("借阅") { terms = ["图书馆"] }
         else if card.name.contains("网费") || card.name.contains("流量") { terms = ["网络计费", "网费"] }
-        else if card.name.contains("电费") { terms = ["缴费", "电费"] }
         else if card.name.contains("成绩") || card.name.contains("学分") || card.name.contains("绩点") { terms = ["教务系统（新）", "教务系统"] }
         else { terms = [card.name] }
         if let app = apps.first(where: { app in terms.contains { app.name.contains($0) } }), let url = PortalLink.resolve(app.entryUrl()) { return url }
@@ -559,6 +576,7 @@ final class PortalRepository {
                 try Task.checkCancellation()
                 guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
                 self.weekCache[weekStart] = list
+                self.weekUpdatedAt[weekStart] = Date()
                 self.weekStates[weekStart] = .loaded
             } catch {
                 guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
@@ -1498,10 +1516,6 @@ final class PortalRepository {
             var customDetails: [LiveActivityDetail] = []
             if deadline != nil, !store.customValue.isEmpty, let row = detail("辅助值", value) { customDetails.append(row) }
             if let deadline, let row = detail("截止", LiveActivityDataPolicy.dateText(deadline, format: "MM-dd HH:mm")) { customDetails.append(row) }
-            if !keys.isEmpty {
-                if let row = detail("变量", LiveActivityTemplate.variables.filter { keys.contains($0.key) }.map(\.token).joined(separator: " ")) { customDetails.append(row) }
-                if let row = detail("来源", "只读当前账号已加载缓存") { customDetails.append(row) }
-            }
             var state = content(title, subtitle: subtitle, value: value, end: deadline, symbol: store.customIcon,
                 countdown: deadline.map { $0 > now ? "距截止" : "已到期" }, destination: "settings",
                 details: customDetails)
@@ -1608,6 +1622,171 @@ final class PortalRepository {
 }
 
 /// 组合根：App 根部创建并注入。
+extension PortalRepository {
+    var hasCurrentReminderAccount: Bool { hasCurrentLiveActivityAccount }
+    var latestReminderWeekUpdate: Date? { weekUpdatedAt.values.max() }
+
+    func loadAcademicServices(force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, let account = session.user?.sid, !account.isEmpty, !Task.isCancelled else { return }
+        if !force, academicServicesState == .loaded || academicServicesState == .loading { return }
+        let token = UUID(); academicServicesRequest = token; academicServicesState = .loading; academicServicesError = nil
+        do {
+            let result = try await withRecovery { try await self.session.client.fetchAcademicServiceDirectory(expectedAccount: account) }
+            guard isCurrent(context), academicServicesRequest == token, !Task.isCancelled else { return }
+            academicServices = result; academicServicesState = .loaded
+        } catch {
+            guard isCurrent(context), academicServicesRequest == token else { return }
+            if NetworkError.isCancellation(error) { academicServicesState = academicServices.isEmpty ? .idle : .loaded; return }
+            academicServicesError = NetworkError.from(error).message
+            academicServicesState = academicServices.isEmpty ? .failed(academicServicesError!) : .loaded
+        }
+    }
+    func academicExams(term: String) -> [AcademicExam] { academicExamCache[term] ?? [] }
+    func academicExamsState(term: String) -> LoadState { academicExamStates[term] ?? .idle }
+    func academicExamsDate(term: String) -> Date? { academicExamDates[term] }
+    var latestAcademicExamUpdate: Date? { academicExamDates.values.max() }
+    func academicExamsError(term: String) -> String? { academicExamErrors[term] }
+    func loadAcademicExams(term: String, force: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, let account = session.user?.sid, !account.isEmpty, !term.isEmpty, !Task.isCancelled else { return }
+        if !force, academicExamStates[term] == .loading || DataFreshness.isFresh(academicExamDates[term], for: 300) { return }
+        let token = UUID(); academicExamRequests[term] = token; academicExamStates[term] = .loading; academicExamErrors[term] = nil
+        do {
+            let result = try await withRecovery { try await self.session.client.fetchAcademicExams(termCode: term, expectedAccount: account) }
+            guard isCurrent(context), academicExamRequests[term] == token, !Task.isCancelled else { return }
+            academicExamCache[term] = result; academicExamStates[term] = .loaded; academicExamDates[term] = Date()
+        } catch {
+            guard isCurrent(context), academicExamRequests[term] == token else { return }
+            if NetworkError.isCancellation(error) { academicExamStates[term] = academicExamCache[term] == nil ? .idle : .loaded; return }
+            academicExamErrors[term] = NetworkError.from(error).message
+            academicExamStates[term] = academicExamCache[term] == nil ? .failed(academicExamErrors[term]!) : .loaded
+        }
+    }
+
+    func reminderSnapshot(preferences: CampusReminderPreferences, now: Date = Date()) -> CampusReminderSnapshot {
+        guard hasCurrentLiveActivityAccount else { return .init() }
+        var output = CampusReminderSnapshot()
+        let start = Calendar.current.startOfDay(for: now)
+        let end = Calendar.current.date(byAdding: .day, value: CampusReminderPolicy.horizonDays, to: start)!
+        let occurrences = (effectivePortalOccurrences(from: start, to: end) + localOccurrences(from: start, to: end)).mergeConsecutive()
+        output.readySources = Set(weekCache.keys.map { "week:" + AcademicQueryPolicy.schoolDay($0) }).union(["planner", "daily"])
+        let schedule = LiveActivitySchedule.snapshot(occurrences, from: start, to: end, at: now, portalLoaded: true)
+        func timed(_ id: String, _ kind: CampusReminderKind, _ title: String, _ body: String, _ event: Date, _ lead: Int, _ destination: String, _ source: String) {
+            guard event > now else { return }
+            var item = CampusReminderPolicy.timed(id: id, kind: kind, title: title, body: body, event: event, lead: lead, destination: destination)
+            item.sourceKey = source
+            if item.fireAt <= now { item.fireAt = now.addingTimeInterval(5) }
+            output.planned.append(item)
+        }
+        for item in schedule.items {
+            let slot = item.occurrence.slot
+            let kind: CampusReminderKind = slot.eventID == nil ? (slot.kind == "exam" ? .exam : .course) : .planner
+            let lead = kind == .planner ? preferences.plannerLead : kind == .exam ? preferences.examLead : preferences.courseLead
+            let event = CampusReminderPolicy.clock(day: item.occurrence.date, minutes: slot.startMinutes) ?? item.start
+            timed(item.occurrence.id, kind, slot.name + "即将开始", "\(slot.timeText) · \(slot.room)", event, lead, "course",
+                kind == .planner ? "planner" : "week:" + AcademicQueryPolicy.schoolDay(LiveActivityDataPolicy.portalWeekStart(for: item.occurrence.date)))
+        }
+        for (term, exams) in academicExamCache {
+            output.readySources.insert("exam:" + term)
+            for exam in exams {
+                guard let start = exam.start else { continue }
+                timed("exam:" + exam.id, .exam, exam.title + "考试提醒", [exam.dateText, exam.timeText, exam.place, exam.seat.isEmpty ? "" : "座位 " + exam.seat].filter { !$0.isEmpty }.joined(separator: " · "), start, preferences.examLead, "academic", "exam:" + term)
+            }
+        }
+        let assignments = LiveActivityAssignments(cg: cgReport, reports: assignmentReports)
+        if let cgReport, cgReport.warnings.isEmpty,
+           cgReport.assignments.filter({ !$0.history }).allSatisfy({ $0.loaded && $0.problemCount > 0 && $0.problems.count >= $0.problemCount }) {
+            output.readySources.insert("assignment:" + LearningPlatform.cg.title)
+        }
+        for (platform, report) in assignmentReports where report.warnings.isEmpty && report.courses.allSatisfy({ report.refreshedCourseKeys.contains($0.key) }) {
+            output.readySources.insert("assignment:" + platform.title)
+        }
+        for item in assignments.pending {
+            guard let deadline = item.deadline else { continue }
+            timed(item.id, .assignment, item.title + "即将截止", item.platform + " · 截止 " + LiveActivityDataPolicy.dateText(deadline, format: "MM-dd HH:mm"), deadline, preferences.assignmentLead, "learning", "assignment:" + item.platform)
+            if preferences.assignmentDayBefore, preferences.assignmentLead != 1440 {
+                timed(item.id, .assignment, item.title + "将于明天截止", item.platform, deadline, 1440, "learning", "assignment:" + item.platform)
+            }
+        }
+        if preferences.systemEvents {
+            if systemCalendar.updatedAt != nil { output.readySources.insert("system") }
+            for item in systemCalendar.agenda {
+                let event = item.allDay ? (Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: item.date) ?? item.date) : item.date
+                timed("system:" + item.id, .planner, item.title, item.source + (item.location.isEmpty ? "" : " · " + item.location), event,
+                    item.allDay ? 0 : preferences.plannerLead, "course", "system")
+            }
+        } else { output.readySources.insert("system") }
+        func balance(_ id: String, _ value: Double?, _ threshold: Double, _ updated: Date?, _ title: String, _ unit: String) {
+            guard let value, value.isFinite, let updated else { return }
+            let low = value < threshold
+            output.changes.append(.init(id: "balance:" + id, kind: .balance,
+                fingerprint: low ? "low:" + AcademicQueryPolicy.schoolDay(now) : "normal", title: low ? title : "",
+                body: "最近同步余量 \(value.formatted(.number.precision(.fractionLength(0...2))))\(unit)，低于提醒阈值 \(threshold.formatted())\(unit)。",
+                destination: "card", updatedAt: updated, notifyFirst: true))
+        }
+        balance("card", cardBalance?.balance, preferences.cardThreshold, cardUpdatedAt, "校园卡余额偏低", "元")
+        balance("net", netInfo?.balance, preferences.netThreshold, netUpdatedAt, "网费余额偏低", "元")
+        if electricInfo?.unbound == false {
+            balance("electric:" + electricRoomCode, electricInfo?.remainKwh, preferences.electricityThreshold, electricUpdatedAt, "宿舍电量偏低", "度")
+        }
+        if let updated = gradesUpdatedAt, gradesWarning == nil {
+            let raw = grades.map { term in term.name + ":" + term.courses.map { $0.id }.sorted().joined(separator: ";") }.sorted().joined(separator: "|")
+            output.changes.append(.init(id: "grades", kind: .grades, fingerprint: CampusReminderStore.key(raw),
+                title: "教务成绩有更新", body: "最新同步的成绩与上次记录有变化，点击查看成绩与绩点。", destination: "learning", updatedAt: updated))
+        }
+        if let updated = todosUpdatedAt {
+            let raw = todos.map { $0.title + "|" + $0.instance + "|" + $0.node + "|" + String($0.percent) }.sorted().joined(separator: ";")
+            output.changes.append(.init(id: "affairs", kind: .affairs, fingerprint: CampusReminderStore.key(raw),
+                title: "办事进度有变化", body: "最新同步的在办事项或办理节点有变化。", destination: "affairs", updatedAt: updated))
+        }
+        if let updated = newsUpdatedAt, let item = news.first {
+            output.changes.append(.init(id: "news", kind: .news, fingerprint: item.id, title: "校园资讯有更新",
+                body: item.title, destination: "news", updatedAt: updated))
+        }
+        for offset in 0..<7 {
+            guard let day = CampusReminderPolicy.calendar.date(byAdding: .day, value: offset, to: now),
+                  let date = CampusReminderPolicy.calendar.date(bySettingHour: preferences.dailyHour, minute: preferences.dailyMinute, second: 0, of: day) else { continue }
+            output.planned.append(.init(id: "daily:" + AcademicQueryPolicy.schoolDay(day), kind: .daily,
+                title: "每日校园安排", body: "查看课程、本机日程、作业截止与校园账户，及时确认最新安排。", fireAt: date, destination: "course", sourceKey: "daily"))
+        }
+        return output
+    }
+
+    func prepareReminderData(preferences: CampusReminderPreferences, background: Bool = false) async {
+        await ensureLoadedForCurrentUser()
+        guard hasCurrentReminderAccount, preferences.enabled, !Task.isCancelled else { return }
+        var work: [Task<Void, Never>] = []
+        if preferences.allows(.course) || preferences.allows(.exam) || preferences.allows(.daily) {
+            work.append(Task { @MainActor in
+                var week = LiveActivityDataPolicy.portalWeekStart(for: Date())
+                for _ in 0..<3 {
+                    guard !Task.isCancelled else { return }
+                    await self.loadDisplayWeek(starting: week, force: background)
+                    week = Calendar.current.date(byAdding: .day, value: 7, to: week)!
+                }
+            })
+        }
+        if preferences.allows(.balance) { work.append(Task { @MainActor in await self.loadCardOverview(force: background) }) }
+        if preferences.allows(.exam) {
+            work.append(Task { @MainActor in
+                await self.loadAcademicQuery(.terms, force: background)
+                guard !Task.isCancelled, let term = self.academicTerms.first(where: { $0.current }) ?? self.academicTerms.first else { return }
+                await self.loadAcademicExams(term: term.code, force: background)
+            })
+        }
+        if preferences.allows(.grades) { work.append(Task { @MainActor in await self.loadGrades(force: background) }) }
+        if preferences.allows(.affairs) || preferences.allows(.news) { work.append(Task { @MainActor in await self.refreshHome(force: background) }) }
+        if preferences.systemEvents {
+            work.append(Task { @MainActor in await self.systemCalendar.refresh(start: Date(), end: Date().addingTimeInterval(14 * 86400)) })
+        }
+        let requests = work
+        await withTaskCancellationHandler {
+            for task in requests { await task.value }
+        } onCancel: { requests.forEach { $0.cancel() } }
+    }
+}
+
 @MainActor
 @Observable
 final class AppEnvironment {
@@ -1615,6 +1794,7 @@ final class AppEnvironment {
     let repository: PortalRepository
     let dynamicIslandStore: DynamicIslandStore
     let liveActivityManager = DynamicIslandActivityManager()
+    let reminders = CampusReminderStore.shared
     var pendingActivityURL: URL?
     var pendingLearningSection: String?
 
@@ -1623,5 +1803,6 @@ final class AppEnvironment {
         self.session = store
         self.repository = PortalRepository(session: store)
         self.dynamicIslandStore = DynamicIslandStore()
+        CampusBackgroundRefresh.shared.configure(session: store, repository: self.repository)
     }
 }

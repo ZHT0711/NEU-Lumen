@@ -4,10 +4,10 @@ import shutil
 
 # Exact replace hooks fail closed if the real component changes; no substitute view.
 HOOKS = (
-    ('                .frame(maxWidth: .infinity, alignment: .leading)\n            if let subtitle',
-     '                .frame(maxWidth: .infinity, alignment: .leading)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).title"))\n            if let subtitle'),
-    ('Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)',
-     'Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)\n                    .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).subtitle"))'),
+    ('            }\n            if let subtitle',
+     '            }\n            .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).title"))\n            if let subtitle'),
+    ('LiveActivitySymbolText(text: subtitle, accent: state.accent).font(.caption2).foregroundStyle(.secondary).lineLimit(1)',
+     'LiveActivitySymbolText(text: subtitle, accent: state.accent).font(.caption2).foregroundStyle(.secondary).lineLimit(1)\n                    .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).subtitle"))'),
     ('                .font(.caption2)\n                .lineLimit(1)\n                .minimumScaleFactor(0.8)',
      '                .font(.caption2)\n                .lineLimit(1)\n                .minimumScaleFactor(0.8)\n                .background(LiveActivityUIProbe(id: "candidate-\\(detailLimit)-\\(footer).footer"))'),
     ('        .frame(maxWidth: .infinity, alignment: .leading)\n    }\n}\n\nstruct LiveActivityMetricRow',

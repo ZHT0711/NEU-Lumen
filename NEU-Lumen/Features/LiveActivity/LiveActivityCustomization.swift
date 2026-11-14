@@ -19,7 +19,11 @@ enum LiveActivityAppearance {
     static func iconName(_ symbol: String) -> String {
         ["book.closed.fill": "课程", "creditcard.fill": "钱包", "wifi": "网络", "bolt.fill": "电量",
          "checklist": "待办", "calendar": "日程", "sparkles": "星光", "chart.bar.fill": "统计",
-         "bell.fill": "提醒", "heart.fill": "爱心", "flag.fill": "目标"][symbol] ?? "星光"
+         "bell.fill": "提醒", "heart.fill": "爱心", "flag.fill": "旗帜", "clock.fill": "时间",
+         "mappin.and.ellipse": "地点", "graduationcap.fill": "学业", "pencil": "学习", "cup.and.saucer.fill": "休息",
+         "sun.max.fill": "白天", "moon.fill": "夜晚", "figure.run": "运动", "leaf.fill": "自然",
+         "envelope.fill": "邮件", "doc.text.fill": "文档", "checkmark.circle.fill": "完成", "timer": "计时",
+         "target": "目标", "building.columns.fill": "校园"][symbol] ?? "星光"
     }
 }
 
@@ -56,6 +60,7 @@ struct LiveActivityAppearanceFields: View {
 struct LiveActivityCustomizationFields: View {
     @Bindable var store: DynamicIslandStore
     @State private var insertionTarget = "副标题"
+    @State private var showSymbols = false
 
     var body: some View {
         Section {
@@ -72,11 +77,15 @@ struct LiveActivityCustomizationFields: View {
                 .onChange(of: store.customValue) { _, value in
                     if value.count > 32 { store.customValue = String(value.prefix(32)) }
                 }
-            Picker("图标", selection: $store.customIcon) {
-                ForEach(DynamicIslandStore.allowedCustomIcons, id: \.self) { symbol in
-                    Label(LiveActivityAppearance.iconName(symbol), systemImage: symbol).tag(symbol)
-                }
+            Button { showSymbols = true } label: {
+                HStack {
+                    Label("主图标", systemImage: store.customIcon)
+                    Spacer()
+                    Text(LiveActivityAppearance.iconName(store.customIcon)).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }.frame(minHeight: 44)
             }
+            .sheet(isPresented: $showSymbols) { LiveActivitySymbolPicker(selection: $store.customIcon) }
             Toggle("目标倒计时", isOn: $store.customDeadlineEnabled)
             if store.customDeadlineEnabled {
                 DatePicker("目标时间", selection: $store.customDeadline, displayedComponents: [.date, .hourAndMinute])
@@ -93,6 +102,13 @@ struct LiveActivityCustomizationFields: View {
             Picker("插入位置", selection: $insertionTarget) {
                 ForEach(["标题", "副标题", "短值"], id: \.self) { Text($0).tag($0) }
             }
+            Menu {
+                ForEach(DynamicIslandStore.allowedCustomIcons, id: \.self) { symbol in
+                    Button { insert("{sf:" + symbol + "}") } label: {
+                        Label(LiveActivityAppearance.iconName(symbol), systemImage: symbol)
+                    }
+                }
+            } label: { Label("插入 SF Symbol", systemImage: "square.grid.2x2") }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 85))], spacing: 10) {
                 ForEach(DynamicIslandStore.templateVariables) { variable in
                     Button { insert(variable.token) } label: {
@@ -119,19 +135,19 @@ struct LiveActivityCustomizationFields: View {
         Section("快速模板") {
             Button("课程与地点") {
                 store.customTitle = "{course}"
-                store.customSubtitle = "{room} · {start}"
+                store.customSubtitle = "{sf:mappin.and.ellipse} {room} · {sf:clock.fill} {start}"
                 store.customValue = "{week}"
                 store.customIcon = "book.closed.fill"
             }
             Button("校园钱包") {
                 store.customTitle = "校园账户"
-                store.customSubtitle = "校园卡 {card} · 网费 {net}"
+                store.customSubtitle = "{sf:creditcard.fill} {card} · {sf:wifi} {net}"
                 store.customValue = "{card}"
                 store.customIcon = "creditcard.fill"
             }
             Button("学习与待办") {
                 store.customTitle = "学习提醒"
-                store.customSubtitle = "待办 {pending} · GPA {gpa}"
+                store.customSubtitle = "{sf:checklist} 待办 {pending} · {sf:graduationcap.fill} GPA {gpa}"
                 store.customValue = "{pending}"
                 store.customIcon = "checklist"
             }
@@ -143,6 +159,30 @@ struct LiveActivityCustomizationFields: View {
         case "标题": store.customTitle = String((store.customTitle + token).prefix(80))
         case "短值": store.customValue = String((store.customValue + token).prefix(32))
         default: store.customSubtitle = String((store.customSubtitle + token).prefix(160))
+        }
+    }
+}
+
+private struct LiveActivitySymbolPicker: View {
+    @Binding var selection: String
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 86))], spacing: 12) {
+                    ForEach(DynamicIslandStore.allowedCustomIcons, id: \.self) { symbol in
+                        Button { selection = symbol; dismiss() } label: {
+                            VStack(spacing: 9) {
+                                Image(systemName: symbol).font(.title2)
+                                Text(LiveActivityAppearance.iconName(symbol)).font(.caption)
+                            }.frame(maxWidth: .infinity, minHeight: 78)
+                                .background(selection == symbol ? AppTheme.accent.opacity(0.15) : Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                        }.buttonStyle(.plain)
+                            .accessibilityAddTraits(selection == symbol ? .isSelected : [])
+                    }
+                }.padding(16)
+            }.navigationTitle("选择 SF Symbol").navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
         }
     }
 }
@@ -160,14 +200,14 @@ struct LiveActivityContentPreview: View {
                         .font(.title2).foregroundStyle(LiveActivityAppearance.color(state.accent))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(state.title).font(.headline).lineLimit(2)
-                        Text(state.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                        LiveActivitySymbolText(text: state.title, accent: state.accent).font(.headline).lineLimit(2)
+                        LiveActivitySymbolText(text: state.subtitle, accent: state.accent).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                         if let secondary = state.secondaryValue, !secondary.isEmpty {
                             Text(secondary).font(.caption).foregroundStyle(LiveActivityAppearance.color(state.accent)).lineLimit(2)
                         }
                     }
                     Spacer(minLength: 0)
-                    Text(state.value).font(.subheadline.monospacedDigit().bold())
+                    LiveActivitySymbolText(text: state.value, accent: state.accent).font(.subheadline.monospacedDigit().bold())
                         .foregroundStyle(LiveActivityAppearance.color(state.accent))
                         .lineLimit(2).minimumScaleFactor(0.7)
                 }

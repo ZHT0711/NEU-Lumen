@@ -43,7 +43,7 @@ struct NativePaymentView: View {
                     Task { await repo.loadElectric(force: true) }
                 }.disabled(room.trimmingCharacters(in: .whitespaces).isEmpty)
                 ServiceLoadNotice(state: repo.electricState)
-                Button("缴纳电费", systemImage: "arrow.up.right") { openPayment() }
+                Button("缴纳电费", systemImage: "bolt.fill") { web = NativeServiceWebLink(url: CampusPaymentEntry.electricity) }
             }
             Section("校园卡本月流水") {
                 if repo.cardBills.isEmpty { Text("尚无已读取的本月流水").foregroundStyle(.secondary) }

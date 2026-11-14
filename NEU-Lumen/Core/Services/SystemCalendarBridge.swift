@@ -23,6 +23,7 @@ final class SystemCalendarBridge {
     private(set) var agenda: [SystemAgendaItem] = []
     private(set) var busy = false
     private(set) var message: String?
+    private(set) var updatedAt: Date?
     private(set) var accountKey = ""
     var eventCalendarIDs: Set<String> = [] { didSet { saveSelections() } }
     var reminderCalendarIDs: Set<String> = [] { didSet { saveSelections() } }
@@ -41,6 +42,7 @@ final class SystemCalendarBridge {
         eventCalendarIDs = savedEvents
         reminderCalendarIDs = savedReminders
         agenda = []
+        updatedAt = nil
         message = nil
     }
 
@@ -88,6 +90,7 @@ final class SystemCalendarBridge {
         }
         guard account == accountKey, requestID == refreshID else { return }
         agenda = items.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date }
+        updatedAt = Date()
     }
 
     func event(for item: SystemAgendaItem) -> EKEvent? {

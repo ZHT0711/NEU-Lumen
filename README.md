@@ -54,9 +54,19 @@
 
 ## 原生服务与实时活动
 
+首页铃铛 → **提醒与通知**：课程、考试、日程、作业截止、账户阈值和校园动态提醒，可配置后台自动刷新。系统决定后台运行时机；时间已知的提醒提前交给系统安排，离线仍可触发。详见 [提醒与后台刷新](docs/reminders.md)。
+
+<p align="center">
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/notifications-light.png" width="245" alt="提醒设置（合成演示，非通知到达证明）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-services-light.png" width="245" alt="教务功能目录（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/academic-exams-light.png" width="245" alt="原生考试安排（合成演示）" />
+</p>
+
 服务大厅 → **原生服务**：默认折叠，展开八张独立校园主题卡片，进入后可左右切换。新增资讯频道搜索、每日校园日程和附件下载中心。iOS 26 导航使用 Liquid Glass，兼顾减少透明度、增强对比度和动态字体。
 
 个人培养方案详情支持多级思维导图与大纲、课组要求和课程查询；缴费支持项目与订单入口、账户与流水，办事支持目录、指南、进度和表单核对，邮箱支持组合搜索、批量标记与移动。能力边界见 [原生服务说明](docs/native-services.md) 与 [教务说明](docs/academic-queries.md)。
+
+电费入口直达学校电费专页。教务增加按当前账号权限读取的完整功能目录和原生考试安排，业务页支持原生查询条件、表格、表单及操作核对。自定义灵动岛支持 SF Symbols 主图标、行内符号和更简洁的内容布局。
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-light.png" width="245" alt="八项原生服务校园简笔画卡面" />

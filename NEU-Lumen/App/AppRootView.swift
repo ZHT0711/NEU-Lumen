@@ -41,6 +41,7 @@ struct AppRootView: View {
         }
         .background { LiveActivityCoordinator() }
         .background { BrowserDownloadCoordinator() }
+        .background { CampusReminderCoordinator() }
         .onOpenURL { url in
             guard url.scheme == "neulumen", let host = url.host,
                   ["activity", "dynamic-island"].contains(host) else { return }

@@ -26,6 +26,10 @@
 	<true/>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array><string>edu.neu.lumen.refresh</string></array>
+	<key>UIBackgroundModes</key>
+	<array><string>fetch</string></array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

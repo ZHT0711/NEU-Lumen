@@ -226,6 +226,13 @@ jobs:
           exec > >(tee "${RUNNER_TEMP}/academic-query-tests.log") 2>&1
           python3 scripts/test_academic_queries.py --require-swift
 
+      - name: Test campus reminder policies
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/reminder-tests.log") 2>&1
+          python3 scripts/test_campus_reminders.py --require-swift
+
       - name: Build unsigned IPA
         shell: bash
         run: |
@@ -239,7 +246,7 @@ jobs:
       - name: Require warning-free compiler logs
         # Add each new native test log here and increment --required-count together.
         run: >-
-          python3 scripts/check_build_diagnostics.py --required-count 10
+          python3 scripts/check_build_diagnostics.py --required-count 11
           "${RUNNER_TEMP}/catalog-tests.log"
           "${RUNNER_TEMP}/planner-tests.log"
           "${RUNNER_TEMP}/login-tests.log"
@@ -247,6 +254,7 @@ jobs:
           "${RUNNER_TEMP}/browser-download-tests.log"
           "${RUNNER_TEMP}/data-reliability-tests.log"
           "${RUNNER_TEMP}/academic-query-tests.log"
+          "${RUNNER_TEMP}/reminder-tests.log"
           "${RUNNER_TEMP}/system-island-tests.log"
           build/ios-build.log build/ui-preview/simulator-build.log
 

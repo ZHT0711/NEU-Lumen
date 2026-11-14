@@ -173,6 +173,9 @@ jar.clear(); precondition(jar.allCookies().isEmpty, "退出清除会话")
 print("Cookies: 7 checks passed")
 
 let nativePayment = NativeCampusService.payment
+precondition(CampusPaymentEntry.electricity.path == "/openPayElecPagesDbdx51414E039.html")
+precondition(CampusPaymentEntry.isElectricity(CampusPaymentEntry.electricity))
+precondition(!CampusPaymentEntry.isElectricity(URL(string: "https://pay.neu.edu.cn.evil.example/openPayElecPagesDbdx51414E039.html")!))
 precondition(NativeCampusService.allCases.count == 8)
 precondition(!NativeCampusService.downloads.hasSchoolPage && !NativeCampusService.downloads.owns(host: "personal.neu.edu.cn"))
 precondition(NativeCampusService.news.owns(host: "neunews.neu.edu.cn") && !NativeCampusService.news.owns(host: "neunews.neu.edu.cn.evil.example"))

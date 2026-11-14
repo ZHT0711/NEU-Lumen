@@ -128,6 +128,9 @@ struct ProfileView: View {
                 }
 
                 Section("实时活动") {
+                    NavigationLink { CampusReminderView() } label: {
+                        Label("提醒与通知", systemImage: "bell.badge")
+                    }
                     NavigationLink {
                         LiveActivitySettingsView()
                     } label: {

@@ -390,6 +390,8 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var provisionalUnsafeMethod = false
     @ObservationIgnored private var documentUnsafeMethod = false
     @ObservationIgnored private var service: NativeCampusService?
+    @ObservationIgnored private var electricityResume = false
+    @ObservationIgnored private var electricityResumeAttempted = false
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -452,6 +454,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         self.client = client
         self.session = session
         let source = WebVPN.unwrap(url) ?? url
+        electricityResume = CampusPaymentEntry.isElectricity(source)
         let service = service ?? (source.host?.lowercased() == "pay.neu.edu.cn" ? NativeCampusService.payment : nil)
         self.service = service
         if let session {
@@ -500,6 +503,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         store.add(self)
         entryURL = destination
         currentURL = destination
+        if UIApplication.shared.applicationState == .background { webView.frame = CGRect(x: 0, y: 0, width: 390, height: 844) }
         webView.load(URLRequest(url: destination))
     }
 
@@ -625,8 +629,19 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         updateState()
         Task {
             await syncCookies()
+            await resumeElectricityAfterLogin()
             await clickCampusUnifiedLoginIfNeeded()
         }
+    }
+
+    private func resumeElectricityAfterLogin() async {
+        guard electricityResume, !electricityResumeAttempted, let current = webView.url,
+              let client, client.sessionGeneration == clientEpoch else { return }
+        let source = WebVPN.unwrap(current) ?? current
+        guard source.host == "pay.neu.edu.cn", ["/openPortal", "/openPortal/", "/portal.html", "/index.html", "/", "/openApplication"].contains(source.path) else { return }
+        // The normal school CAS landing succeeded. Resume one verified read-only destination once.
+        electricityResumeAttempted = true
+        webView.load(URLRequest(url: CampusPaymentEntry.electricity))
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { show(error) }
@@ -880,6 +895,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     }
 
     static func present(_ alert: UIAlertController, in webView: WKWebView, fallback: () -> Void) {
+        guard UIApplication.shared.applicationState != .background else { fallback(); return }
         guard var controller = webView.window?.rootViewController else { fallback(); return }
         while let presented = controller.presentedViewController { controller = presented }
         guard !(controller is UIAlertController) else { fallback(); return }
@@ -891,7 +907,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        decisionHandler(.prompt)
+        decisionHandler(UIApplication.shared.applicationState == .background ? .deny : .prompt)
     }
 
     func webView(_ webView: WKWebView, requestDeviceOrientationAndMotionPermissionFor origin: WKSecurityOrigin,

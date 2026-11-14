@@ -272,6 +272,9 @@ struct UIValidationRoot: View {
                 case "academic-center": NavigationStack { AcademicCenterView().nativeUIFixtureCaption("模拟器合成学业查询 · 非真实账号数据") }
                 case "academic-calendar": NavigationStack { AcademicCalendarView().nativeUIFixtureCaption("模拟器合成校历与周次 · 非学校实际安排") }
                 case "academic-plan": NavigationStack { PersonalAcademicProgramDetail(program: PersonalAcademicProgram(id: "SYNTH-PROGRAM", name: "合成个人培养方案 · UI 验证", minimumCredits: "154", facts: [])).nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
+                case "academic-services": NavigationStack { AcademicServicesView().nativeUIFixtureCaption("模拟器合成功能目录 · 非账号实际权限") }
+                case "academic-exams": NavigationStack { AcademicExamsView().nativeUIFixtureCaption("模拟器合成考试 · 非真实考试安排") }
+                case "notifications": NavigationStack { CampusReminderView().nativeUIFixtureCaption("模拟器合成提醒设置 · 非系统通知到达证明") }
                 case "native-payment": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
@@ -393,6 +396,7 @@ struct UIValidationRoot: View {
                 environment.dynamicIslandStore.kind = screen == "live-activity-custom" ? .custom : .nextCourse
             }
             environment.repository.seedUIValidation()
+            if screen == "notifications" { environment.reminders.seedReminderScreenshot() }
             if screen.hasPrefix("academic-") || screen.hasPrefix("native-") {
                 do { try await seedAcademicUIValidation(environment) }
                 catch {
@@ -402,7 +406,7 @@ struct UIValidationRoot: View {
             }
             if screen == "live-activity-custom" {
                 environment.dynamicIslandStore.customTitle = "{course}"
-                environment.dynamicIslandStore.customSubtitle = "卡 {card} · 网 {net}"
+                environment.dynamicIslandStore.customSubtitle = "{sf:creditcard.fill} {card} · {sf:wifi} {net}"
                 environment.dynamicIslandStore.customValue = "{week}"
                 environment.dynamicIslandStore.customIcon = "bell.fill"
                 environment.dynamicIslandStore.accent = "purple"
@@ -962,6 +966,41 @@ program_view = destination / 'NEU-Lumen/Features/Academic/PersonalAcademicProgra
 program_source = program_view.read_text(encoding='utf-8').replace('private struct PersonalAcademicProgramDetail:', 'struct PersonalAcademicProgramDetail:')
 program_view.write_text(program_source, encoding='utf-8')
 
+service_fixture('NEU-Lumen/Core/Services/CampusReminderStore.swift',
+                'func refreshAuthorization() async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=notifications") { authorization = .authorized; return }
+''', r'''
+extension CampusReminderStore {
+    func seedReminderScreenshot() {
+        restoring = true
+        accountKey = "SYNTHETIC-REMINDER-ACCOUNT"; authorization = .authorized
+        preferences.enabled = true
+        lastBackgroundAttempt = Date().addingTimeInterval(-300)
+        lastBackgroundSuccess = Date().addingTimeInterval(-300)
+        lastTrigger = "模拟器合成状态"
+        backgroundMessage = "合成后台状态：仅用于 UI 检查，不代表系统已调度或真实校园数据已更新。"
+        upcoming = [.init(id: "SYNTH-R-1", kind: .course, title: "合成课程即将开始", body: "合成教室 A101", fireAt: Date().addingTimeInterval(1800), destination: "course")]
+        restoring = false
+    }
+}
+''')
+service_fixture('NEU-Lumen/Core/Services/PortalRepository.swift',
+                'func loadAcademicServices(force: Bool = false) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=academic-services") {
+            academicServices = [AcademicServiceItem(id: "SYNTH-1", title: "合成选课查询", category: "合成选课", path: "合成选课 › 合成选课查询", url: URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.do")),
+                AcademicServiceItem(id: "SYNTH-2", title: "合成考试报名", category: "合成考试", path: "合成考试 › 合成考试报名", url: URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.do")),
+                AcademicServiceItem(id: "SYNTH-3", title: "合成学籍信息查询", category: "合成学籍", path: "合成学籍 › 合成学籍信息查询", url: URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.do")),
+                AcademicServiceItem(id: "SYNTH-4", title: "合成教学评价", category: "合成评价", path: "合成评价 › 合成教学评价", url: URL(string: "https://jwxt.neu.edu.cn/jwapp/sys/synthetic/index.do"))]
+            academicServicesState = .loaded; return
+        }
+''')
+service_fixture('NEU-Lumen/Core/Services/PortalRepository.swift',
+                'func loadAcademicExams(term: String, force: Bool = false) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=academic-exams") {
+            academicExamCache[term] = [AcademicExam(id: "SYNTH-EXAM", title: "合成考试：程序设计基础", dateText: "2026-12-01", timeText: "14:00–16:00", place: "合成考场 A101", teachers: "合成教师", seat: "12", type: "合成期末考试", start: Date().addingTimeInterval(2 * 86400))]
+            academicExamStates[term] = .loaded; academicExamDates[term] = Date(); return
+        }
+''')
 service_fixture('NEU-Lumen/Features/Services/NativeNewsView.swift',
                 'func load(session: SessionStore, reset: Bool) async {', r'''
         if ProcessInfo.processInfo.arguments.contains("--screen=native-news") {

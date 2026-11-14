@@ -131,7 +131,7 @@ struct LiveActivityContentState: Codable, Hashable {
         return copy
     }
 
-    static let allowedSymbols = ["book.closed.fill", "creditcard.fill", "wifi", "bolt.fill", "checklist", "calendar", "sparkles", "chart.bar.fill", "bell.fill", "heart.fill", "flag.fill"]
+    static let allowedSymbols = ["book.closed.fill", "creditcard.fill", "wifi", "bolt.fill", "checklist", "calendar", "sparkles", "chart.bar.fill", "bell.fill", "heart.fill", "flag.fill", "clock.fill", "mappin.and.ellipse", "graduationcap.fill", "pencil", "cup.and.saucer.fill", "sun.max.fill", "moon.fill", "figure.run", "leaf.fill", "envelope.fill", "doc.text.fill", "checkmark.circle.fill", "timer", "target", "building.columns.fill"]
     var symbol: String {
         if let symbolName, Self.allowedSymbols.contains(symbolName) { return symbolName }
         switch kind {
@@ -207,6 +207,25 @@ struct LiveActivityContentState: Codable, Hashable {
     func displayValue(isStale: Bool) -> String {
         if isStale && (countdownDate != nil || phase != nil || kind == "dayOverview" || kind == "assignments") { return "待更新" }
         return value
+    }
+}
+
+/// Optional inline SF Symbols, independent of data-variable substitution.
+/// Whitelisted names only; unknown or malformed tokens stay ordinary text.
+enum LiveActivityInlineSymbols {
+    enum Part: Equatable { case text(String), symbol(String) }
+    static func parts(_ input: String) -> [Part] {
+        let pattern = try! NSRegularExpression(pattern: #"\{sf:([a-z0-9.]+)\}"#)
+        let source = LiveActivityText.prefix(input, bytes: 640)
+        var output: [Part] = [], cursor = source.startIndex
+        for match in pattern.matches(in: source, range: NSRange(source.startIndex..., in: source)).prefix(12) {
+            guard let range = Range(match.range, in: source), let nameRange = Range(match.range(at: 1), in: source),
+                  LiveActivityContentState.allowedSymbols.contains(String(source[nameRange])) else { continue }
+            if cursor < range.lowerBound { output.append(.text(String(source[cursor..<range.lowerBound]))) }
+            output.append(.symbol(String(source[nameRange]))); cursor = range.upperBound
+        }
+        if cursor < source.endIndex { output.append(.text(String(source[cursor...]))) }
+        return output
     }
 }
 

@@ -360,5 +360,13 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     try require(result["activated"] as? Bool == true, "onclick-only payment project works")
     let projectCount = try await web.evaluateJavaScript("window.syntheticProjects") as? Int
     try require(projectCount == 1, "school payment project handler executes once")
+    _ = try await web.evaluateJavaScript("document.body.insertAdjacentHTML('beforeend', '<input type=button value=合成教务查询 onclick=\"window.academicClicks=(window.academicClicks||0)+1\"><div role=grid aria-label=合成考试><div role=row><span role=columnheader>课程</span><span role=columnheader>地点</span></div><div role=row><span role=gridcell>合成高数</span><span role=gridcell>A101</span></div></div>')")
+    snapshot = try await read()
+    try require(snapshot.tables.contains { $0.headers == ["课程", "地点"] && $0.rows == [["合成高数", "A101"]] }, "academic ARIA grid uses visible column headers and cells")
+    guard let academic = snapshot.actions.first(where: { $0.title == "合成教务查询" }) else { throw NetworkError(message: "Missing school input button") }
+    result = try await call("act", token: snapshot.token, action: academic.id)
+    try require(result["activated"] as? Bool == true, "school input-button query is usable")
+    let academicClicks = try await web.evaluateJavaScript("window.academicClicks") as? Int
+    try require(academicClicks == 1, "academic handler executes exactly once")
     print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
 }

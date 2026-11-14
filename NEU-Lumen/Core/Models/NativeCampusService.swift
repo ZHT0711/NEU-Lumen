@@ -1,5 +1,13 @@
 import Foundation
 
+enum CampusPaymentEntry {
+    /// School project 414 / factory E039; never send electricity actions to the general portal.
+    static let electricity = URL(string: "https://pay.neu.edu.cn/openPayElecPagesDbdx51414E039.html")!
+    static func isElectricity(_ url: URL) -> Bool {
+        url.scheme == "https" && url.host == "pay.neu.edu.cn" && url.path == electricity.path
+    }
+}
+
 /// Explicit native tools; this never rewrites PortalApp's school-provided destination.
 enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable {
     case academic, payment, vpn, affairs, mail, news, agenda, downloads

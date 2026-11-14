@@ -44,9 +44,10 @@ struct NativeServiceDocument: Decodable {
     const visible=el=>el.isConnected && !el.closest('[hidden],[aria-hidden="true"]') && el.getClientRects().length>0 &&
         el.ownerDocument.defaultView.getComputedStyle(el).visibility!=='hidden';
     const label=el=>clean(Array.from(el.labels||[]).map(x=>x.textContent).join(' ') || el.getAttribute('aria-label') ||
+        el.closest('.bh-form-item,.form-group,.control-group')?.querySelector('.bh-form-label,.control-label,label')?.textContent ||
         el.getAttribute('placeholder') || el.getAttribute('title') || el.name || el.id,256);
     const text=el=>clean(el.innerText || el.textContent);
-    const context=el=>clean(el.closest('tr,form,article,section')?.innerText,4096);
+    const context=el=>clean(el.closest('tr,[role=row],form,article,section')?.innerText,4096);
     const actionState=el=>JSON.stringify([el.getAttribute('href'),el.getAttribute('onclick'),el.getAttribute('formaction'),
         el.getAttribute('formmethod'),el.getAttribute('target'),el.getAttribute('type'),el.form?.action,el.form?.method,
         el.getAttribute('aria-disabled')]);
@@ -154,18 +155,21 @@ struct NativeServiceDocument: Decodable {
             state.fields.set(id,entry);
             fields.push({id,label:name,kind,value:entry.original,required:nodes?nodes.some(x=>x.required):!!el.required,readOnly:!!(el.disabled||el.readOnly),options});
         }
-        for (const table of doc.querySelectorAll('table')) {
-            if (!visible(table) || table.querySelector('table')) continue;
-            const headers=Array.from(table.querySelectorAll('thead th')).map(text);
-            const all=Array.from(table.rows).filter(row=>visible(row) && !row.closest('thead'));
-            const rows=all.slice(0,200).map(row=>Array.from(row.cells).map(text)).filter(row=>row.some(Boolean));
+        for (const table of doc.querySelectorAll('table,[role=grid],[role=table]')) {
+            if (!visible(table) || table.querySelector('table,[role=grid],[role=table]')) continue;
+            const html=table.tagName==='TABLE';
+            const headers=Array.from(table.querySelectorAll(html?'thead th':'[role=columnheader]')).filter(visible).map(text);
+            const all=html?Array.from(table.rows).filter(row=>visible(row) && !row.closest('thead')):
+                Array.from(table.querySelectorAll('[role=row]')).filter(row=>visible(row) &&
+                    row.closest('table,[role=grid],[role=table]')===table && row.querySelector('[role=gridcell],[role=cell]'));
+            const rows=all.slice(0,200).map(row=>Array.from(html?row.cells:row.querySelectorAll('[role=gridcell],[role=cell]')).map(text)).filter(row=>row.some(Boolean));
             if (!rows.length) continue;
-            tables.push({id:'t'+serial++,title:clean(table.caption?.textContent || doc.title,256),headers,rows,truncated:all.length>200});
+            tables.push({id:'t'+serial++,title:clean(table.caption?.textContent || table.getAttribute('aria-label') || doc.title,256),headers,rows,truncated:all.length>200});
             if (tables.length>=30) { needsWeb=true; break; }
         }
         for (const el of doc.querySelectorAll('a[href],a[onclick],button,input[type=submit],input[type=button],[role=button],[onclick]')) {
             if (!visible(el) || el.disabled || el.getAttribute('aria-disabled')==='true' || el.closest('form')?.querySelector('input[type=password]')) continue;
-            if (el.matches('input,select,textarea,img') || el.querySelector('a[href],a[onclick],button,[role=button]')) continue;
+            if (el.matches('select,textarea,img') || (el.matches('input') && !['submit','button'].includes(el.type)) || el.querySelector('a[href],a[onclick],button,[role=button]')) continue;
             const title=clean(el.innerText || el.value || el.getAttribute('aria-label'),256);
             if (!title) continue;
             const id='a'+serial++;

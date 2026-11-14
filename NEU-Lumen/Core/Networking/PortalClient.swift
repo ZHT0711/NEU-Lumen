@@ -10,6 +10,7 @@ final class PortalClient {
     private let http: HTTPClient
     private let casGate = CASRequestGate()
     private let newsGate = CASRequestGate(limit: 3)
+    private let routeProbeGate = CASRequestGate()
     private var sessionEpoch = UUID()
     var sessionGeneration: UUID { sessionEpoch }
 
@@ -39,7 +40,18 @@ final class PortalClient {
         routeInvalidated = true
     }
 
+    func networkPathChanged() {
+        http.resetTransport(networkChanged: true)
+        invalidateAccessRoute()
+    }
+
     func isCampusNet() async -> Bool {
+        await routeProbeGate.acquire()
+        let value = await readCampusProbe()
+        await routeProbeGate.release()
+        return value
+    }
+    private func readCampusProbe() async -> Bool {
         let epoch = sessionEpoch
         let revision = accessRouteRevision
         if let probe = campusProbe, Date().timeIntervalSince(probe.date) < 600 {
@@ -62,12 +74,8 @@ final class PortalClient {
         guard let requestURL = URL(string: url) else { return false }
         let request = URLRequest(url: requestURL, timeoutInterval: 2.5)
         do {
-            let response = try await http.send(request, followRedirects: false)
-            guard (200..<400).contains(response.status) else { return false }
-            if let location = response.headers.first(where: { String(describing: $0.key).lowercased() == "location" })?.value as? String,
-               let target = URL(string: location, relativeTo: requestURL)?.absoluteURL,
-               WebVPN.isWrapped(target.absoluteString) { return false }
-            return true
+            let response = try await http.send(request, followRedirects: false, retryTransport: false)
+            return CampusAccessProbe.accepts(url: response.finalURL, status: response.status, headers: response.headers, body: response.body)
         } catch {
             return false
         }
@@ -94,13 +102,13 @@ final class PortalClient {
     }
 
     /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
-    func prepareAccess() async {
+    func prepareAccess(authenticateGateway: Bool = true) async {
         let epoch = sessionEpoch
         let revision = accessRouteRevision
         let campus = await isCampusNet()
         guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { return }
         webvpnOn = !campus
-        if !campus { _ = await ensureWebVPN() }
+        if !campus, authenticateGateway { _ = await ensureWebVPN() }
     }
 
     private func maybeWrap(_ url: String) -> String {
@@ -786,6 +794,36 @@ final class PortalClient {
             guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
             return try await read()
         }
+    }
+
+    func fetchAcademicServiceDirectory(expectedAccount: String) async throws -> [AcademicServiceItem] {
+        let epoch = sessionEpoch
+        try await jwxtSSO()
+        let identity = try await jwxtGet("api/home/currentUser.do")
+        try AcademicQueryParser.validateIdentity(identity, expectedAccount: expectedAccount)
+        let user = try AcademicQueryParser.payload(identity, title: "教务身份") as? [String: Any]
+        var path = "api/home/menus.do"
+        if let type = user.flatMap({ AcademicQueryParser.scalar($0["userType"]) }), !type.isEmpty {
+            var parts = URLComponents(); parts.queryItems = [URLQueryItem(name: "userType", value: type)]
+            path += "?" + (parts.percentEncodedQuery ?? "")
+        }
+        let result = try AcademicServiceParser.menus(await jwxtGet(path))
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        guard sessionEpoch == epoch, !Task.isCancelled else { throw CancellationError() }
+        return result
+    }
+
+    func fetchAcademicExams(termCode: String, expectedAccount: String) async throws -> [AcademicExam] {
+        let epoch = sessionEpoch
+        try await jwxtSSO()
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        guard case .terms(let terms) = try AcademicQueryParser.decode(await jwxtGet("api/home/student/schoolCalendars.do"), key: .terms),
+              terms.contains(where: { $0.code == termCode }) else { throw AcademicQueryError.invalid("考试学期") }
+        var query = URLComponents(); query.queryItems = [URLQueryItem(name: "termCode", value: termCode)]
+        let exams = try AcademicServiceParser.exams(await jwxtGet("api/home/student/exams.do?" + (query.percentEncodedQuery ?? "")), term: termCode)
+        try AcademicQueryParser.validateIdentity(await jwxtGet("api/home/currentUser.do"), expectedAccount: expectedAccount)
+        guard sessionEpoch == epoch, !Task.isCancelled else { throw CancellationError() }
+        return exams
     }
 
     // Verified against pyfagl/modules/pyfacxcd/pyfacxcd.js and

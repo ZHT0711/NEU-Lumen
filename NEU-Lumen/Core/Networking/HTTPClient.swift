@@ -19,7 +19,11 @@ final class HTTPClient {
         }
     }
 
-    private let session: URLSession
+    private var session: URLSession
+    private let configuration: URLSessionConfiguration
+    private let transportLock = NSLock()
+    private var transportRevision = UUID()
+    private var networkRevision = UUID()
     let cookies = CookieJar()
 
     /// 重定向目标改写钩子：WebVPN 模式下把校内主机 Location 改写为网关地址。
@@ -33,16 +37,37 @@ final class HTTPClient {
         config.timeoutIntervalForRequest = Self.timeout
         config.timeoutIntervalForResource = 60
         config.urlCache = nil
+        config.allowsCellularAccess = true
+        config.allowsExpensiveNetworkAccess = true
+        config.allowsConstrainedNetworkAccess = true
+        config.waitsForConnectivity = false
+        self.configuration = config.copy() as! URLSessionConfiguration
         session = URLSession(configuration: config, delegate: RedirectSuppressor(), delegateQueue: nil)
+    }
+
+    private func transport() -> (session: URLSession, revision: UUID, network: UUID) {
+        transportLock.lock(); defer { transportLock.unlock() }
+        return (session, transportRevision, networkRevision)
+    }
+    func resetTransport(networkChanged: Bool = false) {
+        let replacement = URLSession(configuration: configuration, delegate: RedirectSuppressor(), delegateQueue: nil)
+        transportLock.lock()
+        let previous = session
+        session = replacement; transportRevision = UUID()
+        if networkChanged { networkRevision = UUID() }
+        transportLock.unlock()
+        // Do not replay writes or erase cookies. New reads use a fresh connection pool/DNS path.
+        previous.finishTasksAndInvalidate()
     }
 
     /// 手动跟随重定向（最多 10 跳），每跳吸收 Set-Cookie。
     @discardableResult
-    func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true) async throws -> RawResponse {
+    func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true, retryTransport: Bool = true) async throws -> RawResponse {
         let generation = cookies.generation
+        let network = transport().network
         var current = request
         for _ in 0..<maxHops {
-            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+            guard generation == cookies.generation, network == transport().network, !Task.isCancelled else { throw CancellationError() }
             if current.value(forHTTPHeaderField: "User-Agent") == nil {
                 current.setValue(userAgentOverride ?? Self.userAgent, forHTTPHeaderField: "User-Agent")
             }
@@ -56,8 +81,20 @@ final class HTTPClient {
                 current.setValue(cookie, forHTTPHeaderField: "Cookie")
             }
 
-            let (data, response) = try await session.data(for: current)
-            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+            var outcome: (Data, URLResponse)?
+            for attempt in 0..<2 {
+                let connection = transport()
+                if let url = current.url, let freshCookie = cookies.headerFor(url) { current.setValue(freshCookie, forHTTPHeaderField: "Cookie") }
+                do { outcome = try await connection.session.data(for: current); break }
+                catch {
+                    guard attempt == 0, retryTransport, generation == cookies.generation, network == transport().network,
+                          CampusTransportRetry.allows(method: current.httpMethod, error: error, userCancelled: Task.isCancelled,
+                              connectionReplaced: connection.revision != transport().revision) else { throw error }
+                    resetTransport()
+                    try await Task.sleep(for: .milliseconds(350))
+                }
+            }
+            guard let (data, response) = outcome, generation == cookies.generation, network == transport().network, !Task.isCancelled else { throw CancellationError() }
             guard let http = response as? HTTPURLResponse else {
                 throw NetworkError(message: "网络响应异常")
             }

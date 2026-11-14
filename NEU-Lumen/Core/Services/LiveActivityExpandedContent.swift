@@ -32,14 +32,22 @@ struct LiveActivityExpandedContent: View {
         let details = Array(state.visibleDetails(isStale: isStale).prefix(detailLimit))
         let hasFooterContent = isStale || state.updatedAt != .distantPast || state.progress?.isFinite == true
         return VStack(alignment: .leading, spacing: compact ? 4 : 5) {
-            Text(state.displayTitle(isStale: isStale))
+            HStack(alignment: .center, spacing: 9) {
+                if state.kind == "custom" {
+                    Image(systemName: state.symbol).font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(liveActivityAccent(state.accent)).frame(width: 28, height: 28)
+                        .background(liveActivityAccent(state.accent).opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+                        .accessibilityHidden(true)
+                }
+                LiveActivitySymbolText(text: state.displayTitle(isStale: isStale), accent: state.accent)
                 .font(compact ? .system(size: 15, weight: .semibold) : .headline)
                 .lineLimit(titleLines)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if let subtitle = state.displaySubtitle(isStale: isStale),
                !compact && (state.kind == "custom" || details.isEmpty) {
-                Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                LiveActivitySymbolText(text: subtitle, accent: state.accent).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             if state.countdownDate != nil || !state.value.isEmpty || isStale {
                 LiveActivityMetricRow(state: state, isStale: isStale, compact: compact)
@@ -114,7 +122,7 @@ struct LiveActivityMetricRow: View {
                 } else if state.countdownDate != nil {
                     Text(isStale ? "待更新" : "已到时间 · 待更新")
                 } else {
-                    Text(state.displayValue(isStale: isStale))
+                    LiveActivitySymbolText(text: state.displayValue(isStale: isStale), accent: state.accent)
                 }
             }
             .font(compact ? .system(size: 17, weight: .semibold, design: .monospaced) : .title3.monospacedDigit().weight(.semibold))
@@ -124,6 +132,20 @@ struct LiveActivityMetricRow: View {
             .multilineTextAlignment(.trailing)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Text-backed composition keeps inline symbols on the same baseline as variable values.
+struct LiveActivitySymbolText: View {
+    let text: String
+    var accent: String? = nil
+    var body: some View {
+        LiveActivityInlineSymbols.parts(text).reduce(Text("")) { result, part in
+            switch part {
+            case .text(let value): return result + Text(value)
+            case .symbol(let name): return result + Text(Image(systemName: name)).foregroundColor(liveActivityAccent(accent))
+            }
+        }
     }
 }
 
@@ -157,7 +179,10 @@ private struct LiveActivityDetailRows: View {
     var body: some View {
         LiveActivityDetailLayout(accessibility: dynamicTypeSize.isAccessibilitySize) {
             ForEach(Array(details.enumerated()), id: \.offset) { _, row in
-                (Text(row.label + " ").foregroundColor(.secondary) + Text(row.value))
+                HStack(spacing: 4) {
+                    Text(row.label).foregroundStyle(.secondary)
+                    LiveActivitySymbolText(text: row.value)
+                }
                     .font(.caption2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)

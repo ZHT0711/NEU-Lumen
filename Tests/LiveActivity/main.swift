@@ -270,6 +270,11 @@ for kind in liveFixtureKinds {
 }
 precondition(liveFixture("academicOverview").destination.absoluteString == "neulumen://activity/learning?section=grades")
 print("Live activity freshness: start/end/custom boundaries, stale labels/counts and destination allowlist passed")
+precondition(LiveActivityInlineSymbols.parts("地点 {sf:mappin.and.ellipse} A101") == [.text("地点 "), .symbol("mappin.and.ellipse"), .text(" A101")])
+precondition(LiveActivityInlineSymbols.parts("{sf:not.allowed} {sf:bolt.fill}") == [.text("{sf:not.allowed} "), .symbol("bolt.fill")])
+precondition(LiveActivityInlineSymbols.parts("{sf:https://example.invalid/x}") == [.text("{sf:https://example.invalid/x}")])
+precondition(LiveActivityTemplate.dependencies(in: ["{sf:creditcard.fill} {card}"]) == ["card"])
+print("Custom SF Symbols: whitelisted inline icons, literal unknown tokens and independent data variables passed")
 
 for width in [CGFloat(220), 280, 330, 350, 370] {
     for labelWidth in [CGFloat(33), 60, 120, 240] {

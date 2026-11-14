@@ -415,15 +415,17 @@ final class SessionStore {
             }
             self.client.invalidateAccessRoute()
             await self.client.prepareAccess()
-            if let fresh = try? await self.client.fetchUserInfo(), epoch == self.sessionEpoch, !Task.isCancelled,
-               self.canBind(fresh) {
+            var authenticationExpired = false
+            do {
+                let fresh = try await self.client.fetchUserInfo()
+                guard epoch == self.sessionEpoch, !Task.isCancelled, self.canBind(fresh) else { return false }
                 self.user = self.user?.merging(fresh) ?? fresh
                 self.profileSyncError = nil
                 return true
-            }
+            } catch { authenticationExpired = NetworkError.from(error).isSessionExpired }
             guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             // Native credentials are a last resort, without changing the app's root navigation.
-            if let cred = CredentialStore.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
+            if authenticationExpired, let cred = CredentialStore.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
                 do {
                     let fresh = try await self.client.login(username: cred.username, password: cred.password)
                     guard epoch == self.sessionEpoch, !Task.isCancelled, self.user?.isSameAccount(as: fresh) != false else { return false }
@@ -445,7 +447,7 @@ final class SessionStore {
     /// Returning from a sheet or another app is not a network-path change.
     /// Preserve the route cache; revalidate only occasionally or for unknown identity.
     func applicationDidBecomeActive() {
-        guard phase == .loggedIn else { return }
+        guard phase == .loggedIn, !recoveringNetwork else { return }
         if !hasConfirmedIdentity {
             Task { _ = await ensureIdentity() }
             return
@@ -463,7 +465,7 @@ final class SessionStore {
     }
 
     func networkDidChange(isConnected: Bool = true) {
-        client.invalidateAccessRoute()
+        if phase == .loggedIn { client.networkPathChanged() } else { client.invalidateAccessRoute() }
         networkAvailable = isConnected
         stopNetworkRecovery()
         recoveryRequest = UUID()
@@ -479,7 +481,10 @@ final class SessionStore {
             defer { if self.networkRequest == request { self.recoveringNetwork = false; self.networkRecoveryTask = nil } }
             do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             guard self.sessionEpoch == epoch, self.phase == .loggedIn, self.networkRequest == request else { return }
-            _ = await self.silentRelogin()
+            // A new IP/interface is not evidence that the cookie session expired.
+            // Resolve the route quickly, then retry data reads; renew authentication only
+            // if an actual business response reports that it is required.
+            await self.client.prepareAccess(authenticateGateway: false)
             guard self.sessionEpoch == epoch, self.phase == .loggedIn, self.networkRequest == request, !Task.isCancelled else { return }
             self.networkRevision += 1
         }

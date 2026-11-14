@@ -8,6 +8,7 @@ struct CardView: View {
     @State private var cardQuery: String?
     @State private var roomDraft = ""
     @State private var editingRoom = false
+    @State private var electricityWeb = false
 
     private var repo: PortalRepository {
         environment.repository
@@ -38,6 +39,9 @@ struct CardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showCardWeb) {
             NavigationStack { PortalWebViewScreen(url: URL(string: PortalClient.serviceCard)!, cardMode: true, cardQuery: cardQuery) }
+        }
+        .sheet(isPresented: $electricityWeb) {
+            NavigationStack { PortalWebViewScreen(url: CampusPaymentEntry.electricity, nativeService: .payment) }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -275,6 +279,8 @@ struct CardView: View {
     private var electricSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionHeader("电费", icon: "bolt.fill")
+            Button("缴纳电费", systemImage: "bolt.fill") { electricityWeb = true }
+                .buttonStyle(.bordered).frame(minHeight: 44)
             GlassCard {
                 VStack(alignment: .leading, spacing: 10) {
                     if editingRoom || repo.electricRoomCode.isEmpty {

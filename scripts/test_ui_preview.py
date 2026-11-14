@@ -185,7 +185,7 @@ class UIPreviewTests(unittest.TestCase):
                 thread.join(timeout=5)
 
     def test_download_checks_and_twentieth_screenshot_are_required(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 45)
+        self.assertEqual(len(preview.SCREENSHOTS), 48)
         self.assertIn('downloads-light.png', preview.SCREENSHOTS)
         for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
                      'learning-save.txt', 'learning-restore.txt']:
@@ -216,10 +216,10 @@ class UIPreviewTests(unittest.TestCase):
         self.assertIn('contains("--screen=grades") ? "成绩" : "作业"', prepare)
         self.assertNotIn('bash scripts/validate_ui.sh\n          fi', workflow)
     def test_exact_new_snapshots_and_required_checks(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 45)
-        self.assertEqual(len(preview.CHECKS), 16)
-        self.assertEqual(len(set(preview.SCREENSHOTS)), 45)
-        self.assertEqual(len(set(preview.CHECKS)), 16)
+        self.assertEqual(len(preview.SCREENSHOTS), 48)
+        self.assertEqual(len(preview.CHECKS), 18)
+        self.assertEqual(len(set(preview.SCREENSHOTS)), 48)
+        self.assertEqual(len(set(preview.CHECKS)), 18)
         for kind in preview.LIVE_KINDS:
             self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)
         self.assertIn('live-expanded-ax-stale-light.png', preview.SCREENSHOTS)

@@ -69,6 +69,12 @@ struct HomeView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        environment.pendingActivityURL = URL(string: "neulumen://activity/reminders")
+                    } label: { Image(systemName: environment.reminders.unreadCount > 0 ? "bell.badge" : "bell") }
+                    .accessibilityLabel("提醒与通知")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         refreshTask?.cancel()
                         refreshTask = Task { await refreshHomeData(force: true) }
                     } label: {

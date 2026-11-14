@@ -85,9 +85,9 @@ private struct ActivityDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(state.displayTitle(isStale: isStale)).font(.headline).lineLimit(2)
+            LiveActivitySymbolText(text: state.displayTitle(isStale: isStale), accent: state.accent).font(.headline).lineLimit(2)
             if let subtitle = state.displaySubtitle(isStale: isStale) {
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                LiveActivitySymbolText(text: subtitle, accent: state.accent).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
             if let secondary = state.displaySecondary(isStale: isStale) {
                 Text(secondary).font(.caption.weight(.medium)).foregroundStyle(activityAccent(state.accent)).lineLimit(2)
@@ -128,7 +128,7 @@ private struct ActivityValue: View {
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
         } else if !state.value.isEmpty {
-            Text(state.displayValue(isStale: isStale))
+            LiveActivitySymbolText(text: state.displayValue(isStale: isStale), accent: state.accent)
                 .font(.headline.monospacedDigit())
                 .foregroundStyle(activityAccent(state.accent))
                 .lineLimit(1)

@@ -11,7 +11,7 @@ struct AcademicCenterView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(repo.academicTerms.first(where: { $0.current })?.name ?? "我的学业")
                         .font(.title2.bold())
-                    Text("查看课表、成绩、校历和培养计划")
+                    Text("成绩、课表、考试、培养方案与学校全部教务功能")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }.padding(.vertical, 8)
                 Button {
@@ -28,10 +28,14 @@ struct AcademicCenterView: View {
                     AcademicEntryCard(title: "校历与周次", subtitle: "学期日期 · 假期 · 教学周查询", icon: "calendar")
                 }.buttonStyle(.plain)
                 NavigationLink { AcademicPlanView() } label: {
-                    AcademicEntryCard(title: "培养计划", subtitle: "方案进度 · 课程模块 · 修读状态", icon: "list.bullet.rectangle.portrait")
+                    AcademicEntryCard(title: "培养计划", subtitle: "个人方案 · 平台课组 · 学分要求", icon: "list.bullet.rectangle.portrait")
                 }.buttonStyle(.plain)
-                Text("选课、考试报名及其他业务可通过右上角「学校原站」办理。")
-                    .font(.footnote).foregroundStyle(.secondary)
+                NavigationLink { AcademicExamsView() } label: {
+                    AcademicEntryCard(title: "考试安排", subtitle: "学期考试 · 时间地点 · 座位与提醒", icon: "pencil.and.list.clipboard")
+                }.buttonStyle(.plain)
+                NavigationLink { AcademicServicesView() } label: {
+                    AcademicEntryCard(title: "全部教务功能", subtitle: "按学校权限实时读取完整目录与业务表单", icon: "square.grid.2x2")
+                }.buttonStyle(.plain)
             }.padding(16).padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))

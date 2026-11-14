@@ -4,8 +4,7 @@ import Foundation
 /// No networking, account identifiers or ActivityKit payloads are stored here.
 enum LiveActivityDataPolicy {
     static let accents = ["cyan", "blue", "green", "orange", "pink", "purple"]
-    static let symbols = ["book.closed.fill", "creditcard.fill", "wifi", "bolt.fill", "checklist",
-                          "calendar", "sparkles", "chart.bar.fill", "bell.fill", "heart.fill", "flag.fill"]
+    static let symbols = LiveActivityContentState.allowedSymbols
     static let destinations = ["course", "card", "settings", "learning", "profile"]
 
     static func accent(_ value: String) -> String { accents.contains(value) ? value : "cyan" }

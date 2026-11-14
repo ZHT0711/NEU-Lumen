@@ -12,7 +12,8 @@ final class CampusNetworkMonitor {
         self.monitor = monitor
         monitor.pathUpdateHandler = { [weak self] path in
             let signature = CampusNetworkPath(connected: path.status == .satisfied,
-                interfaces: path.availableInterfaces.map { "\($0.name):\(path.usesInterfaceType($0.type))" }.sorted(),
+                interfaces: [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .loopback, .other]
+                    .filter { path.usesInterfaceType($0) }.map { String(describing: $0) }.sorted(),
                 gateways: path.gateways.map { String(describing: $0) }.sorted(),
                 expensive: path.isExpensive, constrained: path.isConstrained)
             Task { @MainActor [weak self] in

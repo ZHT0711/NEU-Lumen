@@ -31,7 +31,7 @@ struct NativeServiceDocumentView: View {
                     Text(notice).foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if !document.fields.isEmpty {
-                    Section(service == .affairs ? "申请表单" : "查询与缴费信息") {
+                    Section(service == .affairs ? "申请表单" : service == .academic ? "查询条件与业务表单" : "查询与缴费信息") {
                         ForEach(document.fields) { field in fieldEditor(field) }
                     }
                 }

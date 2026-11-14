@@ -34,6 +34,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var pageGeneration = UUID()
     private var verifiedPage: UUID?
     private static let world = WKContentWorld.world(name: "NEULumen.NativeMail")
+    private var backgroundOnly = false
 
     private var current: Bool {
         guard let session else { return false }
@@ -68,6 +69,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         } else { config.websiteDataStore = .nonPersistent() }
         config.defaultWebpagePreferences.preferredContentMode = .mobile
         let view = WKWebView(frame: .zero, configuration: config)
+        if backgroundOnly { view.frame = CGRect(x: 0, y: 0, width: 390, height: 844) }
         webView = view; view.navigationDelegate = self; view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
         view.customUserAgent = session.client.browserUserAgent ?? HTTPClient.userAgent
@@ -100,7 +102,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func recoverAfterNetworkChange() async {
         guard current else { return }
-        if loadingWeb || needsLogin { reloadLogin() }
+        if loadingWeb || needsLogin || error != nil { reloadLogin() }
         else { await refresh() }
     }
 
@@ -173,6 +175,9 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
             folderID = raw["folderID"] as? String ?? folderID
             nextStart = raw["nextStart"] as? Int ?? (reset ? rows.count : nextStart + rows.count)
             hasMore = raw["hasMore"] as? Bool ?? false; loaded = true; error = nil; lastRefresh = Date()
+            if reset, folderID == "1", !hasSearch {
+                await CampusReminderStore.shared.recordMail(account: ownerAccount, messages: messages, unread: folders.first { $0.id == "1" }?.unread)
+            }
             await persist()
         } catch {
             if current, currentOperation == token, !NetworkError.isCancellation(error) { self.error = NetworkError.from(error).message }
@@ -282,6 +287,22 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
         verifiedPage = nil; pageGeneration = UUID(); lastRefresh = nil; persistenceWarning = nil
         advancedSearch = NativeMailSearch()
     }
+
+    func readInBackground(session: SessionStore, apps: [PortalApp]) async -> Bool {
+        guard let user = session.user else { return false }
+        let account = user.sid.isEmpty ? user.uid : user.sid
+        guard let saved = KeychainWebSessionStore(account: "service.mail." + account).load(),
+              saved.user.isSameAccount(as: user), !saved.user.email.isEmpty, !saved.cookies.isEmpty else { return false }
+        backgroundOnly = true
+        defer { close(); backgroundOnly = false }
+        await connect(session: session, apps: apps)
+        for _ in 0..<24 {
+            guard !Task.isCancelled, current, !needsLogin else { return false }
+            if loaded { return true }
+            do { try await Task.sleep(for: .milliseconds(400)) } catch { return false }
+        }
+        return false
+    }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         loadingWeb = true; pageGeneration = UUID(); verifiedPage = nil
         currentOperation = nil; busy = false
@@ -335,7 +356,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-        guard current else { completionHandler(); return }
+        guard current, !backgroundOnly else { completionHandler(); return }
         let alert = UIAlertController(title: frame.securityOrigin.host, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "好", style: .default) { _ in completionHandler() })
         PortalBrowser.present(alert, in: webView, fallback: completionHandler)
@@ -343,7 +364,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        guard current else { completionHandler(false); return }
+        guard current, !backgroundOnly else { completionHandler(false); return }
         let epoch = ownerEpoch
         let alert = UIAlertController(title: frame.securityOrigin.host, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in completionHandler(false) })
@@ -355,7 +376,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
-        guard current else { completionHandler(nil); return }
+        guard current, !backgroundOnly else { completionHandler(nil); return }
         let epoch = ownerEpoch
         let alert = UIAlertController(title: frame.securityOrigin.host, message: prompt, preferredStyle: .alert)
         alert.addTextField { $0.text = defaultText }

@@ -68,7 +68,7 @@ enum LiveActivityUIFixture {
                 detail("均分", "合成 90.5"), detail("成绩", "合成 2 / 3 门有效"), detail("同步", "合成同步时间")]
         default:
             state.title = "合成自定义：跨学科项目截止与用户辅助信息（长中文）"
-            state.subtitle = "合成变量与缓存来源 · 原标题/副标题保持真实组件"
+            state.subtitle = "{sf:mappin.and.ellipse} 合成校园项目 · {sf:clock.fill} 合成截止时间"
             state.value = "123:21:16:00"
             state.secondaryValue = "合成用户辅助值"
             state.symbolName = "bell.fill"
@@ -78,7 +78,7 @@ enum LiveActivityUIFixture {
             state.countdownTitle = "距截止"
             state.progress = 0.35
             state.detailItems = [detail("辅助值", "合成用户辅助内容"), detail("截止", "合成多日目标", timed: true),
-                                detail("变量", "合成缓存 · 未读取项不补零")]
+                                detail("备注", "合成项目安排")]
         }
         return state.boundedText()
     }

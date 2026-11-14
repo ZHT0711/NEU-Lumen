@@ -16,6 +16,8 @@ struct MainTabView: View {
     @State private var scrollActivity = TabBarScrollActivity()
     @State private var showActivitySettings = false
     @State private var showActivityCard = false
+    @State private var showReminders = false
+    @State private var nativeService: NativeCampusService?
 
     var body: some View {
         tabs
@@ -23,6 +25,12 @@ struct MainTabView: View {
                 guard let url = pending else { return }
                 showActivityCard = url.host == "activity" && url.path == "/card"
                 showActivitySettings = url.host == "dynamic-island" || url.path == "/settings"
+                showReminders = url.host == "activity" && url.path == "/reminders"
+                if url.host == "activity", url.path == "/services" {
+                    let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "native" }?.value
+                    nativeService = name.flatMap(NativeCampusService.init(rawValue:))
+                    selection = .services
+                }
                 if url.host == "activity", url.path == "/course" { selection = .schedule }
                 if url.host == "activity", url.path == "/profile" { selection = .profile }
                 if url.host == "activity", url.path == "/learning" {
@@ -51,6 +59,12 @@ struct MainTabView: View {
                             }
                         }
                 }
+            }
+            .sheet(isPresented: $showReminders) {
+                NavigationStack { CampusReminderView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showReminders = false } } } }
+            }
+            .sheet(item: $nativeService) { service in
+                NavigationStack { NativeServiceHost(initial: service).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { nativeService = nil } } } }
             }
             .environment(\.tabBarScrollActivity, scrollActivity)
             .modifier(ScrollingTabBarStyle(activity: scrollActivity))

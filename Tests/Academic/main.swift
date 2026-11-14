@@ -1,5 +1,20 @@
 import Foundation
 
+let syntheticMenus: [String: Any] = ["code": 0, "datas": [["menuId": "root", "menuName": "合成培养", "children": [
+    ["menuId": "plan", "menuName": "合成个人方案", "appName": "pyfagl", "menuCode": "pyfacxcd"],
+    ["menuId": "external", "menuName": "学校提供的其他业务", "entry": "http://example.neu.edu.cn:8080/query?a=1#tab"]]]]]
+let serviceMenus = try AcademicServiceParser.menus(syntheticMenus)
+precondition(serviceMenus.count == 2 && serviceMenus[0].category == "合成培养")
+precondition(serviceMenus[0].url?.path == "/jwapp/sys/pyfagl/*default/index.do" && serviceMenus[0].url?.fragment == "/pyfacxcd")
+precondition(serviceMenus[1].url?.port == 8080 && serviceMenus[1].url?.fragment == "tab")
+precondition(AcademicServiceParser.schoolURL("javascript:alert(1)") == nil)
+let examData: [String: Any] = ["code": 0, "datas": [["taskId": "synthetic-exam", "courseDesc": "合成高等数学", "examDate": "2026-12-01", "startTime": "14:00", "examTimeDescription": "14:00–16:00", "examPlace": "A101", "examSeatNo": 12]]]
+let exams = try AcademicServiceParser.exams(examData, term: "synthetic")
+precondition(exams.count == 1 && exams[0].seat == "12" && exams[0].start != nil)
+precondition(AcademicServiceParser.examDate(day: "2026-12-01", time: "24:00") == nil)
+precondition(AcademicServiceParser.examDate(day: "2026-02-30", time: "14:00") == nil)
+print("Academic directory/exams: full role tree, original ports/fragments, safe protocols, seat fields and strict school clocks passed")
+
 var checks = 0
 func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
     checks += 1
