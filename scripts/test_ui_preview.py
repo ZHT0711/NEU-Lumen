@@ -187,7 +187,7 @@ class UIPreviewTests(unittest.TestCase):
                 thread.join(timeout=5)
 
     def test_download_checks_and_twentieth_screenshot_are_required(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 49)
+        self.assertEqual(len(preview.SCREENSHOTS), 52)
         self.assertIn('downloads-light.png', preview.SCREENSHOTS)
         for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
                      'learning-save.txt', 'learning-restore.txt']:
@@ -211,18 +211,19 @@ class UIPreviewTests(unittest.TestCase):
         self.assertIn('/releases/download/nightly/home-light.png', readme)
         workflow = (root / '.github/workflows/build-unsigned.yml').read_text()
         self.assertEqual(workflow.count('cron: "17 19 * * *"'), 1)
-        self.assertEqual(workflow.count('--dir release-assets/ui-preview'), 2)
+        self.assertEqual(workflow.count('--dir release-assets/ui-preview'), 3)
         self.assertIn('run: python3 scripts/publish_nightly.py', workflow)
         self.assertIn('cancel-in-progress: false', workflow)
         prepare = (root / 'scripts/prepare_ui_validation.py').read_text()
         self.assertIn('contains("--screen=grades") ? "成绩" : "作业"', prepare)
         self.assertNotIn('bash scripts/validate_ui.sh\n          fi', workflow)
     def test_exact_new_snapshots_and_required_checks(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 49)
+        self.assertEqual(len(preview.SCREENSHOTS), 52)
         self.assertEqual(len(preview.CHECKS), 19)
-        self.assertEqual(len(set(preview.SCREENSHOTS)), 49)
+        self.assertEqual(len(set(preview.SCREENSHOTS)), 52)
         self.assertEqual(len(set(preview.CHECKS)), 19)
-        self.assertIn('native-ecode-light.png', preview.SCREENSHOTS)
+        for screen in ['native-ecode', 'native-electricity', 'native-bills', 'services-directory']:
+            self.assertIn(screen + '-light.png', preview.SCREENSHOTS)
         self.assertIn('ecode-screenshot.txt', preview.CHECKS)
         for kind in preview.LIVE_KINDS:
             self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)

@@ -12,6 +12,13 @@ enum CampusPaymentEntry {
 enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable {
     case academic, payment, vpn, affairs, mail, news, agenda, downloads
     var id: String { rawValue }
+    static let groups = ["学习与生活", "校园资源"]
+    var group: String {
+        switch self {
+        case .academic, .payment, .affairs, .agenda: "学习与生活"
+        case .mail, .news, .vpn, .downloads: "校园资源"
+        }
+    }
     var title: String {
         switch self {
         case .academic: "学业查询"

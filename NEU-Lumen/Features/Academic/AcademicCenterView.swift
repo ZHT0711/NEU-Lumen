@@ -1,44 +1,40 @@
 import SwiftUI
 
-/// 服务大厅横向胶囊进入的唯一学业工具首页。
 struct AcademicCenterView: View {
     @Environment(AppEnvironment.self) private var environment
     private var repo: PortalRepository { environment.repository }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(repo.academicTerms.first(where: { $0.current })?.name ?? "我的学业")
-                        .font(.title2.bold())
-                    Text("成绩、课表、考试、培养方案与学校全部教务功能")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                }.padding(.vertical, 8)
+        List {
+            Section(repo.academicTerms.first(where: { $0.current })?.name ?? "学习记录") {
                 Button {
                     environment.pendingActivityURL = URL(string: "neulumen://activity/learning?section=grades")
                 } label: {
-                    AcademicEntryCard(title: "成绩与绩点", subtitle: "学期成绩 · 学分 · 加权均分", icon: "chart.bar.doc.horizontal")
+                    AcademicEntryCard(title: "成绩与绩点", subtitle: "学期成绩、学分与加权均分", icon: "chart.bar.doc.horizontal")
                 }.buttonStyle(.plain)
                 Button {
                     environment.pendingActivityURL = URL(string: "neulumen://activity/course")
                 } label: {
-                    AcademicEntryCard(title: "我的课表", subtitle: "周课表 · 课程详情 · 个人日程", icon: "calendar.day.timeline.left")
+                    AcademicEntryCard(title: "我的课表", subtitle: "每周课程与课程详情", icon: "calendar.day.timeline.left")
                 }.buttonStyle(.plain)
-                NavigationLink { AcademicCalendarView() } label: {
-                    AcademicEntryCard(title: "校历与周次", subtitle: "学期日期 · 假期 · 教学周查询", icon: "calendar")
-                }.buttonStyle(.plain)
-                NavigationLink { AcademicPlanView() } label: {
-                    AcademicEntryCard(title: "培养计划", subtitle: "个人方案 · 平台课组 · 学分要求", icon: "list.bullet.rectangle.portrait")
-                }.buttonStyle(.plain)
+            }
+            Section("教学安排") {
                 NavigationLink { AcademicExamsView() } label: {
-                    AcademicEntryCard(title: "考试安排", subtitle: "学期考试 · 时间地点 · 座位与提醒", icon: "pencil.and.list.clipboard")
-                }.buttonStyle(.plain)
+                    AcademicEntryCard(title: "考试安排", subtitle: "时间、地点、座位与提醒", icon: "pencil.and.list.clipboard")
+                }
+                NavigationLink { AcademicCalendarView() } label: {
+                    AcademicEntryCard(title: "校历与周次", subtitle: "学期日期与教学周", icon: "calendar")
+                }
+                NavigationLink { AcademicPlanView() } label: {
+                    AcademicEntryCard(title: "培养计划", subtitle: "个人方案与学分要求", icon: "list.bullet.rectangle.portrait")
+                }
+            }
+            Section {
                 NavigationLink { AcademicServicesView() } label: {
-                    AcademicEntryCard(title: "全部教务功能", subtitle: "按学校权限实时读取完整目录与业务表单", icon: "square.grid.2x2")
-                }.buttonStyle(.plain)
-            }.padding(16).padding(.bottom, 24)
+                    AcademicEntryCard(title: "全部教务功能", subtitle: "空闲教室、选课与学校业务", icon: "square.grid.2x2")
+                }
+            }
         }
-        .background(Color(.systemGroupedBackground))
         .navigationTitle("学业查询").navigationBarTitleDisplayMode(.inline)
         .task(id: environment.session.requestEpoch) { await repo.loadAcademicQuery(.terms) }
     }
@@ -49,17 +45,17 @@ struct AcademicEntryCard: View {
     let subtitle: String
     let icon: String
     var body: some View {
-        GlassCard {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: icon).font(.title2).foregroundStyle(AppTheme.accent).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title).font(.headline)
-                    Text(subtitle).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").foregroundStyle(.secondary).accessibilityHidden(true)
-            }.padding(16)
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.title3).foregroundStyle(AppTheme.accent)
+                .frame(width: 36, height: 40).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.body.weight(.medium)).foregroundStyle(.primary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
 }

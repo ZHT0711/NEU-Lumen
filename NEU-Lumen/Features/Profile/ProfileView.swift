@@ -94,40 +94,16 @@ struct ProfileView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    .frame(minHeight: 110)
-                    .listRowBackground(
-                        Color(.secondarySystemGroupedBackground)
-                            .overlay(alignment: .trailing) {
-                                CampusLineArt().stroke(campusInk.opacity(0.12), lineWidth: 1)
-                                    .frame(width: 260, height: 160).offset(x: 35, y: 12)
-                            }.clipped().accessibilityHidden(true)
-                    )
+                    .frame(minHeight: 88)
                     if environment.session.user?.hasCoreProfile != true {
                         Text("个人资料尚未同步完整").font(.caption).foregroundStyle(.secondary)
                     }
                     if let error = environment.session.profileSyncError {
                         Text(error).font(.caption).foregroundStyle(.orange)
                     }
-                    Button(environment.session.refreshingProfile ? "正在同步…" : "刷新个人资料") {
-                        Task { await environment.session.refreshUserProfile() }
-                    }
-                    .disabled(environment.session.refreshingProfile)
                 }
 
-                Section("校园外观") {
-                    Picker("首页校区", selection: Binding(
-                        get: { environment.repository.campusOverride?.rawValue ?? "auto" },
-                        set: { environment.repository.setCampusOverride(Campus(rawValue: $0)) }
-                    )) {
-                        Text("自动识别").tag("auto")
-                        ForEach(Campus.allCases) { campus in Text(campus.title).tag(campus.rawValue) }
-                    }
-                    Text(environment.repository.suggestedCampus.map { "根据学院/专业识别为\($0.title)，可手动调整。" }
-                         ?? "学院/专业尚无法确定校区，当前展示\(environment.repository.campus.title)插画，可手动选择。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section("实时活动") {
+                Section("校园与提醒") {
                     NavigationLink { CampusReminderView() } label: {
                         Label("提醒与通知", systemImage: "bell.badge")
                     }
@@ -138,62 +114,28 @@ struct ProfileView: View {
                     }
                 }
 
-                Section("会话") {
-                    LabeledContent("记住的账号", value: environment.session.rememberedUsername.isEmpty ? "未保存" : environment.session.rememberedUsername)
-                    LabeledContent("保持登录", value: environment.session.usesWebSession ? "已开启（网页登录会话）" :
-                        (environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭"))
-                    if let error = environment.session.sessionSaveError {
-                        Text(error).font(.caption).foregroundStyle(.orange)
+                Section("设置与支持") {
+                    NavigationLink { appearanceSettings } label: {
+                        Label("校园外观", systemImage: "paintpalette")
                     }
-                    if let error = environment.session.credentialSaveError {
-                        Text(error).font(.caption).foregroundStyle(.orange)
+                    NavigationLink { accountSettings } label: {
+                        Label("账号与登录", systemImage: "person.crop.circle.badge.checkmark")
                     }
-                    Button("更新网页登录（保留账号和收藏）") { showWebLogin = true }
-                    LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
-                    Button(role: .destructive) {
-                        confirmLogout = true
+                    NavigationLink {
+                        ScrollView { campusExploreSection.padding(20) }
+                            .navigationTitle("走进东大").navigationBarTitleDisplayMode(.inline)
                     } label: {
-                        Text("退出登录")
+                        Label("走进东大", systemImage: "building.columns")
+                    }
+                    NavigationLink { aboutPage } label: {
+                        Label("关于 NEU-Lumen", systemImage: "info.circle")
                     }
                 }
-
-                Section { campusExploreSection }
-
-                Section("关于") {
-                    VStack(spacing: 10) {
-                        Image("NEULogo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 30)
-                        Image("NEUMotto")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(height: 26)
-                            .accessibilityLabel("校训：知行合一")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    LabeledContent("版本", value: version)
-                    LabeledContent("数据来源", value: "东北大学一号通门户")
-                    Link(destination: URL(string: "https://github.com/ZHT0711/NEU-Lumen")!) {
-                        LabeledContent("GitHub 仓库", value: "ZHT0711/NEU-Lumen")
-                    }
-                    NavigationLink("慕课解析器开源许可") {
-                        ScrollView {
-                            Text(Bundle.main.url(forResource: "MOOC-reminder-LICENSE", withExtension: "txt")
-                                .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "MIT License · Copyright (c) 2026 furina061006")
-                                .font(.footnote).textSelection(.enabled).padding()
-                        }.navigationTitle("开源许可")
-                    }
-                }
-
                 Section {
-                    Text("NEU-Lumen 是东北大学一号通门户（personal.neu.edu.cn）的第三方原生 iOS 客户端，与学校官方无关。凭据仅保存在本机钥匙串，不上传、不打日志；请遵守学校相关使用规定。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("隐私与免责声明")
+                    Text("NEU-Lumen " + version).font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).listRowBackground(Color.clear)
                 }
+
             }
             .tracksTabBarScrolling()
             .sheet(isPresented: $showWebLogin) {
@@ -204,6 +146,13 @@ struct ProfileView: View {
                     .presentationDetents([.medium])
             }
             .navigationTitle("我的")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("刷新个人资料", systemImage: "arrow.clockwise") {
+                        Task { await environment.session.refreshUserProfile() }
+                    }.disabled(environment.session.refreshingProfile)
+                }
+            }
             .navigationDestination(for: AppDestination.self) { destination in
                 switch destination {
                 case .web(let url): PortalWebViewScreen(url: url)
@@ -223,4 +172,90 @@ struct ProfileView: View {
             }
         }
     }
+
+    private var appearanceSettings: some View {
+        Form {
+            Section("校园外观") {
+                Picker("首页校区", selection: Binding(
+                    get: { environment.repository.campusOverride?.rawValue ?? "auto" },
+                    set: { environment.repository.setCampusOverride(Campus(rawValue: $0)) }
+                )) {
+                    Text("自动识别").tag("auto")
+                    ForEach(Campus.allCases) { campus in Text(campus.title).tag(campus.rawValue) }
+                }
+                Text(environment.repository.suggestedCampus.map { "根据学院/专业识别为\($0.title)，可手动调整。" }
+                     ?? "学院/专业尚无法确定校区，当前展示\(environment.repository.campus.title)插画，可手动选择。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+        }
+        .navigationTitle("校园外观").navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var accountSettings: some View {
+        Form {
+            Section("会话") {
+                LabeledContent("记住的账号", value: environment.session.rememberedUsername.isEmpty ? "未保存" : environment.session.rememberedUsername)
+                LabeledContent("保持登录", value: environment.session.usesWebSession ? "已开启（网页登录会话）" :
+                    (environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭"))
+                if let error = environment.session.sessionSaveError {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+                if let error = environment.session.credentialSaveError {
+                    Text(error).font(.caption).foregroundStyle(.orange)
+                }
+                Button("更新网页登录（保留账号和收藏）") { showWebLogin = true }
+                LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
+                Button(role: .destructive) {
+                    confirmLogout = true
+                } label: {
+                    Text("退出登录")
+                }
+            }
+
+        }
+        .navigationTitle("账号与登录").navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var aboutPage: some View {
+        List {
+            Section("关于") {
+                VStack(spacing: 10) {
+                    Image("NEULogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 30)
+                    Image("NEUMotto")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 26)
+                        .accessibilityLabel("校训：知行合一")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                LabeledContent("版本", value: version)
+                LabeledContent("数据来源", value: "东北大学一号通门户")
+                Link(destination: URL(string: "https://github.com/ZHT0711/NEU-Lumen")!) {
+                    LabeledContent("GitHub 仓库", value: "ZHT0711/NEU-Lumen")
+                }
+                NavigationLink("慕课解析器开源许可") {
+                    ScrollView {
+                        Text(Bundle.main.url(forResource: "MOOC-reminder-LICENSE", withExtension: "txt")
+                            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? "MIT License · Copyright (c) 2026 furina061006")
+                            .font(.footnote).textSelection(.enabled).padding()
+                    }.navigationTitle("开源许可")
+                }
+            }
+
+            Section {
+                Text("NEU-Lumen 是东北大学一号通门户（personal.neu.edu.cn）的第三方原生 iOS 客户端，与学校官方无关。凭据仅保存在本机钥匙串，不上传、不打日志；请遵守学校相关使用规定。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("隐私与免责声明")
+            }
+        }
+        .navigationTitle("关于 NEU-Lumen").navigationBarTitleDisplayMode(.inline)
+    }
+
 }

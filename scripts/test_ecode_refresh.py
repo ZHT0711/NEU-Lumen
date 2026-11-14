@@ -16,9 +16,7 @@ class ECodeRefreshTests(unittest.TestCase):
         harness = '''import Foundation
 @MainActor final class ECodeRefreshHarness {
     let browser = RefreshBrowser()
-    var needsSchoolRefresh = false
     var document: String? = "previous code"
-    var loadedAt: Date? = Date()
     var message: String?
     var clearCount = 0
     func clearCode() { clearCount += 1 }

@@ -313,8 +313,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: python3 scripts/build_provenance.py download ipa --dir release-assets
 
-      - name: Verify IPA build provenance
-        run: python3 scripts/build_provenance.py validate --ipa-only
+      - name: Download screenshots from the same build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python3 scripts/build_provenance.py download ui --dir release-assets/ui-preview
+
+      - name: Verify IPA and simulator build provenance
+        run: |
+          python3 scripts/build_provenance.py validate
+          python3 scripts/package_ui_preview.py release-assets/ui-preview --list-assets
 
       - name: Generate release body
         shell: bash
@@ -378,7 +386,12 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
-          files: release-assets/NEU-Lumen-iOS-unsigned.ipa
+          files: |
+            release-assets/NEU-Lumen-iOS-unsigned.ipa
+            release-assets/build-provenance.json
+            release-assets/ui-preview/*.png
+            release-assets/ui-preview/NEU-Lumen-ui-preview.zip
+            release-assets/ui-preview/ui-preview.json
 
   manual_nightly:
     name: Publish dated manual nightly

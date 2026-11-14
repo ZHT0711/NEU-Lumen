@@ -23,7 +23,7 @@ LIVE_KINDS = ('nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'ass
 LIVE_SCREENSHOTS = tuple(f'live-expanded-{kind}-light.png' for kind in LIVE_KINDS) + ('live-expanded-ax-stale-light.png',)
 SYSTEM_ISLAND_SCREENSHOTS = tuple(f'system-island-{kind}.png' for kind in ('nextCourse', 'custom', 'electricBalance'))
 NATIVE_SCREENS = ('academic-center', 'academic-calendar', 'academic-plan', 'academic-services', 'academic-exams')
-SERVICE_SCREENS = ('native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
+SERVICE_SCREENS = ('services-directory', 'native-electricity', 'native-bills', 'native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
 ACADEMIC_WEB_CHECK = 'academic-web-sync-checks.txt'
 ACADEMIC_WEB_CASES = ('same-account', 'wrong-account', 'spoofed-page-world',
                       'identity-changes-between-checks', 'account-epoch-rejects-old-snapshot')

@@ -256,11 +256,11 @@ struct UIValidationRoot: View {
             if ready {
                 switch screen {
                 case "schedule": ScheduleView()
-                case "services": ServicesView()
+                case "services", "services-directory": ServicesView()
                 case "services-art": NavigationStack {
                     ScrollView { NativeServicesCarousel(services: NativeCampusService.allCases, searching: true) { _ in }.padding() }
                         .background(Color(.systemGroupedBackground)).navigationTitle("原生服务")
-                        .nativeUIFixtureCaption("本次构建原生卡面 · 八项校园主题简笔画")
+                        .nativeUIFixtureCaption("本次构建原生服务 · 分组入口")
                 }
                 case "profile": ProfileView()
                 case "favorites": FavoritesEditor()
@@ -276,7 +276,7 @@ struct UIValidationRoot: View {
                 case "academic-services": NavigationStack { AcademicServicesView().nativeUIFixtureCaption("模拟器合成功能目录 · 非账号实际权限") }
                 case "academic-exams": NavigationStack { AcademicExamsView().nativeUIFixtureCaption("模拟器合成考试 · 非真实考试安排") }
                 case "notifications": NavigationStack { CampusReminderView().nativeUIFixtureCaption("模拟器合成提醒设置 · 非系统通知到达证明") }
-                case "native-payment": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
+                case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
                 case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
@@ -1054,15 +1054,27 @@ service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
         }
 ''')
 
+# Render each reorganized payment section and the full directory in the real views.
+service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
+                'billQuery = ""; billFilter = .all; section = "账户"', r'''
+                if ProcessInfo.processInfo.arguments.contains("--screen=native-electricity") { section = "电费" }
+                if ProcessInfo.processInfo.arguments.contains("--screen=native-bills") { section = "流水" }
+''')
+service_fixture('NEU-Lumen/Features/Services/ServicesView.swift',
+                'catalogReadFailed = false; readingCatalog = false', r'''
+                    showDirectory = ProcessInfo.processInfo.arguments.contains("--screen=services-directory")
+''')
+
 # The actual production e-code reader and view run against an explicitly synthetic
 # local canvas. This page is not a usable QR credential and never enters the IPA.
 shutil.copyfile(root / 'Tests/ECode/WebKitValidation.swift', destination / 'NEU-Lumen/App/ECodeValidation.swift')
 (fixtures / 'ecode.html').write_text('''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>合成 e码通</title></head>
 <body><h1>合成 e码通 · 非有效校园凭证</h1><p>学号：20250001</p><p>姓名：合成学子</p>
-<canvas id="qrcode" width="240" height="240"></canvas><script>
+<div class="qr-code"><span class="code"><canvas id="qrcode" width="240" height="240"></canvas></span></div><script>
 const c=document.getElementById('qrcode'),x=c.getContext('2d');x.fillStyle='white';x.fillRect(0,0,240,240);
 x.fillStyle='#204198';for(let r=0;r<20;r++)for(let k=0;k<20;k++)if((r*7+k*11)%5<2)x.fillRect(20+k*10,20+r*10,8,8);
 x.fillStyle='white';x.fillRect(35,95,170,45);x.fillStyle='#204198';x.font='bold 19px sans-serif';x.fillText('SYNTHETIC',52,123);
+const image=new Image();image.src=c.toDataURL();c.replaceWith(image);
 </script></body></html>''', encoding='utf-8')
 ecode_model = destination / 'NEU-Lumen/Core/Models/ECodeDocument.swift'
 ecode_source = ecode_model.read_text(encoding='utf-8')
@@ -1100,7 +1112,7 @@ if ecode_source.count(ecode_hook) != 1:
 ecode_source = ecode_source.replace(ecode_hook, ecode_hook + '''
             if ProcessInfo.processInfo.arguments.contains("--screen=native-ecode") {
                 let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ecode-diagnostics.txt")
-                let flags = "foreground=" + String(foreground) + "; blocked=" + String(needsSchoolRefresh) + "; loading=" + String(browser.isLoading) + "; website=" + String(showWebsite) + "; connected=" + String(session.networkAvailable) + "; error=" + (browser.error ?? "nil") + "; state=" + (document?.state ?? "nil")
+                let flags = "foreground=" + String(foreground) + "; loading=" + String(browser.isLoading) + "; website=" + String(showWebsite) + "; connected=" + String(session.networkAvailable) + "; error=" + (browser.error ?? "nil") + "; state=" + (document?.state ?? "nil")
                 try? flags.write(to: output, atomically: true, encoding: .utf8)
             }
 ''')

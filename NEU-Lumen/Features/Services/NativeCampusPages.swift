@@ -6,6 +6,7 @@ struct NativePaymentView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var web: NativeServiceWebLink?
     @State private var room = ""
+    @State private var section = "账户"
     @State private var roomOwner: UUID?
     @State private var paymentBrowsers: [URL: PortalBrowser] = [:]
     @State private var billQuery = ""
@@ -21,99 +22,112 @@ struct NativePaymentView: View {
     }
     var body: some View {
         Form {
-            Section("缴费服务") {
-                Button("缴费项目", systemImage: "square.grid.2x2") { openPayment(path: "/openApplication") }
-                Button("我的订单", systemImage: "list.clipboard") { openPayment(path: "/orders.html") }
-                Button("缴费大厅首页", systemImage: "house") { openPayment() }
-            }
-            Section("校园账户") {
-                LabeledContent("校园卡余额", value: money(repo.cardBalance?.balance))
-                if let subsidy = repo.cardBalance?.subsidy { LabeledContent("补助余额", value: money(subsidy)) }
-                LabeledContent("网费余额", value: money(repo.netInfo?.balance))
-                if let date = repo.cardUpdatedAt { Text("校园卡更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                if let date = repo.netUpdatedAt { Text("网费更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                Text("学校页面核对缴费项目、金额并完成支付。账户余额不等同于待缴费用。")
-                    .font(.caption).foregroundStyle(.secondary)
-                ServiceLoadNotice(state: repo.cardState)
-                ServiceLoadNotice(state: repo.netState)
-            }
-            Section("校园网络") {
-                if let net = repo.netInfo {
-                    ForEach(net.usageFacts, id: \.0) { label, value in LabeledContent(label, value: value) }
-                } else { Text("尚未读取网络用量").foregroundStyle(.secondary) }
-                Button("充值网费", systemImage: "wifi") { openPayment() }
-            }
-            Section("宿舍电费") {
-                if let electric = repo.electricInfo, !electric.unbound {
-                    LabeledContent("房间", value: electric.roomLabel ?? electric.roomNo ?? "已绑定")
-                    LabeledContent("剩余电量", value: electric.remainKwh.map { $0.formatted(.number.precision(.fractionLength(0...2))) + " kWh" } ?? "未提供")
-                    if let time = electric.lastReadAt { LabeledContent("抄表时间", value: time) }
+            Section {
+                Picker("缴费分类", selection: $section) {
+                    Text("账户").tag("账户")
+                    Text("电费").tag("电费")
+                    Text("流水").tag("流水")
+                }.pickerStyle(.segmented).accessibilityIdentifier("payment.section")
+            }.listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+            if section == "账户" {
+                Section("校园账户") {
+                    LabeledContent("校园卡余额", value: money(repo.cardBalance?.balance))
+                    if let subsidy = repo.cardBalance?.subsidy { LabeledContent("补助余额", value: money(subsidy)) }
+                    LabeledContent("网费余额", value: money(repo.netInfo?.balance))
+                    if let date = repo.cardUpdatedAt { Text("校园卡更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    if let date = repo.netUpdatedAt { Text("网费更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    Text("学校页面核对缴费项目、金额并完成支付。账户余额不等同于待缴费用。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ServiceLoadNotice(state: repo.cardState)
+                    ServiceLoadNotice(state: repo.netState)
                 }
-                TextField("房间码（3 位宿舍 + 4 位寝室）", text: $room)
-                    .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($roomFocused).submitLabel(.search).onSubmit { queryRoom() }
-                Button("查询并记住房间", systemImage: "bolt") { queryRoom() }
-                    .disabled(!ElectricRoomKey.isValid(room) || (repo.electricState == .loading && !hasUnsavedRoom))
-                if hasUnsavedRoom {
-                    Text("请先查询新房间，再去缴费。").font(.caption).foregroundStyle(.secondary)
-                    if !repo.electricRoomCode.isEmpty {
-                        Button("恢复已保存的房间") { room = repo.electricRoomCode; roomFocused = false }
+                Section("校园网络") {
+                    if let net = repo.netInfo {
+                        ForEach(net.usageFacts, id: \.0) { label, value in LabeledContent(label, value: value) }
+                    } else { Text("尚未读取网络用量").foregroundStyle(.secondary) }
+                    Button("充值网费", systemImage: "wifi") { openPayment() }
+                }
+                Section("缴费服务") {
+                    Button("缴费项目", systemImage: "square.grid.2x2") { openPayment(path: "/openApplication") }
+                    Button("我的订单", systemImage: "list.clipboard") { openPayment(path: "/orders.html") }
+                    Button("缴费大厅首页", systemImage: "house") { openPayment() }
+                }
+            }
+            if section == "电费" {
+                Section("宿舍电费") {
+                    if let electric = repo.electricInfo, !electric.unbound {
+                        LabeledContent("房间", value: electric.roomLabel ?? electric.roomNo ?? "已绑定")
+                        LabeledContent("剩余电量", value: electric.remainKwh.map { $0.formatted(.number.precision(.fractionLength(0...2))) + " kWh" } ?? "未提供")
+                        if let time = electric.lastReadAt { LabeledContent("抄表时间", value: time) }
                     }
-                }
-                ServiceLoadNotice(state: repo.electricState)
-                if let warning = repo.electricWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
-                if let date = repo.electricUpdatedAt { Text("上次成功查询 " + date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                Button("缴纳电费", systemImage: "bolt.fill") { openPaymentURL(CampusPaymentEntry.electricity) }
-                    .disabled(hasUnsavedRoom)
-                if !repo.electricRoomCode.isEmpty {
-                    Text("缴费时沿用房间码 \(repo.electricRoomCode)，学校表单仍可修改。").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Section("校园卡月流水") {
-                HStack {
-                    Button { Task { await repo.shiftBillsMonth(-1) } } label: { Image(systemName: "chevron.left") }
-                        .accessibilityLabel("上个月").disabled(repo.billsState == .loading)
-                    Spacer()
-                    Text("\(String(repo.billsYear)) 年 \(repo.billsMonth) 月").font(.headline).monospacedDigit()
-                    Spacer()
-                    Button { Task { await repo.shiftBillsMonth(1) } } label: { Image(systemName: "chevron.right") }
-                        .accessibilityLabel("下个月").disabled(isCurrentMonth || repo.billsState == .loading)
-                }.buttonStyle(.borderless)
-                if !isCurrentMonth {
-                    Button("回到本月") {
-                        let current = NativePaymentPresentation.currentMonth()
-                        Task { await repo.loadBills(year: current.year, month: current.month) }
-                    }
-                }
-                TextField("搜索交易、地点、日期或金额", text: $billQuery)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Picker("交易类型", selection: $billFilter) {
-                    ForEach(PaymentBillFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
-                }.pickerStyle(.segmented)
-                if repo.billsState == .loaded, filteredBills.isEmpty {
-                    Text(repo.cardBills.isEmpty ? "该月没有流水记录" : "没有匹配的流水记录").foregroundStyle(.secondary)
-                }
-                ForEach(filteredBills) { bill in
-                    Button { selectedBill = bill } label: { HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(bill.subject).font(.subheadline).foregroundStyle(.primary)
-                            Text(bill.timeText).font(.caption).foregroundStyle(.secondary)
-                            if !bill.station.isEmpty { Text(bill.station).font(.caption).foregroundStyle(.secondary) }
+                    TextField("房间码（3 位宿舍 + 4 位寝室）", text: $room)
+                        .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($roomFocused).submitLabel(.search).onSubmit { queryRoom() }
+                    Button("查询并记住房间", systemImage: "bolt") { queryRoom() }
+                        .disabled(!ElectricRoomKey.isValid(room) || (repo.electricState == .loading && !hasUnsavedRoom))
+                    if hasUnsavedRoom {
+                        Text("请先查询新房间，再去缴费。").font(.caption).foregroundStyle(.secondary)
+                        if !repo.electricRoomCode.isEmpty {
+                            Button("恢复已保存的房间") { room = repo.electricRoomCode; roomFocused = false }
                         }
+                    }
+                    ServiceLoadNotice(state: repo.electricState)
+                    if let warning = repo.electricWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+                    if let date = repo.electricUpdatedAt { Text("上次成功查询 " + date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    Button("缴纳电费", systemImage: "bolt.fill") { openPaymentURL(CampusPaymentEntry.electricity) }
+                        .disabled(hasUnsavedRoom)
+                    if !repo.electricRoomCode.isEmpty {
+                        Text("缴费时沿用房间码 \(repo.electricRoomCode)，学校表单仍可修改。").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if section == "流水" {
+                Section("校园卡月流水") {
+                    HStack {
+                        Button { Task { await repo.shiftBillsMonth(-1) } } label: { Image(systemName: "chevron.left") }
+                            .accessibilityLabel("上个月").disabled(repo.billsState == .loading)
                         Spacer()
-                        Text(money(bill.amount)).monospacedDigit().foregroundStyle(bill.isRecharge ? Color.green : Color.primary)
-                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                    } }.buttonStyle(.plain)
+                        Text("\(String(repo.billsYear)) 年 \(repo.billsMonth) 月").font(.headline).monospacedDigit()
+                        Spacer()
+                        Button { Task { await repo.shiftBillsMonth(1) } } label: { Image(systemName: "chevron.right") }
+                            .accessibilityLabel("下个月").disabled(isCurrentMonth || repo.billsState == .loading)
+                    }.buttonStyle(.borderless)
+                    if !isCurrentMonth {
+                        Button("回到本月") {
+                            let current = NativePaymentPresentation.currentMonth()
+                            Task { await repo.loadBills(year: current.year, month: current.month) }
+                        }
+                    }
+                    TextField("搜索交易、地点、日期或金额", text: $billQuery)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Picker("交易类型", selection: $billFilter) {
+                        ForEach(PaymentBillFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
+                    }.pickerStyle(.segmented)
+                    if repo.billsState == .loaded, filteredBills.isEmpty {
+                        Text(repo.cardBills.isEmpty ? "该月没有流水记录" : "没有匹配的流水记录").foregroundStyle(.secondary)
+                    }
+                    ForEach(filteredBills) { bill in
+                        Button { selectedBill = bill } label: { HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(bill.subject).font(.subheadline).foregroundStyle(.primary)
+                                Text(bill.timeText).font(.caption).foregroundStyle(.secondary)
+                                if !bill.station.isEmpty { Text(bill.station).font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            Text(money(bill.amount)).monospacedDigit().foregroundStyle(bill.isRecharge ? Color.green : Color.primary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        } }.buttonStyle(.plain)
+                    }
+                    if repo.billsState == .loaded {
+                        Text("显示 \(filteredBills.count) 笔，共读取 \(repo.cardBills.count) 笔").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if repo.billTruncated { Label("该月记录较多，学校本次返回可能不完整", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
+                    if let warning = repo.billsWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+                    if let updated = repo.billsUpdatedAt { Text("上次成功查询 " + updated.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    Button("刷新所选月份", systemImage: "arrow.clockwise") { Task { await loadBills(force: true) } }
+                        .disabled(repo.billsState == .loading)
+                    ServiceLoadNotice(state: repo.billsState)
                 }
-                if repo.billsState == .loaded {
-                    Text("显示 \(filteredBills.count) 笔，共读取 \(repo.cardBills.count) 笔").font(.caption).foregroundStyle(.secondary)
-                }
-                if repo.billTruncated { Label("该月记录较多，学校本次返回可能不完整", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
-                if let warning = repo.billsWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
-                if let updated = repo.billsUpdatedAt { Text("上次成功查询 " + updated.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
-                Button("刷新所选月份", systemImage: "arrow.clockwise") { Task { await loadBills(force: true) } }
-                    .disabled(repo.billsState == .loading)
-                ServiceLoadNotice(state: repo.billsState)
             }
         }
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
@@ -122,7 +136,7 @@ struct NativePaymentView: View {
             if roomOwner != environment.session.requestEpoch {
                 for browser in paymentBrowsers.values { browser.close() }
                 paymentBrowsers = [:]; web = nil; selectedBill = nil
-                billQuery = ""; billFilter = .all
+                billQuery = ""; billFilter = .all; section = "账户"
                 room = repo.electricRoomCode
                 roomOwner = environment.session.requestEpoch
             }
@@ -194,8 +208,10 @@ struct NativeVPNView: View {
         Form {
             Section("访问状态") {
                 LabeledContent("网络", value: environment.session.networkAvailable ? (campus.map { $0 ? "校园网络可达" : "使用校外访问" } ?? "尚未检测") : "网络已断开")
-                LabeledContent("WebVPN 认证", value: ticket ? "已保存学校会话" : "未读取到学校会话")
-                if let checkedAt { LabeledContent("检测时间", value: checkedAt.formatted(date: .omitted, time: .shortened)) }
+                DisclosureGroup("连接详情") {
+                    LabeledContent("WebVPN 认证", value: ticket ? "已保存学校会话" : "未读取到学校会话")
+                    if let checkedAt { LabeledContent("检测时间", value: checkedAt.formatted(date: .omitted, time: .shortened)) }
+                }
                 if busy { ProgressView("正在检测网络…") }
                 Button("重新检测", systemImage: "arrow.clockwise") { Task { await check(force: true) } }.disabled(busy)
                 Button("更新 WebVPN 认证", systemImage: "person.badge.key") {
@@ -326,11 +342,10 @@ struct NativeAffairsView: View {
         List {
             Section {
                 NavigationLink { NativeAffairsDirectoryView() } label: { Label("办事服务中心", systemImage: "square.grid.2x2") }
-                Text("申请表单可在办事指南中开始填写，下方显示门户已返回的在办事项。")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextField("搜索事项或处理节点", text: $query)
             }
             Section("我的在办事项") {
+                TextField("搜索事项或处理节点", text: $query)
+                    .autocorrectionDisabled().textInputAutocapitalization(.never)
                 if let error = store.error {
                     Text(error).font(.footnote).foregroundStyle(.orange)
                     Button("重新读取办事进度") { Task { await store.retry(session: environment.session) } }

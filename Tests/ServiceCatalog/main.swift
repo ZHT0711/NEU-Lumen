@@ -18,6 +18,9 @@ let apps = [
     app("未分类应用", category: " \n"),
 ]
 let catalog = ServiceCatalog(apps: apps)
+precondition(catalog.ecodeURL.absoluteString == "https://ecode.neu.edu.cn/ecode/#/", "e-code falls back to the verified school site")
+precondition(NativeCampusService.allCases.allSatisfy { NativeCampusService.groups.contains($0.group) }, "every native service has a visible group")
+
 
 precondition(catalog.categories.reduce(0) { $0 + $1.count } == apps.count, "分类必须覆盖全部应用")
 precondition(catalog.categories.last == ServiceCategory(name: "其他服务", count: 1), "空分类应归入其他服务")

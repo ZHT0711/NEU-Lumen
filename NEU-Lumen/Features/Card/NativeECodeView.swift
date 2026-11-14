@@ -8,11 +8,9 @@ struct NativeECodeView: View {
     @State private var document: ECodeDocument?
     @State private var image: UIImage?
     @State private var observedAt: Date?
-    @State private var loadedAt: Date?
     @State private var showWebsite = false
     @State private var message: String?
     @State private var owner = UUID()
-    @State private var needsSchoolRefresh = false
     @State private var foreground = false
     private static let world = WKContentWorld.world(name: "NEULumen.ECode")
 
@@ -28,7 +26,7 @@ struct NativeECodeView: View {
                     VStack(spacing: 22) {
                         HStack(spacing: 12) {
                             Image("NEUEmblem").renderingMode(.template).resizable().scaledToFit().frame(width: 48, height: 48)
-                            NEUCalligraphy()
+                            NEUCalligraphy(width: 88)
                             Spacer(minLength: 0)
                         }.foregroundStyle(AppTheme.accent).accessibilityElement(children: .combine)
                         if browser.isLoading { ProgressView("正在读取学校校园码…") }
@@ -37,7 +35,7 @@ struct NativeECodeView: View {
                                 Image(uiImage: image).interpolation(.none).resizable().scaledToFit()
                                     .frame(maxWidth: 300).padding(18).background(.white)
                                     .accessibilityLabel("学校当前账号的校园码")
-                                Text(environment.session.user?.name ?? "").font(.title2.bold())
+                                Text(environment.session.user?.name ?? "").font(.title3.bold())
                                 ForEach(document?.facts ?? []) { fact in
                                     LabeledContent(fact.label, value: fact.value)
                                 }
@@ -54,13 +52,11 @@ struct NativeECodeView: View {
                             Button(link.title, systemImage: "qrcode") { Task { await open(link.url) } }
                                 .buttonStyle(.borderedProminent)
                         }
-                        HStack {
-                            Button("刷新校园码", systemImage: "arrow.clockwise") { refresh() }.disabled(browser.isLoading)
-                            Spacer()
-                            Button("学校页面", systemImage: "arrow.up.right.square") { showWebsite = true }
-                        }.buttonStyle(.bordered)
-                        Text("校园码由学校实时提供，保持联网。付款、通行权限和办理结果以学校系统为准。")
-                            .font(.footnote).foregroundStyle(.secondary)
+                        Button("刷新校园码", systemImage: "arrow.clockwise") { refresh() }
+                            .buttonStyle(.borderedProminent).controlSize(.large)
+                            .disabled(browser.isLoading)
+                        Text("保持联网，校园码随学校页面自动更新。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }.padding(20)
                 }
                 .background(Color(.systemGroupedBackground))
@@ -75,9 +71,8 @@ struct NativeECodeView: View {
         }
         .privacySensitive()
         .task(id: environment.session.requestEpoch) { await run() }
-        .onChange(of: browser.isLoading) { _, loading in
+        .onChange(of: browser.isLoading) { _, _ in
             clearCode()
-            if !loading { loadedAt = Date(); needsSchoolRefresh = false }
         }
         .onChange(of: browser.currentURL) { _, _ in clearCode() }
         .onChange(of: scenePhase, initial: true) { _, phase in
@@ -93,22 +88,20 @@ struct NativeECodeView: View {
             clearCode()
             if scenePhase == .active, environment.session.networkAvailable { refresh() }
         }
-        .onChange(of: showWebsite) { _, website in
+        .onChange(of: showWebsite) { _, _ in
             clearCode()
-            if !website { refresh() }
+            document = nil
+            message = nil
         }
         .onDisappear { owner = UUID(); clearCode(); document = nil; browser.close() }
     }
 
     private func clearCode() { image = nil; observedAt = nil }
     private func refresh() {
-        clearCode(); document = nil; loadedAt = nil
-        needsSchoolRefresh = false
-        // Foreground/network callbacks may precede the first GET or arrive while
-        // it is loading. Let that request finish instead of treating it as POST.
+        clearCode(); document = nil; message = nil
         guard !browser.isLoading, !browser.webView.isLoading, browser.webView.url != nil else { return }
-        needsSchoolRefresh = !browser.reloadReadOnlyDocument()
-        if needsSchoolRefresh { message = "请在学校页面刷新或重新进入校园码，再返回查看。" }
+        // A POST-backed page can still be read. Only confirmed GET documents are reloaded.
+        _ = browser.reloadReadOnlyDocument()
     }
 
     private func open(_ url: URL) async {
@@ -127,7 +120,6 @@ struct NativeECodeView: View {
         let session = environment.session, epoch = session.requestEpoch
         let account = session.user?.sid.isEmpty == false ? session.user!.sid : (session.user?.uid ?? "")
         clearCode(); document = nil; message = nil
-        needsSchoolRefresh = false
         browser.close()
         let browser = PortalBrowser()
         self.browser = browser
@@ -141,40 +133,35 @@ struct NativeECodeView: View {
         await browser.start(environment.repository.ecodeEntryURL, client: session.client, session: session)
         guard owner == runOwner, !Task.isCancelled else { return }
         while owner == runOwner, !Task.isCancelled, session.requestEpoch == epoch, session.phase == .loggedIn {
-            if !showWebsite, !needsSchoolRefresh, foreground, session.networkAvailable, !browser.isLoading, browser.error == nil,
+            if !showWebsite, foreground, session.networkAvailable, !browser.isLoading, browser.error == nil,
                let url = browser.webView.url, ECodeDocument.allows(WebVPN.unwrap(url) ?? url) {
-                // A conservative display limit is not a claim about the school's token validity.
-                // Re-read from the server instead of indefinitely presenting an unchanged DOM code.
-                if document?.state == "ready", let loadedAt, Date().timeIntervalSince(loadedAt) >= 30 {
-                    refresh()
-                } else {
-                    do {
-                        let raw = try await browser.webView.callAsyncJavaScript(ECodeDocument.reader,
-                            arguments: ["expectedAccount": account], in: nil, contentWorld: Self.world)
-                        guard owner == runOwner, session.requestEpoch == epoch,
-                              session.phase == .loggedIn, !Task.isCancelled else { return }
-                        guard browser.webView.url == url, !browser.isLoading,
-                              foreground, session.networkAvailable else {
-                            clearCode()
-                            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
-                            continue
-                        }
-                        let next = try JSONDecoder().decode(ECodeDocument.self, from: JSONSerialization.data(withJSONObject: raw ?? [:]))
-                        document = next
-                        if next.state == "ready", let png = next.png, png.hasPrefix("data:image/png;base64,"),
-                           let data = Data(base64Encoded: String(png.dropFirst(22))), let decoded = UIImage(data: data) {
-                            image = decoded; observedAt = Date(); message = nil
-                            if loadedAt == nil { loadedAt = Date() }
-                        } else {
-                            clearCode()
-                            message = next.state == "account" ? "学校页面账号与当前账号不一致，请核对学校登录。" :
-                                next.state == "login" ? "请先完成学校认证。" : "请在学校页面进入校园码，完成认证后会自动读取。"
-                        }
-                    } catch {
-                        guard owner == runOwner, session.requestEpoch == epoch, !Task.isCancelled else { return }
+                do {
+                    let raw = try await browser.webView.callAsyncJavaScript(ECodeDocument.reader,
+                        arguments: ["expectedAccount": account], in: nil, contentWorld: Self.world)
+                    guard owner == runOwner, session.requestEpoch == epoch,
+                          session.phase == .loggedIn, !Task.isCancelled else { return }
+                    guard browser.webView.url == url, !browser.isLoading,
+                          foreground, session.networkAvailable else {
                         clearCode()
-                        if !NetworkError.isCancellation(error) { message = "校园码暂未读取成功，请重试或在学校页面查看。" }
+                        do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+                        continue
                     }
+                    let next = try JSONDecoder().decode(ECodeDocument.self, from: JSONSerialization.data(withJSONObject: raw ?? [:]))
+                    let replaced = document?.png != next.png
+                    document = next
+                    if next.state == "ready", let png = next.png, png.hasPrefix("data:image/png;base64,"),
+                       let data = Data(base64Encoded: String(png.dropFirst(22))), let decoded = UIImage(data: data) {
+                        if image == nil || replaced { observedAt = Date() }
+                        image = decoded; message = nil
+                    } else {
+                        clearCode()
+                        message = next.state == "account" ? "学校页面账号与当前账号不一致，请核对学校登录。" :
+                            next.state == "login" ? "请先完成学校认证。" : "请在学校页面进入校园码，完成认证后会自动读取。"
+                    }
+                } catch {
+                    guard owner == runOwner, session.requestEpoch == epoch, !Task.isCancelled else { return }
+                    clearCode()
+                    if !NetworkError.isCancellation(error) { message = "校园码暂未读取成功，请重试或在学校页面查看。" }
                 }
             } else { clearCode() }
             do { try await Task.sleep(for: .seconds(1)) } catch { return }

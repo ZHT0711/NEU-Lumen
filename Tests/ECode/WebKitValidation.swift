@@ -65,6 +65,22 @@ func verifyECodeDocument(browser: PortalBrowser, base: URL) async throws {
     result = try await read()
     try require(result.state == "account" && result.png == nil, "a school account change removes all code pixels")
 
+    // Match the school's Vue template and v-qr image output, including a portrait
+    // outside the code container. All image bytes remain synthetic.
+    try await load(identity + #"<div class="avatar"><img id="portrait"></div><div class="qr-code"><span class="code"><canvas width="128" height="128"></canvas></span></div>"#)
+    _ = try await web.evaluateJavaScript("const c=document.querySelector('canvas');const i=new Image();i.src=c.toDataURL();document.getElementById('portrait').src=i.src;c.replaceWith(i)")
+    for _ in 0..<40 {
+        if try await web.evaluateJavaScript("Array.from(document.images).every(i=>i.complete && i.naturalWidth>0)") as? Bool == true { break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    result = try await read()
+    try require(result.state == "ready" && result.png != nil, "school .qr-code span.code image is read")
+    _ = try await web.evaluateJavaScript("document.querySelector('.qr-code').remove()")
+    try await rejects("the portrait is not treated as a campus code")
+    try await load(identity + #"<section class="qr_code"><canvas width="128" height="128"></canvas></section>"#)
+    result = try await read()
+    try require(result.state == "ready", "underscore QR container is supported")
+
     try await load(code)
     try await rejects("a code without a rendered account is not accepted")
     try await load(identity + "<p>工号：SYNTH-B</p>" + code)

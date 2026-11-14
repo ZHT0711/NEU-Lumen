@@ -48,10 +48,10 @@ class NativeServicesTests(unittest.TestCase):
             result=subprocess.run([str(executable)],capture_output=True,text=True,encoding='utf-8')
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
-    def test_glass_is_on_navigation_with_accessible_fallback(self):
+    def test_grouped_native_navigation_with_accessible_grid(self):
         source=(ROOT/'NEU-Lumen/Features/Services/NativeServicesCarousel.swift').read_text(encoding='utf-8')
-        for key in ['GlassEffectContainer','glassEffect(', 'accessibilityReduceTransparency','accessibilityReduceMotion',
-                    'colorSchemeContrast','minHeight: 44','tabViewStyle(.page','DisclosureGroup(isExpanded:', '@State private var expanded = false']:
+        for key in ['dynamicTypeSize', 'isAccessibilitySize', 'NativeCampusService.groups',
+                    'Menu("切换服务"', 'tabViewStyle(.page', 'accessibilityElement(children: .combine)']:
             self.assertIn(key,source)
         self.assertNotIn('Timer.publish',source)
 

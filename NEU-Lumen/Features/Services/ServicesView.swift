@@ -6,6 +6,7 @@ struct ServicesView: View {
     @State private var path: [AppDestination] = []
     @State private var showFavorites = false
     @State private var favoritesOnly = false
+    @State private var showDirectory = false
     @State private var query = ""
     @State private var selectedCategory: String?
     @State private var catalogReadFailed = false
@@ -33,21 +34,34 @@ struct ServicesView: View {
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    serviceHeader
-                    nativeStudyServices
+                LazyVStack(alignment: .leading, spacing: 24) {
                     searchField
-                    if keyword.isEmpty && !repo.hotSearch.isEmpty {
-                        hotChips
+                    if keyword.isEmpty {
+                        Picker("服务范围", selection: $showDirectory) {
+                            Text("校园服务").tag(false)
+                            Text("应用目录").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("services.scope")
                     }
-                    HStack {
-                        Toggle("只看收藏", isOn: $favoritesOnly).toggleStyle(.button)
-                        Spacer()
-                        Button("管理收藏") { showFavorites = true }
-                    }.font(.subheadline)
-                    categoryChips
-                    smartSearchCard
-                    appsSection
+                    if catalogReadFailed && !showDirectory && keyword.isEmpty {
+                        Label("应用目录更新失败，下拉可重试", systemImage: "exclamationmark.triangle")
+                            .font(.footnote).foregroundStyle(.orange)
+                    }
+                    if !showDirectory || !keyword.isEmpty { nativeStudyServices }
+                    if showDirectory || !keyword.isEmpty {
+                        if keyword.isEmpty && !repo.hotSearch.isEmpty { hotChips }
+                        HStack {
+                            Toggle("只看收藏", isOn: $favoritesOnly).toggleStyle(.button)
+                            Spacer()
+                            Button("管理收藏") { showFavorites = true }
+                        }.font(.subheadline)
+                        categoryChips
+                        appsSection
+                        smartSearchCard
+                    } else {
+                        favoriteAppsSection
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -60,6 +74,9 @@ struct ServicesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await loadCatalog(force: true) }
+            .onChange(of: showDirectory) { _, directory in
+                if !directory { selectedCategory = nil; favoritesOnly = false }
+            }
             .onChange(of: catalog.categories) { _, categories in
                 if let selectedCategory, !categories.contains(where: { $0.name == selectedCategory }) {
                     self.selectedCategory = nil
@@ -68,7 +85,7 @@ struct ServicesView: View {
             .task(id: environment.session.requestEpoch) {
                 if ownerEpoch != environment.session.requestEpoch {
                     ownerEpoch = environment.session.requestEpoch
-                    query = ""; selectedCategory = nil; favoritesOnly = false
+                    query = ""; selectedCategory = nil; favoritesOnly = false; showDirectory = false
                     path = []; showFavorites = false; searchFocused = false
                     catalogReadFailed = false; readingCatalog = false
                 }
@@ -93,35 +110,47 @@ struct ServicesView: View {
         }
     }
 
-    private var serviceHeader: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "square.grid.2x2.fill")
-                .font(.title2)
-                .foregroundStyle(AppTheme.accent)
-                .frame(width: 52, height: 52)
-                .background(AppTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 16))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("东大服务，一站直达")
-                    .font(.title3.bold())
-                Text("\(repo.apps.count) 个应用 · \(catalog.categories.count) 类校园服务")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var favoriteAppsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("常用应用").font(.headline)
+                Spacer()
+                Button("编辑") { showFavorites = true }.font(.subheadline)
             }
-            Spacer(minLength: 0)
+            let apps = repo.favorites.apps(in: repo.apps)
+            if apps.isEmpty {
+                Button("添加常用应用", systemImage: "plus") { showFavorites = true }
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            } else {
+                GlassCard {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 12)], spacing: 16) {
+                        ForEach(apps) { app in
+                            Button { open(app) } label: {
+                                VStack(spacing: 8) {
+                                    ServiceAppIcon(app: app).frame(width: 40, height: 40)
+                                    Text(app.name).font(.caption).foregroundStyle(.primary)
+                                        .lineLimit(2).multilineTextAlignment(.center)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 76)
+                            }.buttonStyle(.plain)
+                        }
+                    }.padding(16)
+                }
+            }
+            Button("浏览全部应用", systemImage: "arrow.right") { showDirectory = true }
+                .font(.subheadline).frame(minHeight: 44)
         }
-        .padding(.vertical, 8)
     }
 
     @ViewBuilder
     private var nativeStudyServices: some View {
-        if !favoritesOnly {
-            let services = NativeCampusService.allCases.filter {
-                keyword.isEmpty || ($0.title + $0.subtitle).localizedCaseInsensitiveContains(keyword)
-            }
-            if !services.isEmpty {
-                NativeServicesCarousel(services: services, searching: !keyword.isEmpty) { service in
-                    path.append(.nativeService(service))
-                }
+        let services = NativeCampusService.allCases.filter {
+            keyword.isEmpty || ($0.title + $0.subtitle).localizedCaseInsensitiveContains(keyword)
+        }
+        if !services.isEmpty {
+            NativeServicesCarousel(services: services, searching: !keyword.isEmpty) { service in
+                path.append(.nativeService(service))
             }
         }
     }
@@ -171,7 +200,7 @@ struct ServicesView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("搜索校园应用和学习服务", text: $query)
+            TextField("搜索服务和应用", text: $query)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .focused($searchFocused)
@@ -189,7 +218,7 @@ struct ServicesView: View {
             }
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// 智慧搜索入口：一键跳转智搜平台全校搜索（SSO 免登录）。
@@ -314,15 +343,11 @@ struct ServicesView: View {
                                 .padding(.horizontal, 4)
                             }
                             .buttonStyle(.plain)
-                            .overlay(alignment: .topTrailing) {
+                            .contextMenu {
                                 Button { repo.favorites.toggle(app) } label: {
-                                    Image(systemName: repo.favorites.contains(app) ? "star.fill" : "star")
-                                        .foregroundStyle(repo.favorites.contains(app) ? Color.orange : Color.secondary)
-                                        .frame(width: 32, height: 32)
-                                        .background(.regularMaterial, in: Circle())
+                                    Label(repo.favorites.contains(app) ? "取消收藏" : "添加收藏",
+                                          systemImage: repo.favorites.contains(app) ? "star.slash" : "star")
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel((repo.favorites.contains(app) ? "取消收藏" : "收藏") + app.name)
                             }
                         }
                     }

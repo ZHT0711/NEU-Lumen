@@ -72,9 +72,12 @@ struct ECodeDocument: Decodable {
       // A scoped login cookie alone does not prove the rendered code's owner.
       if(identities.some(s=>s!==expectedAccount)) return empty('account');
       if(!expectedAccount || !identities.includes(expectedAccount)) continue;
-      const candidates=Array.from(doc.querySelectorAll('[id*="qrcode" i] canvas,[id*="qrcode" i] img,[class*="qrcode" i] canvas,[class*="qrcode" i] img,canvas[id*="qrcode" i],img[id*="qrcode" i],img[alt="校园码"],img[alt="e码通"],img[alt="付款码"],img[alt="身份码"]')).filter(visible);
+      // The school's Vue v-qr directive renders an image inside .qr-code > .code.
+      const codeSelector='[id*="qrcode" i],[class*="qrcode" i],[id*="qr-code" i],[class*="qr-code" i],[id*="qr_code" i],[class*="qr_code" i]';
+      const candidates=Array.from(doc.querySelectorAll('canvas,img')).filter(el=>
+        visible(el) && (el.closest(codeSelector) || /^(?:校园码|e码通|付款码|身份码)$/i.test(clean(el.getAttribute('alt')))));
       for(const el of candidates) {
-        const container=el.parentElement?.closest('[id*="qrcode" i],[class*="qrcode" i],figure,[role="img"]') || el.parentElement;
+        const container=el.parentElement?.closest(codeSelector+',figure,[role="img"]') || el.parentElement;
         const local=container && !['BODY','HTML'].includes(container.tagName) ? visibleText(container) : '';
         const description=clean([el.getAttribute('alt'),el.getAttribute('aria-label'),el.getAttribute('title'),local].join(' '));
         if(/扫码登录|登录二维码|二维码登录|统一身份认证/.test(description)) continue;

@@ -31,11 +31,12 @@ struct HomeView: View {
                     if repo.usedOfflineFallback {
                         offlineBanner
                     }
-                    nextClassBanner
-                    cardEntrySection
-                    quickAppsSection
                     todaySection
-                    dataCardsSection
+                    quickAppsSection
+                    cardEntrySection
+                    if !repo.dataCards.isEmpty {
+                        DisclosureGroup("校园数据") { dataCardsSection }
+                    }
                     if !repo.todos.isEmpty {
                         todosSection
                     }
@@ -46,24 +47,7 @@ struct HomeView: View {
                 .padding(.bottom, 32)
             }
             .tracksTabBarScrolling()
-            .background {
-                Color(.systemGroupedBackground)
-                    .overlay(alignment: .top) {
-                        LinearGradient(
-                            colors: [AppTheme.accent.opacity(0.09), .clear],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                        .frame(height: 340)
-                        .overlay(alignment: .topTrailing) {
-                            CampusLandmarkArt(campus: repo.campus)
-                                .stroke(campusInk.opacity(0.045), lineWidth: 1)
-                                .frame(width: 360, height: 240)
-                                .offset(x: 70, y: 120)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    .ignoresSafeArea()
-            }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("东大 · Lumen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -126,7 +110,7 @@ struct HomeView: View {
     private var campusHeader: some View {
         Group {
             TimelineView(.periodic(from: .now, by: 60)) { context in
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 18) {
                     HStack(spacing: 10) {
                         Image("NEUEmblem")
                             .renderingMode(.template)
@@ -140,17 +124,12 @@ struct HomeView: View {
                                 .lineLimit(1).minimumScaleFactor(0.7)
                         }
                         Spacer(minLength: 0)
-                        Text("1923")
-                            .font(.system(.title3, design: .serif).weight(.light))
-                            .opacity(0.5)
                     }
                     .foregroundStyle(campusInk)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(greeting(at: context.date))
-                            .font(.title2.bold())
+                            .font(.title3.bold())
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("在东大，让每一天都有所收获。")
-                            .font(.subheadline).foregroundStyle(.secondary)
                     }
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .bottom) {
@@ -164,7 +143,7 @@ struct HomeView: View {
                         }
                     }
                 }
-                .padding(22)
+                .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
                     ZStack {
@@ -244,46 +223,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    @ViewBuilder
-    private var nextClassBanner: some View {
-        if let next = repo.nextCourse() {
-            let ongoing = next.isOngoing
-            Button {
-                selection = .schedule
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: ongoing ? "figure.run" : "book.fill")
-                        .font(.title3)
-                        .foregroundStyle(campusInk)
-                        .frame(width: 44, height: 44)
-                        .background(AppTheme.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(ongoing ? "正在上课" : "下一节课")
-                            .font(.caption)
-                            .foregroundStyle(campusInk)
-                        Text("\(next.slot.name) · \(Semester.hm(next.slot.startMinutes))")
-                            .font(.headline)
-                            .lineLimit(2)
-                        if !next.slot.room.isEmpty {
-                            Text(next.slot.room)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .foregroundStyle(.primary)
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20))
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("打开课表")
-        }
     }
 
     private var dataCardsSection: some View {
@@ -374,58 +313,52 @@ struct HomeView: View {
     }
 
     private var quickAppsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // 收藏顺序与前八项规则不变，只避免空态和网格重复解析目录。
+        VStack(alignment: .leading, spacing: 12) {
             let favorites = repo.favorites.apps(in: repo.apps)
             HStack {
                 sectionHeader("常用应用", icon: "square.grid.2x2")
                 Spacer()
-                Button("编辑") { showFavorites = true }.font(.caption.weight(.medium))
-                Button { selection = .services } label: {
-                    HStack(spacing: 4) {
-                        Text("全部服务")
-                        Image(systemName: "arrow.up.right")
-                    }
-                    .font(.caption.weight(.medium))
-                }
+                Menu {
+                    Button("编辑常用应用", systemImage: "star") { showFavorites = true }
+                    Button("全部服务", systemImage: "square.grid.2x2") { selection = .services }
+                } label: {
+                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                }.accessibilityLabel("管理常用应用")
             }
             if favorites.isEmpty {
-                Button("添加常用应用") { showFavorites = true }.font(.subheadline).padding()
-            }
-            GlassCard {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
-                    ForEach(Array(favorites.prefix(8))) { app in
-                        Button {
-                            open(app)
-                        } label: {
-                            VStack(spacing: 6) {
-                                ServiceAppIcon(app: app)
-                                    .frame(width: 40, height: 40)
-                                Text(app.name)
-                                    .font(.caption2)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.center)
-                                    .frame(minHeight: 28, alignment: .top)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 4)
+                Button("添加常用应用", systemImage: "plus") { showFavorites = true }
+                    .font(.subheadline).frame(maxWidth: .infinity, minHeight: 60)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+            } else {
+                GlassCard {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
+                        ForEach(Array(favorites.prefix(4))) { app in
+                            Button { open(app) } label: {
+                                VStack(spacing: 8) {
+                                    ServiceAppIcon(app: app).frame(width: 40, height: 40)
+                                    Text(app.name).font(.caption).foregroundStyle(.primary)
+                                        .lineLimit(2).multilineTextAlignment(.center)
+                                        .frame(minHeight: 28, alignment: .top)
+                                }
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                            }.buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                    }
+                    }.padding(12)
                 }
-                .padding(12)
             }
         }
     }
 
     private var todosSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("办事动态", icon: "checklist")
+            HStack {
+                sectionHeader("办事动态", icon: "checklist")
+                Spacer()
+                Button("全部") { path.append(.nativeService(.affairs)) }.font(.subheadline)
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 10) {
-                    ForEach(repo.todos) { todo in
+                    ForEach(repo.todos.prefix(2)) { todo in
                         Button {
                             if let url = PortalLink.resolve(todo.url) {
                                 path.append(.web(url))
@@ -460,7 +393,11 @@ struct HomeView: View {
 
     private var newsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("校园资讯", icon: "newspaper")
+            HStack {
+                sectionHeader("校园资讯", icon: "newspaper")
+                Spacer()
+                Button("更多") { path.append(.nativeService(.news)) }.font(.subheadline)
+            }
             GlassCard {
                 VStack(spacing: 0) {
                     if repo.news.isEmpty {
@@ -473,7 +410,7 @@ struct HomeView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 20)
                     } else {
-                        ForEach(Array(repo.news.enumerated()), id: \.element.id) { index, item in
+                        ForEach(Array(repo.news.prefix(3).enumerated()), id: \.element.id) { index, item in
                             Button {
                                 if let url = PortalLink.resolve(item.url) {
                                     path.append(.web(url))
@@ -482,7 +419,7 @@ struct HomeView: View {
                                 NewsRow(item: item)
                             }
                             .buttonStyle(.plain)
-                            if index < repo.news.count - 1 {
+                            if index < min(repo.news.count, 3) - 1 {
                                 Divider().padding(.leading, 14)
                             }
                         }

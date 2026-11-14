@@ -83,7 +83,7 @@ launch_screenshot_page() {
 }
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in native-ecode home home-nanhu schedule services services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
+for SCREEN in native-ecode home home-nanhu schedule services services-directory services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-electricity native-bills native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
   launch_screenshot_page "$SCREEN"
   if [[ "$SCREEN" == "native-ecode" ]]; then wait_ui_marker ecode-screenshot.txt 60; fi
   sleep 1
@@ -227,7 +227,7 @@ sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
 swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-for SCREEN in services services-art grades mooc chaoxing native-payment native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
+for SCREEN in services services-art grades mooc chaoxing native-payment native-electricity native-bills native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
   "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
 done
 for KIND in nextCourse custom electricBalance; do

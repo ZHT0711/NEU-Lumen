@@ -1,5 +1,7 @@
 # 素材来源
 
+应用图标使用内置 imagegen 生成，设计为深蓝圆章、光束 L 字、山峰与书页水纹，导出为 1024 像素 RGB PNG。
+
 校园建筑由 SwiftUI Shape 绘制；外观参考学校公开照片，位置为视觉编排。校徽及学院图片仅作界面展示。
 
 首页书法校名使用 README 同一份学校原版标识，界面裁出校名部分并保留原始比例，不用系统字体仿写。来源：[学校官网标识](https://www.neu.edu.cn/images/libpic/logo.png)、[东大标识](https://www.neu.edu.cn/xygk/ddbs.htm)。
