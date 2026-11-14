@@ -58,6 +58,7 @@ struct AcademicServicesView: View {
         .searchable(text: $query, prompt: "搜索学校功能、栏目或办理事项")
         .task(id: environment.session.requestEpoch) { category = "全部"; page = nil; await repo.loadAcademicServices() }
         .refreshable { await repo.loadAcademicServices(force: true) }
+        .onChange(of: categories) { _, names in if !names.contains(category) { category = "全部" } }
         .onChange(of: environment.session.networkRevision) { _, _ in
             if repo.academicServicesError != nil || repo.academicServicesState == .loading { Task { await repo.loadAcademicServices(force: true) } }
         }

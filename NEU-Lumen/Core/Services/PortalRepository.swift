@@ -142,6 +142,7 @@ final class PortalRepository {
         set {
             guard let context = requestContext else { return }
             let room = ElectricRoomKey.normalize(newValue)
+            guard room.isEmpty || ElectricRoomKey.isValid(room) else { return }
             guard room != electricRoom else { return }
             electricTask?.cancel()
             electricTask = nil

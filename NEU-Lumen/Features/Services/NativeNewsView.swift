@@ -12,15 +12,39 @@ final class NativeNewsStore {
     var keyword = ""
     private var page = 0
     private var request = UUID()
+    private var ownerEpoch: UUID?
+    private var loadedQuery: Query?
+    private var retryFromFirstPage = true
+
+    private struct Query: Equatable {
+        let channel: String
+        let keyword: String
+    }
+
+    var hasLoaded: Bool { loadedQuery != nil }
+
+    /// Keep a search while switching services, but never carry it across account sessions.
+    @discardableResult
+    func bind(to epoch: UUID) -> Bool {
+        guard ownerEpoch != epoch else { return false }
+        clear()
+        ownerEpoch = epoch
+        return true
+    }
 
     func load(session: SessionStore, reset: Bool) async {
         guard session.phase == .loggedIn else { return }
+        bind(to: session.requestEpoch)
         let epoch = session.requestEpoch, token = UUID()
         request = token
         busy = true; error = nil
-        if reset { page = 0; items = []; hasMore = false }
-        let target = page + 1
         let query = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedQuery = Query(channel: channelID, keyword: query)
+        // A failed refresh keeps the current list; a different search must not show old matches.
+        if let loadedQuery, loadedQuery != requestedQuery {
+            items = []; page = 0; hasMore = false; self.loadedQuery = nil
+        }
+        retryFromFirstPage = reset || loadedQuery == nil
         defer { if request == token { busy = false } }
         do {
             let options = channels.isEmpty ? try await session.client.fetchNewsChannels() : channels
@@ -29,10 +53,16 @@ final class NativeNewsStore {
             let channel = options.first { $0.id == channelID } ?? options.first { $0.name == "东大要闻" } ?? options.first
             guard let channel else { throw NetworkError(message: "学校暂未返回可用的资讯频道") }
             channelID = channel.id
+            let selectedQuery = Query(channel: channel.id, keyword: query)
+            let replacing = reset || loadedQuery != selectedQuery
+            retryFromFirstPage = replacing
+            let target = replacing ? 1 : page + 1
             let result = try await session.client.fetchNews(pageSize: 30, channel: channel, page: target, keyword: query)
             guard session.requestEpoch == epoch, session.phase == .loggedIn, request == token, !Task.isCancelled else { return }
-            var seen = Set(items.map(\.id))
-            items += result.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
+            var seen = Set(replacing ? [] : items.map(\.id))
+            let unique = result.filter { !$0.id.isEmpty && seen.insert($0.id).inserted }
+            items = replacing ? unique : items + unique
+            loadedQuery = selectedQuery
             page = target; hasMore = result.count == 30
         } catch {
             guard session.requestEpoch == epoch, request == token, !Task.isCancelled else { return }
@@ -40,9 +70,14 @@ final class NativeNewsStore {
         }
     }
 
-    func clear() {
+    func retry(session: SessionStore) async {
+        await load(session: session, reset: retryFromFirstPage)
+    }
+
+    private func clear() {
         request = UUID(); channels = []; items = []; page = 0
         channelID = ""; keyword = ""; error = nil; busy = false; hasMore = false
+        loadedQuery = nil; retryFromFirstPage = true
     }
 }
 
@@ -52,6 +87,7 @@ struct NativeNewsView: View {
     @State private var store = NativeNewsStore()
     @State private var article: NativeServiceWebLink?
     @State private var draft = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         @Bindable var store = store
@@ -60,6 +96,8 @@ struct NativeNewsView: View {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索学校资讯", text: $draft).submitLabel(.search)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($searchFocused)
                         .onSubmit { search() }
                     if !draft.isEmpty {
                         Button("清除", systemImage: "xmark.circle.fill") { draft = ""; search() }
@@ -72,14 +110,18 @@ struct NativeNewsView: View {
                         ForEach(store.channels) { Text($0.name).tag($0.id) }
                     }
                     .onChange(of: store.channelID) { old, new in
-                        if !old.isEmpty, old != new, active { Task { await load(reset: true) } }
+                        if !old.isEmpty, !new.isEmpty, old != new, active { Task { await load(reset: true) } }
                     }
                 }
             } footer: { Text("新闻列表来自学校门户。点开资讯可查看学校发布的完整图文与附件。") }
             if let error = store.error {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
-                    Button("重试") { Task { await load(reset: store.items.isEmpty) } }
+                    Button("重试") { Task { await store.retry(session: environment.session) } }.disabled(store.busy)
+                    if !store.items.isEmpty {
+                        Text("已保留上次读取的资讯，重试将继续刚才的查询。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             if store.busy, store.items.isEmpty { ProgressView("正在读取校园资讯…") }
@@ -107,22 +149,30 @@ struct NativeNewsView: View {
                 }
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .refreshable { await load(reset: true) }
         .task(id: "\(active)|\(environment.session.requestEpoch)") {
-            if active { store.clear(); draft = ""; await load(reset: true) }
+            if store.bind(to: environment.session.requestEpoch) { draft = "" }
+            if active, !store.hasLoaded { await load(reset: true) }
         }
-        .onChange(of: environment.session.requestEpoch) { _, _ in
-            if !active { store.clear() }
-            article = nil; draft = ""
+        .onChange(of: environment.session.requestEpoch) { _, epoch in
+            store.bind(to: epoch)
+            article = nil; draft = ""; searchFocused = false
+        }
+        .onChange(of: active) { _, value in
+            if !value { searchFocused = false }
         }
         .onChange(of: environment.session.networkRevision) { _, _ in
-            if active, store.error != nil || store.busy { Task { await load(reset: store.items.isEmpty) } }
+            if active, store.error != nil || store.busy {
+                Task { await store.retry(session: environment.session) }
+            }
         }
         .sheet(item: $article) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
     }
 
     private func load(reset: Bool) async { await store.load(session: environment.session, reset: reset) }
     private func search() {
+        searchFocused = false
         store.keyword = draft
         Task { await load(reset: true) }
     }

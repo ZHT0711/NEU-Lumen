@@ -8,6 +8,11 @@ struct ServicesView: View {
     @State private var favoritesOnly = false
     @State private var query = ""
     @State private var selectedCategory: String?
+    @State private var catalogReadFailed = false
+    @State private var readingCatalog = false
+    @State private var ownerEpoch: UUID?
+    @State private var catalogRequest = UUID()
+    @FocusState private var searchFocused: Bool
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 76
 
     private var repo: PortalRepository {
@@ -54,14 +59,21 @@ struct ServicesView: View {
             .navigationTitle("服务大厅")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
+            .refreshable { await loadCatalog(force: true) }
             .onChange(of: catalog.categories) { _, categories in
                 if let selectedCategory, !categories.contains(where: { $0.name == selectedCategory }) {
                     self.selectedCategory = nil
                 }
             }
-            .task(id: environment.session.user?.sid.isEmpty == false ? environment.session.user?.sid : environment.session.user?.uid) {
+            .task(id: environment.session.requestEpoch) {
+                if ownerEpoch != environment.session.requestEpoch {
+                    ownerEpoch = environment.session.requestEpoch
+                    query = ""; selectedCategory = nil; favoritesOnly = false
+                    path = []; showFavorites = false; searchFocused = false
+                    catalogReadFailed = false; readingCatalog = false
+                }
                 await repo.ensureLoadedForCurrentUser()
-                await repo.loadAppsIfNeeded()
+                await loadCatalog(force: false)
                 await repo.loadHotSearchIfNeeded()
             }
             .navigationDestination(for: AppDestination.self) { dest in
@@ -72,6 +84,8 @@ struct ServicesView: View {
                     CardView()
                 case .academic:
                     AcademicCenterView()
+                case .ecode:
+                    NativeECodeView()
                 case .nativeService(let service):
                     NativeServiceHost(initial: service)
                 }
@@ -160,12 +174,16 @@ struct ServicesView: View {
             TextField("搜索校园应用和学习服务", text: $query)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .focused($searchFocused)
+                .submitLabel(.search)
+                .onSubmit { searchFocused = false }
             if !query.isEmpty {
                 Button {
                     query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.tertiary)
+                        .frame(width: 44, height: 44)
                 }
                 .accessibilityLabel("清除搜索")
             }
@@ -234,6 +252,15 @@ struct ServicesView: View {
 
     private var appsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if catalogReadFailed {
+                HStack(alignment: .top, spacing: 12) {
+                    Label(repo.apps.isEmpty ? "应用目录未能读取" : "应用目录更新失败，已保留现有应用", systemImage: "exclamationmark.triangle")
+                        .font(.footnote).foregroundStyle(.orange)
+                    Spacer(minLength: 0)
+                    Button("重试") { Task { await loadCatalog(force: true) } }
+                        .font(.footnote).disabled(readingCatalog)
+                }
+            }
             // 标题、空态与网格使用同一轮筛选结果；下一次构建仍读取最新状态。
             let apps = filtered
             HStack {
@@ -308,5 +335,18 @@ struct ServicesView: View {
     private func open(_ app: PortalApp) {
         guard let destination = AppDestination.service(app) else { return }
         path.append(destination)
+    }
+
+    private func loadCatalog(force: Bool) async {
+        let epoch = environment.session.requestEpoch
+        let request = UUID()
+        catalogRequest = request
+        readingCatalog = true
+        defer {
+            if environment.session.requestEpoch == epoch, catalogRequest == request { readingCatalog = false }
+        }
+        let loaded = await repo.loadAppsIfNeeded(force: force)
+        guard environment.session.requestEpoch == epoch, catalogRequest == request, !Task.isCancelled else { return }
+        catalogReadFailed = !loaded
     }
 }

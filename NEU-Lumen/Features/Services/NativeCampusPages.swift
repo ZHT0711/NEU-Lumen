@@ -6,7 +6,10 @@ struct NativePaymentView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var web: NativeServiceWebLink?
     @State private var room = ""
+    @State private var roomOwner: UUID?
+    @FocusState private var roomFocused: Bool
     private var repo: PortalRepository { environment.repository }
+    private var hasUnsavedRoom: Bool { ElectricRoomKey.normalize(room) != repo.electricRoomCode }
     var body: some View {
         Form {
             Section("缴费服务") {
@@ -37,13 +40,25 @@ struct NativePaymentView: View {
                     LabeledContent("剩余电量", value: electric.remainKwh.map { $0.formatted(.number.precision(.fractionLength(0...2))) + " kWh" } ?? "未提供")
                     if let time = electric.lastReadAt { LabeledContent("抄表时间", value: time) }
                 }
-                TextField("房间码", text: $room).textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("绑定并查询", systemImage: "bolt") {
-                    repo.electricRoomCode = room
-                    Task { await repo.loadElectric(force: true) }
-                }.disabled(room.trimmingCharacters(in: .whitespaces).isEmpty)
+                TextField("房间码（3 位宿舍 + 4 位寝室）", text: $room)
+                    .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .focused($roomFocused).submitLabel(.search).onSubmit { queryRoom() }
+                Button("查询并记住房间", systemImage: "bolt") { queryRoom() }
+                    .disabled(!ElectricRoomKey.isValid(room) || (repo.electricState == .loading && !hasUnsavedRoom))
+                if hasUnsavedRoom {
+                    Text("请先查询新房间，再去缴费。").font(.caption).foregroundStyle(.secondary)
+                    if !repo.electricRoomCode.isEmpty {
+                        Button("恢复已保存的房间") { room = repo.electricRoomCode; roomFocused = false }
+                    }
+                }
                 ServiceLoadNotice(state: repo.electricState)
+                if let warning = repo.electricWarning { Text(warning).font(.caption).foregroundStyle(.orange) }
+                if let date = repo.electricUpdatedAt { Text("上次成功查询 " + date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
                 Button("缴纳电费", systemImage: "bolt.fill") { web = NativeServiceWebLink(url: CampusPaymentEntry.electricity) }
+                    .disabled(hasUnsavedRoom)
+                if !repo.electricRoomCode.isEmpty {
+                    Text("缴费时沿用房间码 \(repo.electricRoomCode)，学校表单仍可修改。").font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("校园卡本月流水") {
                 if repo.cardBills.isEmpty { Text("尚无已读取的本月流水").foregroundStyle(.secondary) }
@@ -63,14 +78,28 @@ struct NativePaymentView: View {
         }
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
             guard active else { return }
-            room = repo.electricRoomCode
+            await repo.ensureLoadedForCurrentUser()
+            if roomOwner != environment.session.requestEpoch {
+                room = repo.electricRoomCode
+                roomOwner = environment.session.requestEpoch
+            }
             await repo.loadCardOverview()
             await loadBills()
+        }
+        .onChange(of: repo.electricRoomCode) { previous, current in
+            if room.isEmpty || ElectricRoomKey.normalize(room) == previous { room = current }
         }
         .refreshable { await repo.loadCardOverview(force: true); await loadBills() }
         .sheet(item: $web) { item in NavigationStack { PortalWebViewScreen(url: item.url, nativeService: .payment) } }
     }
     private func money(_ value: Double?) -> String { value.map { $0.formatted(.currency(code: "CNY")) } ?? "未读取" }
+    private func queryRoom() {
+        guard ElectricRoomKey.isValid(room), repo.electricState != .loading || hasUnsavedRoom else { return }
+        repo.electricRoomCode = room
+        room = repo.electricRoomCode
+        roomFocused = false
+        Task { await repo.loadElectric(force: true) }
+    }
     private func openPayment(path: String? = nil) {
         let entry = NativeCampusService.payment.entryURL(apps: repo.apps)
         web = NativeServiceWebLink(url: path.flatMap { URL(string: $0, relativeTo: entry)?.absoluteURL } ?? entry)

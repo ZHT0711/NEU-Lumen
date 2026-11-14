@@ -1,14 +1,36 @@
 """Native routing/UI source contracts plus execution of the shipped Coremail reader."""
 from pathlib import Path
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 ROOT=Path(__file__).resolve().parents[1]
 
 class NativeServicesTests(unittest.TestCase):
+    def test_electricity_room_prefill(self):
+        result=subprocess.run(['node',str(ROOT/'Tests/Learning/electricity-prefill.mjs')],capture_output=True,text=True,encoding='utf-8')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
     def test_coremail_script(self):
         result=subprocess.run(['node',str(ROOT/'Tests/Learning/native-mail.mjs')],capture_output=True,text=True,encoding='utf-8')
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    @unittest.skipUnless(shutil.which('swiftc'), 'Swift compiler is unavailable')
+    def test_news_refresh_retry_and_search_ownership(self):
+        source=(ROOT/'NEU-Lumen/Features/Services/NativeNewsView.swift').read_text(encoding='utf-8')
+        store=source.split('struct NativeNewsView:',1)[0].replace('import SwiftUI','import Foundation')
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)
+            (path/'NativeNewsStore.swift').write_text(store,encoding='utf-8')
+            executable=path/'native-news-tests'
+            result=subprocess.run(['swiftc','-swift-version','5','-parse-as-library',str(path/'NativeNewsStore.swift'),
+                                   str(ROOT/'Tests/NativeNews/main.swift'),'-o',str(executable)],
+                                  capture_output=True,text=True,encoding='utf-8')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertNotRegex(result.stdout+result.stderr,r'(?im)\bwarning:')
+            result=subprocess.run([str(executable)],capture_output=True,text=True,encoding='utf-8')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
     def test_glass_is_on_navigation_with_accessible_fallback(self):
         source=(ROOT/'NEU-Lumen/Features/Services/NativeServicesCarousel.swift').read_text(encoding='utf-8')

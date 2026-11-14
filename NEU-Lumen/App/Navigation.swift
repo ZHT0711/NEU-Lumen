@@ -5,6 +5,7 @@ enum AppDestination: Hashable {
     case web(URL)
     case card
     case academic
+    case ecode
     case nativeService(NativeCampusService)
 
     /// 门户应用和收藏始终使用学校提供的原始地址。

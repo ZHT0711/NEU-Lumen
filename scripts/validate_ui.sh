@@ -78,8 +78,9 @@ launch_screenshot_page() {
 }
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-for SCREEN in home home-nanhu schedule services services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
+for SCREEN in home home-nanhu schedule services services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications native-ecode; do
   launch_screenshot_page "$SCREEN"
+  if [[ "$SCREEN" == "native-ecode" ]]; then wait_ui_marker ecode-screenshot.txt 60; fi
   sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done

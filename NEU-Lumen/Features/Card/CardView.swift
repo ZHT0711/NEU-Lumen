@@ -281,6 +281,7 @@ struct CardView: View {
             sectionHeader("电费", icon: "bolt.fill")
             Button("缴纳电费", systemImage: "bolt.fill") { electricityWeb = true }
                 .buttonStyle(.bordered).frame(minHeight: 44)
+                .disabled(editingRoom && ElectricRoomKey.normalize(roomDraft) != repo.electricRoomCode)
             GlassCard {
                 VStack(alignment: .leading, spacing: 10) {
                     if editingRoom || repo.electricRoomCode.isEmpty {
@@ -289,13 +290,16 @@ struct CardView: View {
                                 .keyboardType(.numbersAndPunctuation)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                            Button("保存") {
+                            Button("查询") {
                                 repo.electricRoomCode = roomDraft
                                 roomDraft = repo.electricRoomCode
                                 editingRoom = false
                                 Task { await repo.loadElectric(force: true) }
                             }
                             .disabled(!ElectricRoomKey.isValid(roomDraft))
+                            if editingRoom {
+                                Button("取消") { roomDraft = repo.electricRoomCode; editingRoom = false }
+                            }
                         }
                         .font(.subheadline)
                     } else {
@@ -338,7 +342,7 @@ struct CardView: View {
                                     }
                                 }
                                 if let read = info.lastReadAt, !read.isEmpty {
-                                    Text("抄表时间 \(read) · 单价 0.51 元/度")
+                                    Text("抄表时间 \(read)")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }

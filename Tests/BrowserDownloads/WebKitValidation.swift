@@ -368,5 +368,75 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     try require(result["activated"] as? Bool == true, "school input-button query is usable")
     let academicClicks = try await web.evaluateJavaScript("window.academicClicks") as? Int
     try require(academicClicks == 1, "academic handler executes exactly once")
+    let classroomHTML = #"""
+    <!doctype html><meta charset="utf-8"><title>Synthetic empty classroom</title>
+    <label>校区<select id="campus" onchange="document.getElementById('building').innerHTML=this.value==='north'?'<option value=n1>合成北区一号楼</option>':'<option value=s1>合成南区一号楼</option>'"><option value="north">合成北校区</option><option value="south">合成南校区</option></select></label>
+    <label>教学楼<select id="building"><option value="n1">合成北区一号楼</option></select></label>
+    <label>查询日期<input id="day" type="date" value="2026-11-14"></label>
+    <label>节次<select id="periods" multiple><option value="1">第一节</option><option value="2">第二节</option><option value="3" disabled>停用节次</option></select></label>
+    <div class="bh-form-item"><label class="bh-form-label">教室类型</label><div id="classroomType" class="jqx-dropdownlist" role="combobox" aria-controls="classroomChoices" onclick="document.getElementById('classroomChoices').hidden=false"><div id="dropdownlistContentclassroomType">请选择教室类型</div></div></div>
+    <div id="classroomChoices" hidden><div role="option" data-value="normal" onclick="document.getElementById('dropdownlistContentclassroomType').textContent=this.textContent;this.parentNode.hidden=true">合成普通教室</div><div role="option" data-value="lab" aria-disabled="true">合成停用教室</div></div>
+    <button onclick="window.classroomQueries=(window.classroomQueries||0)+1;document.getElementById('result').textContent=document.getElementById('building').value">查询</button>
+    <table><thead><tr><th>空闲教室</th></tr></thead><tbody><tr><td id="result">尚未查询</td></tr></tbody></table>
+    """#
+    web.loadHTMLString(classroomHTML, baseURL: base.appendingPathComponent("synthetic-classrooms"))
+    for _ in 0..<200 {
+        if web.title == "Synthetic empty classroom" && !web.isLoading { break }
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    snapshot = try await read()
+    guard let campus = snapshot.fields.first(where: { $0.label == "校区" }) else { throw NetworkError(message: "Missing classroom campus") }
+    result = try await call("change", token: snapshot.token, action: campus.id, values: [campus.id: "south"])
+    try require(result["filled"] as? Bool == true, "native SELECT changes use school dependent-field handler")
+    snapshot = try await read()
+    try require(snapshot.fields.first(where: { $0.label == "教学楼" })?.options.first?.value == "s1", "campus change refreshes building options")
+    try require(snapshot.fields.first(where: { $0.label == "查询日期" })?.kind == "date", "school date is presented as a native date field")
+    guard let periods = snapshot.fields.first(where: { $0.label == "节次" }) else { throw NetworkError(message: "Missing classroom periods") }
+    result = try await call("change", token: snapshot.token, action: periods.id, values: [periods.id: #"["1","2"]"#])
+    try require(result["filled"] as? Bool == true, "native multi-select preserves every selected teaching period")
+    snapshot = try await read()
+    guard let choice = snapshot.fields.first(where: { $0.kind == "choice" }) else { throw NetworkError(message: "Missing school custom selector") }
+    try require(choice.label == "教室类型" && choice.options.isEmpty, "closed custom selector retains school label without guessing options")
+    result = try await call("open", token: snapshot.token, action: choice.id)
+    try require(result["opened"] as? Bool == true, "explicitly open custom selector through school handler")
+    snapshot = try await read()
+    guard let opened = snapshot.fields.first(where: { $0.kind == "choice" }) else { throw NetworkError(message: "Missing opened selector") }
+    try require(opened.options.map(\.value) == ["normal"], "only rendered enabled options are offered")
+    result = try await call("change", token: snapshot.token, action: opened.id, values: [opened.id: "forged"])
+    try require(result["error"] as? String == "format", "unoffered custom choice cannot be injected")
+    result = try await call("change", token: snapshot.token, action: opened.id, values: [opened.id: "normal"])
+    try require(result["filled"] as? Bool == true, "school custom option remains operable from isolated world")
+    result = try await call("change", token: snapshot.token, action: opened.id, values: [opened.id: "normal"])
+    try require(result["error"] as? String == "stale", "custom option action remains one-shot")
+    snapshot = try await read()
+    try require(snapshot.fields.first(where: { $0.kind == "choice" })?.value == "合成普通教室", "selected custom choice is read back from school state")
+    guard let query = snapshot.actions.first(where: { $0.title == "查询" }) else { throw NetworkError(message: "Missing classroom query") }
+    try require(query.query == true, "read-only classroom query does not need a business confirmation sheet")
+    result = try await call("act", token: snapshot.token, action: query.id)
+    try require(result["activated"] as? Bool == true, "classroom query executes once after linked controls update")
+    snapshot = try await read()
+    try require(snapshot.tables.first?.rows.first == ["s1"], "classroom results remain available to native reader")
+    _ = try await web.evaluateJavaScript(#"""
+    document.getElementById('campus').onchange=()=>setTimeout(()=>{document.getElementById('building').innerHTML='<option value="late">合成延迟楼栋</option>';},400);
+    document.body.insertAdjacentHTML('beforeend','<label>关键词<input id="classroomKeyword" value=""></label><button type="submit">100</button><nav class="pagination"><button>2</button></nav><div role="checkbox" aria-label="选择合成教室" aria-checked="false" onclick="this.setAttribute(\'aria-checked\',this.getAttribute(\'aria-checked\')!==\'true\')">合成教室行</div>');
+    """#)
+    snapshot = try await read()
+    let keywordKey = snapshot.fields.first(where: { $0.label == "关键词" })?.key
+    guard let changedCampus = snapshot.fields.first(where: { $0.label == "校区" }) else { throw NetworkError(message: "Missing linked campus") }
+    result = try await call("change", token: snapshot.token, action: changedCampus.id, values: [changedCampus.id: "north"])
+    try require(result["filled"] as? Bool == true, "async dependent query starts from school handler")
+    _ = try await read()
+    try await Task.sleep(for: .milliseconds(550))
+    result = try await call("watch")
+    try require(result["changed"] as? Bool == true, "late AJAX options are observed after first read")
+    snapshot = try await read()
+    try require(snapshot.fields.first(where: { $0.label == "教学楼" })?.options.first?.value == "late", "late building choices become available")
+    try require(keywordKey != nil && snapshot.fields.first(where: { $0.label == "关键词" })?.key == keywordKey, "stable field keys allow unsubmitted drafts to survive linked refresh")
+    try require(snapshot.actions.first(where: { $0.title == "100" })?.query == false && snapshot.actions.first(where: { $0.title == "2" })?.query == true, "numeric amounts never bypass confirmation while pager numbers remain queries")
+    guard let rowChoice = snapshot.fields.first(where: { $0.label == "选择合成教室" }) else { throw NetworkError(message: "Missing school ARIA row selector") }
+    result = try await call("change", token: snapshot.token, action: rowChoice.id, values: [rowChoice.id: "true"])
+    try require(result["filled"] as? Bool == true, "school custom row checkbox uses its own handler")
+    snapshot = try await read()
+    try require(snapshot.fields.first(where: { $0.label == "选择合成教室" })?.value == "true", "custom checkbox state reads back")
     print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
 }

@@ -209,6 +209,7 @@ struct ProfileView: View {
                 case .web(let url): PortalWebViewScreen(url: url)
                 case .card: CardView()
                 case .academic: AcademicCenterView()
+                case .ecode: NativeECodeView()
                 case .nativeService(let service): NativeServiceHost(initial: service)
                 }
             }

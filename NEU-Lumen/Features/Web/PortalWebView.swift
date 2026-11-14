@@ -49,6 +49,12 @@ struct PortalWebViewScreen: View {
                     .tint(AppTheme.accent)
                     .frame(height: 2)
             }
+            if let notice = browser.electricityPrefillNotice {
+                Text(notice).font(.footnote).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
+                    .privacySensitive()
+            }
             ZStack {
                 PortalWebView(browser: browser)
                 .id(ObjectIdentifier(browser.webView))
@@ -370,6 +376,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     var showsDownloads = false
     var showsDownloadNotice = false
     var downloadNotice = ""
+    private(set) var electricityPrefillNotice: String?
     var documentMIMEType: String?
     var isCurrentPDF: Bool { BrowserDownloadNames.isPDF(documentMIMEType) }
     var downloadCount: Int { BrowserDownloadStore.shared.activeCount }
@@ -392,6 +399,9 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var service: NativeCampusService?
     @ObservationIgnored private var electricityResume = false
     @ObservationIgnored private var electricityResumeAttempted = false
+    @ObservationIgnored private var electricityPrefillTask: Task<Void, Never>?
+    @ObservationIgnored private var electricityPrefillStatus = "unavailable"
+    private static let electricityWorld = WKContentWorld.world(name: "NEULumen.ElectricityRoom")
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -521,6 +531,19 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         if webView.url != nil { webView.reload() } else { goToEntry() }
     }
 
+    /// Automatic consumers may only reload a completed, confirmed GET document.
+    /// WebKit's generic reload can replay a school authentication or business POST.
+    @discardableResult
+    func reloadReadOnlyDocument() -> Bool {
+        guard !isLoading, pendingDocumentRequest == nil,
+              !documentUnsafeMethod, !provisionalUnsafeMethod,
+              let request = documentRequest, (request.httpMethod ?? "GET").uppercased() == "GET",
+              let current = webView.url, current == documentResponseURL,
+              ["http", "https"].contains(current.scheme?.lowercased() ?? "") else { return false }
+        reload()
+        return true
+    }
+
     func goToEntry() {
         guard let entryURL else { return }
         error = nil
@@ -623,7 +646,11 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         return .allow
     }
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        error = nil
+        electricityPrefillTask?.cancel()
+        electricityPrefillNotice = nil
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         pendingDocumentRequest = nil
         updateState()
@@ -631,6 +658,49 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
             await syncCookies()
             await resumeElectricityAfterLogin()
             await clickCampusUnifiedLoginIfNeeded()
+            startElectricityPrefill()
+        }
+    }
+
+    /// Reuses this account's saved query, including after the normal school login.
+    /// Delayed form rendering is retried only while the same document and identity remain active.
+    private func startElectricityPrefill() {
+        electricityPrefillTask?.cancel()
+        guard let session, session.phase == .loggedIn, let user = session.user,
+              let url = webView.url, CampusPaymentEntry.isElectricity(url) else { return }
+        let account = user.sid.isEmpty ? user.uid : user.sid
+        let room = UserDefaults.standard.string(forKey: "lumen.electric.room." + account) ?? ""
+        let epoch = session.requestEpoch
+        electricityPrefillTask = Task { [weak self] in
+            for _ in 0..<24 {
+                guard let self, !Task.isCancelled, self.webView.url == url, session.requestEpoch == epoch else { return }
+                await self.prefillElectricityRoom(room)
+                if self.electricityPrefillStatus != "unavailable" { return }
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
+        }
+    }
+
+    func prefillElectricityRoom(_ rawRoom: String) async {
+        let room = ElectricRoomKey.normalize(rawRoom)
+        guard ElectricRoomKey.isValid(room), let session, session.phase == .loggedIn, let user = session.user,
+              session.requestEpoch == downloadSessionEpoch,
+              let client, client.sessionGeneration == clientEpoch,
+              let url = webView.url, url.user == nil, url.password == nil, url.port == nil || url.port == 443,
+              CampusPaymentEntry.isElectricity(url) else { return }
+        let account = user.sid.isEmpty ? user.uid : user.sid
+        guard ElectricRoomKey.normalize(UserDefaults.standard.string(forKey: "lumen.electric.room." + account) ?? "") == room else { return }
+        let epoch = session.requestEpoch
+        let result = try? await webView.callAsyncJavaScript(ElectricityPaymentPrefill.script,
+            arguments: ["room": room], in: nil, contentWorld: Self.electricityWorld) as? [String: Any]
+        guard session.phase == .loggedIn, session.requestEpoch == epoch,
+              client.sessionGeneration == clientEpoch, webView.url == url, !Task.isCancelled else { return }
+        electricityPrefillStatus = result?["status"] as? String ?? "unavailable"
+        switch electricityPrefillStatus {
+        case "filled": electricityPrefillNotice = "已沿用查询房间码 \(room)，请核对房间后缴费。"
+        case "kept": electricityPrefillNotice = "学校页面已有房间信息，请核对后缴费；本机查询房间码为 \(room)。"
+        case "edited": electricityPrefillNotice = "已保留你修改的房间信息，请核对后缴费。"
+        default: electricityPrefillNotice = "查询房间码 \(room)，请在学校表单核对房间。"
         }
     }
 
@@ -685,6 +755,8 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
 
     func close() {
         webView.stopLoading()
+        electricityPrefillTask?.cancel()
+        electricityPrefillTask = nil
         cookieSaveTask?.cancel()
         webView.configuration.websiteDataStore.httpCookieStore.remove(self)
         // BrowserDownloadStore, not this screen, owns ongoing WKDownload instances.

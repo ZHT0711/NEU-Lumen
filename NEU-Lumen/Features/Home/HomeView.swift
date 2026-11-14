@@ -99,6 +99,8 @@ struct HomeView: View {
                     CardView()
                 case .academic:
                     AcademicCenterView()
+                case .ecode:
+                    NativeECodeView()
                 case .nativeService(let service):
                     NativeServiceHost(initial: service)
                 }
@@ -122,9 +124,7 @@ struct HomeView: View {
     // MARK: - 区块
 
     private var campusHeader: some View {
-        Button {
-            path.append(.web(repo.ecodeEntryURL))
-        } label: {
+        Group {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(spacing: 10) {
@@ -134,8 +134,7 @@ struct HomeView: View {
                             .frame(width: 42, height: 42)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("东北大学")
-                                .font(.system(.headline, design: .serif)).tracking(4)
+                            NEUCalligraphy()
                             Text("NORTHEASTERN UNIVERSITY")
                                 .font(.system(size: 8, weight: .semibold)).tracking(1)
                         }
@@ -186,11 +185,19 @@ struct HomeView: View {
                 }
             }
         }
-        .buttonStyle(.plain)
         .contentShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .gesture(LongPressGesture(minimumDuration: 0.5).exclusively(before: TapGesture()).onEnded { action in
+            switch action {
+            case .first: path.append(.ecode)
+            case .second: path.append(.web(repo.ecodeEntryURL))
+            }
+        })
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(repo.campus.title)，\(repo.campus.landmarks.joined(separator: "、"))，e码通快捷入口")
-        .accessibilityHint("打开校园码")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("东北大学，\(repo.campus.title)，e码通")
+        .accessibilityHint("单击打开学校页面，长按打开原生校园码")
+        .accessibilityAction { path.append(.web(repo.ecodeEntryURL)) }
+        .accessibilityAction(named: "原生e码通") { path.append(.ecode) }
         .accessibilityIdentifier("home.ecode")
     }
 
