@@ -98,7 +98,7 @@ struct CampusReminderView: View {
                     Picker("分钟", selection: $store.preferences.dailyMinute) { ForEach([0, 15, 30, 45], id: \.self) { Text(String(format: "%02d", $0)).tag($0) } }
                 }
             }
-            Section("后台自动刷新") {
+            Section {
                 Toggle("允许后台自动加载", isOn: $store.preferences.background)
                 Toggle("复用已登录学习平台会话", isOn: $store.preferences.backgroundLearning)
                 Toggle("复用已登录学校邮箱会话", isOn: $store.preferences.backgroundMail)
@@ -113,7 +113,7 @@ struct CampusReminderView: View {
                         _ = await CampusBackgroundRefresh.shared.run(manual: true)
                     }
                 }.disabled(!store.preferences.enabled || store.syncing)
-            } footer: {
+            } header: { Text("后台自动刷新") } footer: {
                 Text("iOS 决定后台运行时机，通常只有短暂执行时间，无法保证固定间隔或实时推送。保持登录并允许系统“后台 App 刷新”后，可复用已保存会话读取校园数据、学习任务与邮件；失效会话等待你正常认证。未取得新数据时保留已安排的提醒。")
             }
             Section("通知外观与静默") {
@@ -127,7 +127,7 @@ struct CampusReminderView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("发送一条测试提醒", systemImage: "bell.badge") { Task { await store.test() } }
-                    .disabled(!store.preferences.enabled || !store.authorized)
+                    .disabled(!store.preferences.allows(.custom) || !store.authorized)
             }
             Section("即将提醒 · \(store.upcoming.count)") {
                 if store.upcoming.isEmpty { Text("开启提醒并同步来源后，将在这里显示最近的提醒。") .foregroundStyle(.secondary) }

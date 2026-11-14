@@ -169,7 +169,7 @@ final class CampusReminderStore {
             var dated = components; dated.timeZone = CampusReminderPolicy.calendar.timeZone
             do {
                 let existing = existingRequests[identifier]
-                let existingDate = existing?.trigger?.nextTriggerDate()
+                let existingDate = (existing?.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()
                 let sameTime = existingDate.map { abs($0.timeIntervalSince(item.fireAt)) < 1 } == true
                 let unchanged = sameTime && existing?.content.title == content.title && existing?.content.body == content.body &&
                     (existing?.content.sound != nil) == preferences.sound && (existing?.content.userInfo["destination"] as? String) == item.destination
@@ -234,6 +234,7 @@ final class CampusReminderStore {
     }
     func test() async {
         guard preferences.enabled, authorized, !accountKey.isEmpty else { message = "请先开启并授权通知。"; return }
+        guard preferences.allows(.custom) else { message = "请先开启“自定义提醒”，再发送测试通知。"; return }
         add(.init(title: "通知测试", body: "NEU-Lumen 的本地提醒已配置，可以关闭应用等待提醒。", date: Date().addingTimeInterval(5)))
         await refreshPersonalSchedule()
     }
