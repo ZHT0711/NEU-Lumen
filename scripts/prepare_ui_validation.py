@@ -1094,3 +1094,14 @@ ecode_source = ecode_source.replace(ecode_hook, ecode_hook + '''
         }
 ''')
 ecode_view.write_text(ecode_source, encoding='utf-8')
+ecode_hook = '        while owner == runOwner, !Task.isCancelled, session.requestEpoch == epoch, session.phase == .loggedIn {'
+if ecode_source.count(ecode_hook) != 1:
+    raise RuntimeError('E-code lifecycle diagnostic hook changed')
+ecode_source = ecode_source.replace(ecode_hook, ecode_hook + '''
+            if ProcessInfo.processInfo.arguments.contains("--screen=native-ecode") {
+                let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ecode-diagnostics.txt")
+                let flags = "foreground=" + String(foreground) + "; blocked=" + String(needsSchoolRefresh) + "; loading=" + String(browser.isLoading) + "; website=" + String(showWebsite) + "; connected=" + String(session.networkAvailable) + "; error=" + (browser.error ?? "nil") + "; state=" + (document?.state ?? "nil")
+                try? flags.write(to: output, atomically: true, encoding: .utf8)
+            }
+''')
+ecode_view.write_text(ecode_source, encoding='utf-8')

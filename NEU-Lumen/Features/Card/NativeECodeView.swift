@@ -13,6 +13,7 @@ struct NativeECodeView: View {
     @State private var message: String?
     @State private var owner = UUID()
     @State private var needsSchoolRefresh = false
+    @State private var foreground = false
     private static let world = WKContentWorld.world(name: "NEULumen.ECode")
 
     var body: some View {
@@ -79,7 +80,8 @@ struct NativeECodeView: View {
             if !loading { loadedAt = Date(); needsSchoolRefresh = false }
         }
         .onChange(of: browser.currentURL) { _, _ in clearCode() }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            foreground = phase == .active
             clearCode()
             if phase == .active { refresh() }
         }
@@ -139,7 +141,7 @@ struct NativeECodeView: View {
         await browser.start(environment.repository.ecodeEntryURL, client: session.client, session: session)
         guard owner == runOwner, !Task.isCancelled else { return }
         while owner == runOwner, !Task.isCancelled, session.requestEpoch == epoch, session.phase == .loggedIn {
-            if !showWebsite, !needsSchoolRefresh, scenePhase == .active, session.networkAvailable, !browser.isLoading, browser.error == nil,
+            if !showWebsite, !needsSchoolRefresh, foreground, session.networkAvailable, !browser.isLoading, browser.error == nil,
                let url = browser.webView.url, ECodeDocument.allows(WebVPN.unwrap(url) ?? url) {
                 // A conservative display limit is not a claim about the school's token validity.
                 // Re-read from the server instead of indefinitely presenting an unchanged DOM code.
@@ -152,7 +154,7 @@ struct NativeECodeView: View {
                         guard owner == runOwner, session.requestEpoch == epoch,
                               session.phase == .loggedIn, !Task.isCancelled else { return }
                         guard browser.webView.url == url, !browser.isLoading,
-                              scenePhase == .active, session.networkAvailable else {
+                              foreground, session.networkAvailable else {
                             clearCode()
                             do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
                             continue
