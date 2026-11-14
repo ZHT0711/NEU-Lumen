@@ -728,9 +728,9 @@ try await verifySessionRestart()
 let codeApp = PortalApp(name: "e码通", appId: "ecode", url: "https://ecard.neu.edu.cn/desktop", mobileUrl: "https://ecard.neu.edu.cn/code",
                          iconUrl: "", desc: "", category: "校园生活", visits: 0)
 precondition(ServiceCatalog(apps: DemoData.apps + [codeApp]).ecodeURL.absoluteString == codeApp.mobileUrl)
-precondition(ServiceCatalog(apps: DemoData.apps).ecodeURL.absoluteString == PortalClient.serviceCard)
-precondition(ServiceCatalog(apps: []).ecodeURL.absoluteString == PortalClient.serviceCard)
-print("Home e-code shortcut: official mobile entry and Flutter-compatible SSO fallback passed")
+precondition(ServiceCatalog(apps: DemoData.apps).ecodeURL.absoluteString == "https://ecode.neu.edu.cn/ecode/#/")
+precondition(ServiceCatalog(apps: []).ecodeURL.absoluteString == "https://ecode.neu.edu.cn/ecode/#/")
+print("Home e-code shortcut: official mobile entry and verified school e-code fallback passed")
 
 // Homepage URLs resolve relative links and never treat a blank mobile URL as a destination.
 precondition(PortalLink.from([["form_mobile_url_view":" ", "form_url_view":"/portal/task/42"]])?.absoluteString == PortalClient.portalBase + "/task/42")
