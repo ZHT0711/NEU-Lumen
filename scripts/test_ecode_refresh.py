@@ -26,9 +26,9 @@ class ECodeRefreshTests(unittest.TestCase):
     private func refresh() {''' + method + '\n}\n'
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)
-            (path / 'Refresh.swift').write_text(harness, encoding='utf-8')
+            (path / 'ECodeRefreshHarness.swift').write_text(harness, encoding='utf-8')
             binary = path / 'ecode-refresh-tests'
-            result = subprocess.run(['swiftc', '-swift-version', '5', '-parse-as-library', str(path / 'Refresh.swift'),
+            result = subprocess.run(['swiftc', '-swift-version', '5', '-parse-as-library', str(path / 'ECodeRefreshHarness.swift'),
                                      str(ROOT / 'Tests/ECode/Refresh.swift'), '-o', str(binary)],
                                     capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
