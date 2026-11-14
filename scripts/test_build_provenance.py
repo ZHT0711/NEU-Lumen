@@ -114,6 +114,10 @@ class BuildProvenanceTests(unittest.TestCase):
         self.assertIn('--required-count', text)
         self.assertIn('runs-on: macos-26', text)
         self.assertNotIn('id-token: write', text)
+        nightly = text.split('  nightly:', 1)[1]
+        self.assertIn("startsWith(github.ref, 'refs/tags/v')", nightly)
+        self.assertIn('CURRENT_SHA', nightly)
+
 
 
 if __name__ == '__main__':

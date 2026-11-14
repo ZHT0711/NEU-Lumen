@@ -310,7 +310,7 @@ struct ServicesView: View {
                     Image(systemName: "magnifyingglass")
                         .font(.title3)
                         .foregroundStyle(.secondary)
-                    Text(keyword.isEmpty ? (favoritesOnly ? "暂无收藏，点击应用右上角的星标添加" : "暂无可用应用") : "没有匹配「\(keyword)」的应用")
+                    Text(keyword.isEmpty ? (favoritesOnly ? "暂无收藏，可在管理收藏中添加" : "暂无可用应用") : "没有匹配「\(keyword)」的应用")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

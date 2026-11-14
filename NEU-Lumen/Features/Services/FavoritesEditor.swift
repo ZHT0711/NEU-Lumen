@@ -10,7 +10,7 @@ struct FavoritesEditor: View {
         NavigationStack {
             List {
                 Section {
-                    Text("收藏与首页常用应用实时联动，首页显示前 8 项。拖动右侧手柄排序，点击减号移除。")
+                    Text("收藏与首页常用应用实时联动，首页显示前 4 项，其余应用可在服务页查看。拖动右侧手柄排序，点击减号移除。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("我的收藏（\(repo.favorites.ids.count)）") {

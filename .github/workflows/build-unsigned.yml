@@ -326,56 +326,29 @@ jobs:
 
       - name: Generate release body
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
-          TAG_NAME="${GITHUB_REF_NAME}"
-          RELEASE_TAGS="$(
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
-          )"
-          PREVIOUS_TAG="$(
-            awk -v current="${TAG_NAME}" '$0 != current { print; exit }' <<< "${RELEASE_TAGS}"
-          )"
-
-          if [[ -n "${PREVIOUS_TAG}" ]]; then
-            git log "${PREVIOUS_TAG}..${TAG_NAME}" --pretty=format:"- %s" > release_commits.txt || true
-          else
-            : > release_commits.txt
-          fi
-
+          ASSET_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           cat > release_body.md <<EOF
-          这是由 GitHub Actions 自动构建的 NEU-Lumen iOS 发行版本。
+          <p align="center">
+            <img src="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/NEU-Lumen/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="104" alt="NEU-Lumen 应用图标" />
+          </p>
 
-          ## 下载说明
+          [下载 iOS 安装包](${ASSET_BASE}/NEU-Lumen-iOS-unsigned.ipa) · [全部运行截图](${ASSET_BASE}/NEU-Lumen-ui-preview.zip) · [构建来源](${ASSET_BASE}/build-provenance.json)
 
-          - \`NEU-Lumen-iOS-unsigned.ipa\`：iOS 未签名安装包
+          iOS 17 及以上。IPA 需要自行签名后安装。
 
-          ## 安装说明
+          ## 运行界面
 
-          该 IPA 未签名，不能直接作为 App Store 应用安装，需要自行签名后安装
-          （Sideloadly / AltStore + 个人 Apple ID，或开发者证书）。
+          以下截图来自本版本实际运行的 iPhone 模拟器，使用合成演示数据。
 
-          ## 版本信息
+          <p align="center">
+            <img src="${ASSET_BASE}/home-light.png" width="245" alt="首页" />
+            <img src="${ASSET_BASE}/services-light.png" width="245" alt="服务" />
+          </p>
 
-          - 版本：\`${TAG_NAME}\`
-          - Commit：\`${GITHUB_SHA}\`
-          - 构建编号：\`${GITHUB_RUN_NUMBER}\`
+          [构建与检查](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) · 提交 \`${GITHUB_SHA}\` · 构建 ${GITHUB_RUN_NUMBER}
           EOF
-
-          if [[ -s release_commits.txt ]]; then
-            echo "" >> release_body.md
-            echo "## 更新内容" >> release_body.md
-            echo "" >> release_body.md
-            cat release_commits.txt >> release_body.md
-          fi
-
-          echo "" >> release_body.md
-          echo "---" >> release_body.md
-          echo "" >> release_body.md
-          echo "由 GitHub Actions 自动发布。" >> release_body.md
 
       - name: Create release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -439,7 +412,7 @@ jobs:
   nightly:
     name: Publish rolling nightly IPA
     needs: build
-    if: github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
