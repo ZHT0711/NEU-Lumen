@@ -1,4 +1,5 @@
 import Foundation
+precondition(LiveActivityTemplate.dependencies(in: ["{sf:creditcard.fill} {card}"]) == ["card"])
 #if canImport(CoreGraphics)
 import CoreGraphics
 #endif
@@ -273,7 +274,6 @@ print("Live activity freshness: start/end/custom boundaries, stale labels/counts
 precondition(LiveActivityInlineSymbols.parts("地点 {sf:mappin.and.ellipse} A101") == [.text("地点 "), .symbol("mappin.and.ellipse"), .text(" A101")])
 precondition(LiveActivityInlineSymbols.parts("{sf:not.allowed} {sf:bolt.fill}") == [.text("{sf:not.allowed} "), .symbol("bolt.fill")])
 precondition(LiveActivityInlineSymbols.parts("{sf:https://example.invalid/x}") == [.text("{sf:https://example.invalid/x}")])
-precondition(LiveActivityTemplate.dependencies(in: ["{sf:creditcard.fill} {card}"]) == ["card"])
 print("Custom SF Symbols: whitelisted inline icons, literal unknown tokens and independent data variables passed")
 
 for width in [CGFloat(220), 280, 330, 350, 370] {
