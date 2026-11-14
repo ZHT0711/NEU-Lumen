@@ -8,27 +8,37 @@ enum AppTab: Hashable {
     case profile
 }
 
+private enum ActivitySheet: Identifiable {
+    case settings, card, reminders, service(NativeCampusService)
+    var id: String {
+        switch self {
+        case .settings: "settings"
+        case .card: "card"
+        case .reminders: "reminders"
+        case .service(let value): "service:" + value.rawValue
+        }
+    }
+}
+
 /// 主界面：首页 / 课表 / 服务大厅 / 学习 / 我的。
 struct MainTabView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection: AppTab = .home
     @State private var scrollActivity = TabBarScrollActivity()
-    @State private var showActivitySettings = false
-    @State private var showActivityCard = false
-    @State private var showReminders = false
-    @State private var nativeService: NativeCampusService?
+    @State private var activitySheet: ActivitySheet?
 
     var body: some View {
         tabs
             .onChange(of: environment.pendingActivityURL, initial: true) { _, pending in
                 guard let url = pending else { return }
-                showActivityCard = url.host == "activity" && url.path == "/card"
-                showActivitySettings = url.host == "dynamic-island" || url.path == "/settings"
-                showReminders = url.host == "activity" && url.path == "/reminders"
+                activitySheet = nil
+                if url.host == "dynamic-island" || url.path == "/settings" { activitySheet = .settings }
+                if url.host == "activity", url.path == "/card" { activitySheet = .card }
+                if url.host == "activity", url.path == "/reminders" { activitySheet = .reminders }
                 if url.host == "activity", url.path == "/services" {
                     let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "native" }?.value
-                    nativeService = name.flatMap(NativeCampusService.init(rawValue:))
+                    if let service = name.flatMap(NativeCampusService.init(rawValue:)) { activitySheet = .service(service) }
                     selection = .services
                 }
                 if url.host == "activity", url.path == "/course" { selection = .schedule }
@@ -40,31 +50,17 @@ struct MainTabView: View {
                 }
                 environment.pendingActivityURL = nil
             }
-            .sheet(isPresented: $showActivitySettings) {
+            .sheet(item: $activitySheet) { destination in
                 NavigationStack {
-                    LiveActivitySettingsView()
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("完成") { showActivitySettings = false }
-                            }
+                    Group {
+                        switch destination {
+                        case .settings: LiveActivitySettingsView()
+                        case .card: CardView()
+                        case .reminders: CampusReminderView()
+                        case .service(let service): NativeServiceHost(initial: service)
                         }
+                    }.toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { activitySheet = nil } } }
                 }
-            }
-            .sheet(isPresented: $showActivityCard) {
-                NavigationStack {
-                    CardView()
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button("完成") { showActivityCard = false }
-                            }
-                        }
-                }
-            }
-            .sheet(isPresented: $showReminders) {
-                NavigationStack { CampusReminderView().toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showReminders = false } } } }
-            }
-            .sheet(item: $nativeService) { service in
-                NavigationStack { NativeServiceHost(initial: service).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { nativeService = nil } } } }
             }
             .environment(\.tabBarScrollActivity, scrollActivity)
             .modifier(ScrollingTabBarStyle(activity: scrollActivity))
