@@ -851,12 +851,16 @@ print("Homepage API links and logout generation: detail links, relative task lin
 let academicMenuConfig = URLSessionConfiguration.ephemeral
 academicMenuConfig.protocolClasses = [MockPortalProtocol.self]
 let academicMenuClient = PortalClient(http: HTTPClient(configuration: academicMenuConfig))
-academicMenuClient.absorbCookies([ticket]); academicMenuClient.adoptGatewayTicket()
+academicMenuClient.absorbCookies([ticket, proxyCASTGC]); academicMenuClient.adoptGatewayTicket()
 var menuIdentityReads = 0, menuReads = 0, examReads = 0
 var changeMenuIdentity = false
 MockPortalProtocol.handle = { request in
     let url = WebVPN.unwrap(request.url!) ?? request.url!
     precondition(request.httpMethod == "GET", "Academic menu/exam queries must not write")
+    if url.host == "pass.neu.edu.cn", url.path == "/tpass/login" {
+        let service = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "service" }!.value!
+        return (302, ["Location": service + (service.contains("?") ? "&" : "?") + "ticket=ST-synthetic-menu"], "")
+    }
     if url.path.hasSuffix("/currentUser.do") {
         menuIdentityReads += 1
         let account = changeMenuIdentity && menuIdentityReads.isMultiple(of: 2) ? "another-account" : "20260042"
