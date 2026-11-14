@@ -57,7 +57,15 @@ final class HTTPClient {
         if networkChanged { networkRevision = UUID() }
         transportLock.unlock()
         // Do not replay writes or erase cookies. New reads use a fresh connection pool/DNS path.
-        previous.finishTasksAndInvalidate()
+        if networkChanged {
+            previous.getAllTasks { tasks in
+                for task in tasks {
+                    let method = (task.currentRequest?.httpMethod ?? task.originalRequest?.httpMethod ?? "GET").uppercased()
+                    if ["GET", "HEAD"].contains(method) { task.cancel() }
+                }
+                previous.finishTasksAndInvalidate()
+            }
+        } else { previous.finishTasksAndInvalidate() }
     }
 
     /// 手动跟随重定向（最多 10 跳），每跳吸收 Set-Cookie。
@@ -85,6 +93,8 @@ final class HTTPClient {
             var outcome: (Data, URLResponse)?
             for attempt in 0..<2 {
                 let connection = transport()
+                guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+                guard connection.network == network else { throw URLError(.networkConnectionLost) }
                 if let url = current.url, let freshCookie = cookies.headerFor(url) { current.setValue(freshCookie, forHTTPHeaderField: "Cookie") }
                 do { outcome = try await connection.session.data(for: current); break }
                 catch {
