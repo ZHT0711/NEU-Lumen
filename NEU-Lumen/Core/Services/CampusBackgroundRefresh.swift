@@ -65,6 +65,13 @@ final class CampusBackgroundRefresh {
         guard session.phase == .loggedIn, let user = session.user, !Task.isCancelled else { return false }
         let account = user.sid.isEmpty ? user.uid : user.sid
         let epoch = session.requestEpoch
+        let retainedCookies = session.client.browserCookies()
+        defer {
+            if session.phase == .loggedIn, session.requestEpoch == epoch {
+                session.client.retainMissingCookies(retainedCookies)
+                session.persistWebSession()
+            }
+        }
         let store = CampusReminderStore.shared
         await store.activate(account: account)
         guard store.preferences.enabled, store.authorized, store.preferences.background || manual, !Task.isCancelled else { return false }
