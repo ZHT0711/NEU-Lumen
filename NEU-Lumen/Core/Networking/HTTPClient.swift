@@ -67,7 +67,8 @@ final class HTTPClient {
         let network = transport().network
         var current = request
         for _ in 0..<maxHops {
-            guard generation == cookies.generation, network == transport().network, !Task.isCancelled else { throw CancellationError() }
+            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+            guard network == transport().network else { throw URLError(.networkConnectionLost) }
             if current.value(forHTTPHeaderField: "User-Agent") == nil {
                 current.setValue(userAgentOverride ?? Self.userAgent, forHTTPHeaderField: "User-Agent")
             }
@@ -87,14 +88,18 @@ final class HTTPClient {
                 if let url = current.url, let freshCookie = cookies.headerFor(url) { current.setValue(freshCookie, forHTTPHeaderField: "Cookie") }
                 do { outcome = try await connection.session.data(for: current); break }
                 catch {
-                    guard attempt == 0, retryTransport, generation == cookies.generation, network == transport().network,
+                    guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+                    guard network == transport().network else { throw URLError(.networkConnectionLost) }
+                    guard attempt == 0, retryTransport,
                           CampusTransportRetry.allows(method: current.httpMethod, error: error, userCancelled: Task.isCancelled,
                               connectionReplaced: connection.revision != transport().revision) else { throw error }
                     resetTransport()
                     try await Task.sleep(for: .milliseconds(350))
                 }
             }
-            guard let (data, response) = outcome, generation == cookies.generation, network == transport().network, !Task.isCancelled else { throw CancellationError() }
+            guard generation == cookies.generation, !Task.isCancelled else { throw CancellationError() }
+            guard network == transport().network else { throw URLError(.networkConnectionLost) }
+            guard let (data, response) = outcome else { throw NetworkError(message: "网络请求未完成，请重试") }
             guard let http = response as? HTTPURLResponse else {
                 throw NetworkError(message: "网络响应异常")
             }

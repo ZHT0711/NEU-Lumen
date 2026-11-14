@@ -916,5 +916,8 @@ MockPortalProtocol.handle = { _ in
 do {
     _ = try await roamingHTTP.get(URL(string: "https://personal.neu.edu.cn/late")!)
     preconditionFailure("Old network response must be rejected")
-} catch { precondition(roamingHTTP.cookies.headerFor(URL(string: "https://personal.neu.edu.cn/")!)?.contains("late_mobile") != true) }
+} catch {
+    precondition((error as? URLError)?.code == .networkConnectionLost, "A route change must remain retryable, rather than looking like the user cancelled")
+    precondition(roamingHTTP.cookies.headerFor(URL(string: "https://personal.neu.edu.cn/")!)?.contains("late_mobile") != true)
+}
 print("Mobile transport: one safe read retry, fresh pool with retained cookies, no POST replay and discarded late-network cookies passed")
