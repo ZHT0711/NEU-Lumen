@@ -227,7 +227,7 @@ sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
 swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-for SCREEN in services services-art grades mooc chaoxing native-payment native-electricity native-bills native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
+for SCREEN in services services-directory services-art grades mooc chaoxing native-payment native-electricity native-bills native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
   "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
 done
 for KIND in nextCourse custom electricBalance; do

@@ -36,7 +36,7 @@ struct NativeECodeView: View {
                                     .frame(maxWidth: 300).padding(18).background(.white)
                                     .accessibilityLabel("学校当前账号的校园码")
                                 Text(environment.session.user?.name ?? "").font(.title3.bold())
-                                ForEach(document?.facts ?? []) { fact in
+                                ForEach((document?.facts ?? []).filter { $0.label != "姓名" }) { fact in
                                     LabeledContent(fact.label, value: fact.value)
                                 }
                                 Text("读取于 \(observedAt.formatted(date: .omitted, time: .standard))")

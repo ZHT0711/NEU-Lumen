@@ -1,3 +1,4 @@
+import re
 import json
 import os
 from pathlib import Path
@@ -217,6 +218,17 @@ class UIPreviewTests(unittest.TestCase):
         prepare = (root / 'scripts/prepare_ui_validation.py').read_text()
         self.assertIn('contains("--screen=grades") ? "成绩" : "作业"', prepare)
         self.assertNotIn('bash scripts/validate_ui.sh\n          fi', workflow)
+    def test_every_checked_screen_has_content_expectations(self):
+        root = Path(__file__).resolve().parents[1]
+        shell = (root / 'scripts/validate_ui.sh').read_text()
+        checker = (root / 'scripts/check_system_island.swift').read_text()
+        loop = re.search(r'for SCREEN in ([^;\n]+); do\n\s*"\$PREVIEW/system-island-check"', shell)
+        self.assertIsNotNone(loop)
+        screens = loop.group(1).split()
+        expectations = set(re.findall(r'^\s*"([^"\n]+)": \[', checker, re.M))
+        self.assertFalse(set(screens) - expectations)
+        self.assertTrue(set(screens).issubset({name.removesuffix('-light.png') for name in preview.SCREENSHOTS}))
+
     def test_exact_new_snapshots_and_required_checks(self):
         self.assertEqual(len(preview.SCREENSHOTS), 52)
         self.assertEqual(len(preview.CHECKS), 19)

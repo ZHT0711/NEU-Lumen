@@ -22,11 +22,14 @@ let normalized = text.replacingOccurrences(of: " ", with: "")
 if kind.hasPrefix("screen:") {
     let screen = String(kind.dropFirst("screen:".count))
     let expected: [String: [String]] = [
-        "services": ["原生服务", "服务大厅"],
+        "services": ["服务大厅", "学习与生活", "校园资源"],
         "services-art": ["原生服务", "校园资讯", "下载中心"],
         "grades": ["学习", "成绩"],
         "mooc": ["学习", "作业"],
         "chaoxing": ["学习", "作业"],
+        "services-directory": ["服务大厅", "应用目录", "服务分类"],
+        "native-electricity": ["缴费大厅", "宿舍电费", "查询并记住房间"],
+        "native-bills": ["缴费大厅", "校园卡月流水", "刷新所选月份"],
         "native-payment": ["缴费大厅", "校园卡余额"],
         "native-vpn": ["WebVPN", "访问状态"],
         "native-affairs": ["办事大厅", "我的在办事项"],
