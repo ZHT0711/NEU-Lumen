@@ -35,7 +35,7 @@ if kind.hasPrefix("screen:") {
         "native-agenda": ["校园日程", "查看日期"],
         "native-downloads": ["下载中心", "已完成"],
         "notifications": ["提醒与通知", "后台自动刷新"],
-        "academic-services": ["全部教务功能", "合成选课"],
+        "academic-services": ["全部教务功能", "合成学籍信息查询", "合成考试报名"],
         "academic-exams": ["考试安排", "合成考试"],
     ]
     guard let terms = expected[screen], terms.allSatisfy({ normalized.contains($0) }) else {

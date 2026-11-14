@@ -964,6 +964,15 @@ service_fixture('NEU-Lumen/Features/Academic/PersonalAcademicProgramView.swift',
 # Open the actual native detail diagram in this screenshot-only copy.
 program_view = destination / 'NEU-Lumen/Features/Academic/PersonalAcademicProgramView.swift'
 program_source = program_view.read_text(encoding='utf-8').replace('private struct PersonalAcademicProgramDetail:', 'struct PersonalAcademicProgramDetail:')
+for target, observation in (
+    ('.frame(width: width * displayedZoom, height: height * displayedZoom, alignment: .topLeading)',
+     '.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { ProgramViewportValidation.shared.content = $0 }'),
+    ('.onChange(of: geometry.size, initial: true)',
+     '.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { ProgramViewportValidation.shared.viewport = $0 }\n          .onChange(of: geometry.size, initial: true)'),
+):
+    if program_source.count(target) != 1:
+        raise RuntimeError('Program viewport measurement hook changed: ' + target)
+    program_source = program_source.replace(target, target + '\n                    ' + observation if target.startswith('.frame(') else observation)
 program_view.write_text(program_source, encoding='utf-8')
 
 service_fixture('NEU-Lumen/Core/Services/CampusReminderStore.swift',

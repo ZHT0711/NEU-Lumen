@@ -62,6 +62,17 @@ func verifyAcademicUIValidation(_ environment: AppEnvironment) throws {
 }
 
 @MainActor
+final class ProgramViewportValidation {
+    static let shared = ProgramViewportValidation()
+    var content = CGRect.zero
+    var viewport = CGRect.zero
+    var fits: Bool {
+        content.width > 0 && content.height > 0 && viewport.width > 0 && viewport.height > 0 &&
+            viewport.insetBy(dx: -1, dy: -1).contains(content)
+    }
+}
+
+@MainActor
 func writeNativeUIValidationMarker(screen: String, environment: AppEnvironment) async {
     guard screen.hasPrefix("academic-") else { return }
     let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -69,6 +80,14 @@ func writeNativeUIValidationMarker(screen: String, environment: AppEnvironment) 
     do {
         try await Task.sleep(for: .milliseconds(300))
         try verifyAcademicUIValidation(environment)
+        if screen == "academic-plan" {
+            for _ in 0..<40 where !ProgramViewportValidation.shared.fits {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            guard ProgramViewportValidation.shared.fits else {
+                throw NetworkError(message: "Actual rendered program branches exceed the viewport: \(ProgramViewportValidation.shared.content) / \(ProgramViewportValidation.shared.viewport)")
+            }
+        }
         try "PASS: actual native \(screen) mounted; explicit DEBUG synthetic academic seed only; no real account or network data"
             .write(to: output, atomically: true, encoding: .utf8)
     } catch {
