@@ -101,6 +101,10 @@ struct NativeECodeView: View {
     private func clearCode() { image = nil; observedAt = nil }
     private func refresh() {
         clearCode(); document = nil; loadedAt = nil
+        needsSchoolRefresh = false
+        // Foreground/network callbacks may precede the first GET or arrive while
+        // it is loading. Let that request finish instead of treating it as POST.
+        guard !browser.isLoading, !browser.webView.isLoading, browser.webView.url != nil else { return }
         needsSchoolRefresh = !browser.reloadReadOnlyDocument()
         if needsSchoolRefresh { message = "请在学校页面刷新或重新进入校园码，再返回查看。" }
     }
