@@ -127,6 +127,7 @@ jobs:
             NEU-Lumen/App/Navigation.swift \
             NEU-Lumen/Core/Models/CourseModels.swift \
             NEU-Lumen/Core/Models/GradeModels.swift \
+            NEU-Lumen/Core/Models/GradeAnalysis.swift \
             NEU-Lumen/Core/Models/AcademicResponse.swift \
             NEU-Lumen/Core/Services/Semester.swift \
             NEU-Lumen/Core/Networking/CookieJar.swift \

@@ -10,13 +10,13 @@ enum CampusPaymentEntry {
 
 /// Explicit native tools; this never rewrites PortalApp's school-provided destination.
 enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable {
-    case academic, payment, vpn, affairs, mail, news, agenda, downloads
+    case academic, payment, vpn, affairs, mail, news, agenda, downloads, analysis, map, library, telephone
     var id: String { rawValue }
     static let groups = ["学习与生活", "校园资源"]
     var group: String {
         switch self {
-        case .academic, .payment, .affairs, .agenda: "学习与生活"
-        case .mail, .news, .vpn, .downloads: "校园资源"
+        case .academic, .payment, .affairs, .agenda, .analysis, .map: "学习与生活"
+        case .mail, .news, .vpn, .downloads, .library, .telephone: "校园资源"
         }
     }
     var title: String {
@@ -29,6 +29,10 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .news: "校园资讯"
         case .agenda: "校园日程"
         case .downloads: "下载中心"
+        case .analysis: "成绩分析"
+        case .map: "校园地图"
+        case .library: "图书馆"
+        case .telephone: "校内电话簿"
         }
     }
     var subtitle: String {
@@ -41,6 +45,10 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .news: "资讯频道、搜索与往期新闻"
         case .agenda: "每日课程、本机日程与系统日历"
         case .downloads: "附件预览、分享与下载管理"
+        case .analysis: "成绩分布、学期趋势与待公布记录"
+        case .map: "校区、教学楼、食堂与步行导航"
+        case .library: "馆藏检索、借阅与图书续借"
+        case .telephone: "部门、办公电话与办公地址"
         }
     }
     var symbol: String {
@@ -53,10 +61,14 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .news: "newspaper"
         case .agenda: "calendar.badge.clock"
         case .downloads: "arrow.down.doc"
+        case .analysis: "chart.bar.xaxis"
+        case .map: "map"
+        case .library: "books.vertical"
+        case .telephone: "phone.bubble"
         }
     }
     var appID: String? {
-        switch self { case .payment: "62"; case .affairs: "1"; case .mail: "121"; default: nil }
+        switch self { case .payment: "62"; case .affairs: "1"; case .mail: "121"; case .library: "21"; case .telephone: "91"; default: nil }
     }
     var fallbackURL: URL {
         let value: String
@@ -68,6 +80,10 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .mail: value = "https://mails.neu.edu.cn/coremail/cmcu_addon/dbdxsso.jsp"
         case .news: value = "https://neunews.neu.edu.cn/"
         case .agenda: value = "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do"
+        case .analysis: value = "https://jwxt.neu.edu.cn/jwapp/sys/homeapp/index.do"
+        case .map: value = "https://www.neu.edu.cn/zhxx1.htm"
+        case .library: value = "https://portal.neu.edu.cn/tp_up/up/subgroup/gotoLibirarySystem"
+        case .telephone: value = "https://plat.neu.edu.cn/telephone-directory/"
         case .downloads: value = "about:blank" // Local utility; never offers a school-page action.
         }
         return URL(string: value)!
@@ -81,10 +97,22 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .mail: return ["mails.neu.edu.cn", "mail.neu.edu.cn", "stu.neu.edu.cn", "imp.neu.edu.cn"].contains(host)
         case .news: return host == "neunews.neu.edu.cn"
         case .agenda: return host == "jwxt.neu.edu.cn"
+        case .analysis: return host == "jwxt.neu.edu.cn"
+        case .map: return false
+        case .library: return ["portal.neu.edu.cn", "www.lib.neu.edu.cn", "lib.neu.edu.cn", "210.30.202.58"].contains(host)
+        case .telephone: return host == "plat.neu.edu.cn"
         case .downloads: return false
         }
     }
-    var hasSchoolPage: Bool { self != .downloads }
+    var hasSchoolPage: Bool { ![Self.downloads, .analysis, .map].contains(self) }
+    func allowsNativeDocument(_ url: URL) -> Bool {
+        guard url.user == nil, url.password == nil, let host = url.host?.lowercased(), owns(host: host) else { return false }
+        if self == .library, url.scheme == "http", host == "210.30.202.58", url.port == 8991 {
+            return url.path == "/F" || url.path.hasPrefix("/F/")
+        }
+        return url.scheme == "https" && (url.port == nil || url.port == 443)
+    }
+
     func entryURL(apps: [PortalApp]) -> URL {
         for app in apps {
             guard let url = URL(string: app.entryUrl()), url.scheme == "https", url.user == nil, url.password == nil, url.port == nil || url.port == 443,

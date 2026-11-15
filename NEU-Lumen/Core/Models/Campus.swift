@@ -1,9 +1,13 @@
 import Foundation
 
-enum Campus: String, CaseIterable, Identifiable {
+enum Campus: String, CaseIterable, Identifiable, Hashable {
     case nanhu, hunnan
     var id: String { rawValue }
     var title: String { self == .nanhu ? "南湖校区" : "浑南校区" }
+    /// Published by https://www.neu.edu.cn/zhxx1.htm. Map coordinates come from MapKit search.
+    var address: String {
+        self == .nanhu ? "辽宁省沈阳市和平区文化路三号巷11号" : "辽宁省沈阳市浑南区创新路195号"
+    }
     var landmarks: [String] {
         self == .nanhu ? ["何世礼教学馆", "火箭广场", "刘长春体育馆"] : ["1 号教学楼", "信息学馆", "建筑学馆"]
     }

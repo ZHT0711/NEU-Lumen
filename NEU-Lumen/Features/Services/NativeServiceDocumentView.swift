@@ -32,27 +32,42 @@ struct NativeServiceDocumentView: View {
                     Text(notice).foregroundStyle(.orange).textSelection(.enabled)
                 }
                 if !document.fields.isEmpty {
-                    Section(service == .affairs ? "申请表单" : service == .academic ? "查询条件与业务表单" : "查询与缴费信息") {
+                    Section(service == .affairs ? "申请表单" : service == .payment ? "查询与缴费信息" : "查询条件与业务表单") {
                         ForEach(document.fields) { field in fieldEditor(field) }
                     }
                 }
                 ForEach(document.tables) { table in
                     Section(table.title) {
                         ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
-                            VStack(alignment: .leading, spacing: 6) {
+                            if service == .telephone, let entry = CampusPhoneEntry(cells: row) {
+                                CampusPhoneRow(entry: entry)
+                            } else { VStack(alignment: .leading, spacing: 6) {
                                 ForEach(Array(row.enumerated()), id: \.offset) { index, value in
                                     if index < table.headers.count && !table.headers[index].isEmpty {
                                         LabeledContent(table.headers[index], value: value.isEmpty ? "未提供" : value)
                                     } else if !value.isEmpty { Text(value) }
                                 }
-                            }.font(.subheadline).textSelection(.enabled).padding(.vertical, 4)
+                            }.font(.subheadline).textSelection(.enabled).padding(.vertical, 4) }
                         }
                         if table.truncated { Text("本页已显示前 200 行，可通过学校分页继续查看。").font(.caption).foregroundStyle(.secondary) }
                     }
                 }
-                if !document.actions.isEmpty {
+                let pages = document.actions.filter(\.isPaging)
+                if !pages.isEmpty {
+                    Section("翻页") {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack {
+                                ForEach(pages) { action in
+                                    Button(action.title) { Task { await activate(action) } }
+                                        .frame(minWidth: 44, minHeight: 44).buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+                }
+                if document.actions.contains(where: { !$0.isPaging }) {
                     Section("学校页面操作") {
-                        ForEach(document.actions) { action in
+                        ForEach(document.actions.filter { !$0.isPaging }) { action in
                             Button {
                                 if action.query == true { Task { await activate(action) } }
                                 else { pendingAction = action }
@@ -131,7 +146,8 @@ struct NativeServiceDocumentView: View {
                 queueUpdate(field, value: value)
             }
         })
-        let title = field.label + (field.required ? " *" : "")
+        let label = service == .telephone && field.commit == "live" ? "搜索部门、办公室或地址" : field.label
+        let title = label + (field.required ? " *" : "")
         if field.readOnly {
             VStack(alignment: .leading, spacing: 4) {
                 LabeledContent(title, value: displayValue(field)).textSelection(.enabled)
@@ -209,6 +225,12 @@ struct NativeServiceDocumentView: View {
                 Text(title).font(.subheadline)
                 TextEditor(text: binding).frame(minHeight: 100)
             }
+        } else if field.commit == "live" {
+            HStack {
+                TextField(title, text: binding).submitLabel(.search).autocorrectionDisabled()
+                    .onSubmit { queueUpdate(field, value: binding.wrappedValue) }
+                Button("搜索") { queueUpdate(field, value: binding.wrappedValue) }
+            }
         } else if field.commit == "page" {
             HStack {
                 TextField(title, text: binding).keyboardType(.asciiCapableNumberPad)
@@ -227,8 +249,7 @@ struct NativeServiceDocumentView: View {
         let epoch = session.requestEpoch
         guard session.phase == .loggedIn, let url = browser.webView.url else { throw CancellationError() }
         let original = WebVPN.unwrap(url) ?? url
-        guard original.scheme == "https", original.user == nil, original.password == nil,
-              original.port == nil || original.port == 443, let host = original.host?.lowercased(), service.owns(host: host) else {
+        guard service.allowsNativeDocument(original), let host = original.host?.lowercased(), service.owns(host: host) else {
             throw NetworkError(message: "请先在学校页面完成认证并进入\(service.title)，再切换原生视图")
         }
         let raw = try await browser.webView.callAsyncJavaScript(NativeServiceDocument.bridge, arguments: [

@@ -63,7 +63,7 @@ struct NewsChannel: Identifiable, Hashable {
     let name: String
 }
 
-struct NewsItem: Identifiable, Hashable {
+struct NewsItem: Identifiable, Hashable, Codable {
     let id: String
     let title: String
     let date: String

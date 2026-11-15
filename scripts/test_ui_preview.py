@@ -188,7 +188,7 @@ class UIPreviewTests(unittest.TestCase):
                 thread.join(timeout=5)
 
     def test_download_checks_and_twentieth_screenshot_are_required(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 52)
+        self.assertEqual(len(preview.SCREENSHOTS), 56)
         self.assertIn('downloads-light.png', preview.SCREENSHOTS)
         for name in ['download-checks.txt', 'download-restore.txt', 'download-screenshot.txt',
                      'learning-save.txt', 'learning-restore.txt']:
@@ -230,9 +230,9 @@ class UIPreviewTests(unittest.TestCase):
         self.assertTrue(set(screens).issubset({name.removesuffix('-light.png') for name in preview.SCREENSHOTS}))
 
     def test_exact_new_snapshots_and_required_checks(self):
-        self.assertEqual(len(preview.SCREENSHOTS), 52)
+        self.assertEqual(len(preview.SCREENSHOTS), 56)
         self.assertEqual(len(preview.CHECKS), 19)
-        self.assertEqual(len(set(preview.SCREENSHOTS)), 52)
+        self.assertEqual(len(set(preview.SCREENSHOTS)), 56)
         self.assertEqual(len(set(preview.CHECKS)), 19)
         for screen in ['native-ecode', 'native-electricity', 'native-bills', 'services-directory']:
             self.assertIn(screen + '-light.png', preview.SCREENSHOTS)

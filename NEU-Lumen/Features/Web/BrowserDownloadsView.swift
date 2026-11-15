@@ -41,6 +41,8 @@ struct BrowserDownloadsView: View {
     @State private var showDelete = false
     @State private var missingFile = false
     @State private var query = ""
+    @State private var fileType = "全部"
+    @State private var sortByName = false
 
     init(store: BrowserDownloadStore, embedded: Bool = false) { self.store = store; self.embedded = embedded }
 
@@ -55,8 +57,17 @@ struct BrowserDownloadsView: View {
             List {
                 if !store.records.isEmpty {
                     Section {
-                        TextField("筛选下载文件", text: $query)
-                            .autocorrectionDisabled()
+                        HStack {
+                            TextField("筛选下载文件", text: $query).autocorrectionDisabled()
+                            Menu("筛选与排序", systemImage: "line.3.horizontal.decrease") {
+                                Picker("文件类型", selection: $fileType) {
+                                    ForEach(["全部", "PDF", "图片", "文档", "其他"], id: \.self) { Text($0).tag($0) }
+                                }
+                                Toggle("按文件名排序", isOn: $sortByName)
+                                Button("重置筛选") { query = ""; fileType = "全部"; sortByName = false }
+                            }
+                        }
+                        if fileType != "全部" { Text("文件类型 · " + fileType).font(.caption).foregroundStyle(.secondary) }
                         if !query.isEmpty, !store.records.contains(where: matches) {
                             Text("没有匹配的文件").foregroundStyle(.secondary)
                         }
@@ -105,14 +116,16 @@ struct BrowserDownloadsView: View {
                 shared = nil
                 deleting = nil
                 showDelete = false
-                query = ""
+                query = ""; fileType = "全部"; sortByName = false
                 if !embedded { dismiss() }
             }
     }
 
     @ViewBuilder
     private func downloadSection(_ title: String, states: [BrowserDownloadRecord.State]) -> some View {
-        let items = store.records.filter { states.contains($0.state) && matches($0) }
+        let items = store.records.filter { states.contains($0.state) && matches($0) }.sorted {
+            sortByName ? $0.filename.localizedStandardCompare($1.filename) == .orderedAscending : $0.createdAt > $1.createdAt
+        }
         if !items.isEmpty {
             Section(title) { ForEach(items) { row($0) } }
         }
@@ -189,7 +202,11 @@ struct BrowserDownloadsView: View {
 
     private func matches(_ record: BrowserDownloadRecord) -> Bool {
         let value = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty || record.filename.localizedStandardContains(value)
+        let ext = (record.filename as NSString).pathExtension.lowercased()
+        let images = ["png", "jpg", "jpeg", "gif", "heic", "webp", "tiff"]
+        let documents = ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "txt", "md"]
+        let category = ext == "pdf" ? "PDF" : images.contains(ext) ? "图片" : documents.contains(ext) ? "文档" : "其他"
+        return (fileType == "全部" || category == fileType) && (value.isEmpty || record.filename.localizedStandardContains(value))
     }
 
     private func open(_ record: BrowserDownloadRecord, sharing: Bool) {

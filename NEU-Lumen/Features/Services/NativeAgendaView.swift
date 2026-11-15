@@ -7,6 +7,7 @@ struct NativeAgendaView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var day = Date()
+    @State private var source = "全部"
     @State private var adding = false
     @State private var managing = false
     @State private var selected: CourseOccurrence?
@@ -17,7 +18,7 @@ struct NativeAgendaView: View {
     private var sunday: Date { Semester.weekStart(forDay: day) }
     private var occurrences: [CourseOccurrence] {
         repo.displayWeekOccurrences(starting: sunday)
-            .filter { Calendar.current.isDate($0.date, inSameDayAs: day) }
+            .filter { Calendar.current.isDate($0.date, inSameDayAs: day) && (source == "全部" || (source == "课程" ? $0.slot.eventID == nil : $0.slot.eventID != nil)) }
             .sorted { $0.slot.startMinutes < $1.slot.startMinutes }
     }
     private var systemItems: [SystemAgendaItem] {
@@ -27,6 +28,11 @@ struct NativeAgendaView: View {
     var body: some View {
         List {
             Section {
+                Picker("日程来源", selection: $source) {
+                    Text("全部").tag("全部")
+                    Text("课程").tag("课程")
+                    Text("日程").tag("日程")
+                }.pickerStyle(.segmented)
                 DatePicker("查看日期", selection: $day, displayedComponents: .date)
                 HStack {
                     Button { move(-1) } label: { Label("前一天", systemImage: "chevron.left") }
@@ -71,7 +77,7 @@ struct NativeAgendaView: View {
                     }.buttonStyle(.plain)
                 }
             }
-            Section("系统日历与提醒") {
+            if source != "课程" { Section("系统日历与提醒") {
                 if systemItems.isEmpty {
                     Text("当天暂无所选来源的日程，可在“日历与提醒”中连接和选择。")
                         .font(.subheadline).foregroundStyle(.secondary)
@@ -94,6 +100,7 @@ struct NativeAgendaView: View {
                 }
                 if let message = repo.systemCalendar.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
+            }
             Section { NavigationLink("学期校历与周次", destination: AcademicCalendarView()) }
         }
         .refreshable { await refresh(force: true) }
@@ -104,7 +111,7 @@ struct NativeAgendaView: View {
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
             if active { Task { await refreshSystem() } }
         }
-        .onChange(of: environment.session.requestEpoch) { _, _ in selected = nil; systemItem = nil; completing = nil; managing = false; adding = false }
+        .onChange(of: environment.session.requestEpoch) { _, _ in selected = nil; source = "全部"; systemItem = nil; completing = nil; managing = false; adding = false }
         .onChange(of: environment.session.networkRevision) { _, _ in
             if active, case .failed = repo.displayWeekState(starting: sunday) { Task { await refresh(force: true) } }
         }

@@ -123,6 +123,10 @@ struct GradesView: View {
                         .font(.footnote).foregroundStyle(.orange)
                 }
                 statTiles(semester)
+                NavigationLink { NativeGradeAnalysisView() } label: {
+                    Label("成绩分析与学期统计", systemImage: "chart.bar.xaxis")
+                        .font(.subheadline).frame(minHeight: 44)
+                }
                 if semester.courses.isEmpty {
                     ContentUnavailableView("本学期暂无成绩", systemImage: "doc.text", description: Text("可以切换到其他学期查看已公布的成绩。"))
                 }
@@ -169,10 +173,11 @@ struct GradesView: View {
     }
 
     private func statTiles(_ semester: GradeSemester) -> some View {
-        HStack(spacing: 10) {
-            statTile("GPA", String(format: "%.2f", semester.gpa))
-            statTile("加权平均分", String(format: "%.1f", semester.weightedAvg))
-            statTile("总学分", String(format: "%.1f", semester.credits))
+        let metrics = LiveActivityAcademic(semesters: [semester])
+        return HStack(spacing: 10) {
+            statTile("GPA", metrics.gpa.map { String(format: "%.2f", $0) } ?? "—")
+            statTile("加权平均分", metrics.weightedAverage.map { String(format: "%.1f", $0) } ?? "—")
+            statTile("成绩学分", metrics.credits.map { String(format: "%.1f", $0) } ?? "—")
         }
     }
 
@@ -181,7 +186,7 @@ struct GradesView: View {
             VStack(spacing: 6) {
                 Text(value)
                     .font(.title3.bold())
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 Text(title)
@@ -219,7 +224,7 @@ struct GradeRow: View {
             Spacer()
             Text(course.scoreText)
                 .font(.title3.bold())
-                .foregroundStyle(AppTheme.accent)
+                .foregroundStyle(.primary)
                 .monospacedDigit()
         }
         .padding(.horizontal, 14)

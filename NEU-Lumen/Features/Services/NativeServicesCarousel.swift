@@ -5,6 +5,12 @@ struct NativeServicesCarousel: View {
     var searching = false
     let open: (NativeCampusService) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var illustrationInk: Color {
+        colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -19,14 +25,22 @@ struct NativeServicesCarousel: View {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Label(service.title, systemImage: service.symbol)
                                             .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(AppTheme.accent)
+                                            .foregroundStyle(.primary)
                                         Text(service.subtitle)
                                             .font(.caption).foregroundStyle(.secondary)
                                             .fixedSize(horizontal: false, vertical: true)
                                     }
-                                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
                                     .padding(14)
+                                    .background(alignment: .bottomTrailing) {
+                                        NativeServiceCardArt(service: service)
+                                            .stroke(illustrationInk.opacity(contrast == .increased ? 0.07 : 0.16),
+                                                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                                            .frame(width: 120, height: 96).padding(.trailing, 4)
+                                            .accessibilityHidden(true).allowsHitTesting(false)
+                                    }
                                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
                                     .contentShape(RoundedRectangle(cornerRadius: 18))
                                 }
                                 .buttonStyle(.plain)
@@ -53,7 +67,7 @@ struct NativeServiceHost: View {
     var body: some View {
         VStack(spacing: 0) {
             TabView(selection: $selected) {
-                AcademicCenterView().tag(NativeCampusService.academic)
+                AcademicCenterView(active: selected == .academic).tag(NativeCampusService.academic)
                 NativePaymentView(active: selected == .payment).tag(NativeCampusService.payment)
                 NativeVPNView(active: selected == .vpn).tag(NativeCampusService.vpn)
                 NativeAffairsView(active: selected == .affairs).tag(NativeCampusService.affairs)
@@ -61,6 +75,10 @@ struct NativeServiceHost: View {
                 NativeNewsView(active: selected == .news).tag(NativeCampusService.news)
                 NativeAgendaView(active: selected == .agenda).tag(NativeCampusService.agenda)
                 BrowserDownloadsView(store: .shared, embedded: true).tag(NativeCampusService.downloads)
+                NativeGradeAnalysisView(active: selected == .analysis).tag(NativeCampusService.analysis)
+                NativeCampusMapView(active: selected == .map).tag(NativeCampusService.map)
+                NativeLibraryView().tag(NativeCampusService.library)
+                NativeTelephoneView(active: selected == .telephone).tag(NativeCampusService.telephone)
             }.tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(Color(.systemGroupedBackground))

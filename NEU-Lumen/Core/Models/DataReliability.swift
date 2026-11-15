@@ -78,6 +78,11 @@ struct ElectricRoomKey: Hashable {
         let room = normalize(raw)
         return room.utf8.count == 7 && room.utf8.allSatisfy { (48...57).contains($0) }
     }
+
+    static func recentRooms(selecting room: String, in previous: [String]) -> [String] {
+        var seen = Set<String>()
+        return Array(([room] + previous).map(normalize).filter { isValid($0) && seen.insert($0).inserted }.prefix(5))
+    }
 }
 
 /// Distinguishes unread/failed/partially read schedules from a confirmed empty day.

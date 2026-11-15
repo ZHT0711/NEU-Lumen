@@ -49,6 +49,11 @@ struct NativeMailView: View {
                     }
                     Button("搜索") { applySearch() }
                 }.disabled(store.busy || store.loadingWeb)
+                HStack {
+                    Toggle("仅未读", isOn: Binding(get: { search.unreadOnly }, set: { search.unreadOnly = $0; applySearch() }))
+                    Toggle("有附件", isOn: Binding(get: { search.attachedOnly }, set: { search.attachedOnly = $0; applySearch() }))
+                }
+                .toggleStyle(.button).disabled(store.busy || store.loadingWeb)
                 DisclosureGroup("高级搜索") {
                     TextField("发件人", text: $search.from).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("收件人", text: $search.to).textInputAutocapitalization(.never).autocorrectionDisabled()

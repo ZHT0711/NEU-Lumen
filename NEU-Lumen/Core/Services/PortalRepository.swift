@@ -126,6 +126,7 @@ final class PortalRepository {
     private var walletAccessTask: Task<Void, Never>?
     private var walletAccessID = UUID()
     private var electricRoom = ""
+    private(set) var electricRoomHistory: [String] = []
     private struct ElectricSnapshot {
         let info: ElectricInfo
         let updatedAt: Date
@@ -220,6 +221,7 @@ final class PortalRepository {
         walletAccessID = UUID()
         cardBalanceRevision = UUID()
         electricRoom = sid.isEmpty ? "" : ElectricRoomKey.normalize(UserDefaults.standard.string(forKey: "lumen.electric.room." + sid) ?? "")
+        electricRoomHistory = sid.isEmpty ? [] : ElectricRoomKey.recentRooms(selecting: "", in: UserDefaults.standard.stringArray(forKey: "lumen.electric.history." + sid) ?? [])
         electricCache.removeAll()
         netWarning = nil
         electricWarning = nil
@@ -1220,6 +1222,8 @@ final class PortalRepository {
                 self.electricUpdatedAt = updated
                 self.electricWarning = nil
                 self.electricState = .loaded
+                self.electricRoomHistory = ElectricRoomKey.recentRooms(selecting: key.room, in: self.electricRoomHistory)
+                UserDefaults.standard.set(self.electricRoomHistory, forKey: "lumen.electric.history." + context.account)
                 self.session.persistWebSession()
             case .failure(let error):
                 if NetworkError.isCancellation(error) { self.electricState = self.electricInfo == nil ? .idle : .loaded }

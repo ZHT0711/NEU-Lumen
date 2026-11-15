@@ -87,12 +87,28 @@ struct NativeNewsView: View {
     @State private var store = NativeNewsStore()
     @State private var article: NativeServiceWebLink?
     @State private var draft = ""
+    @State private var saved = SavedCampusNews()
+    @State private var savedOnly = false
     @FocusState private var searchFocused: Bool
+
+    private var visibleItems: [NewsItem] {
+        guard savedOnly else { return store.items }
+        let query = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return saved.items.filter { query.isEmpty || ($0.title + $0.category + $0.date).localizedCaseInsensitiveContains(query) }
+    }
+    private var account: String? {
+        guard let user = environment.session.user else { return nil }
+        return user.sid.isEmpty ? user.uid : user.sid
+    }
 
     var body: some View {
         @Bindable var store = store
         List {
             Section {
+                Picker("资讯范围", selection: $savedOnly) {
+                    Text("最新资讯").tag(false)
+                    Text("我的收藏").tag(true)
+                }.pickerStyle(.segmented)
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索学校资讯", text: $draft).submitLabel(.search)
@@ -103,9 +119,9 @@ struct NativeNewsView: View {
                         Button("清除", systemImage: "xmark.circle.fill") { draft = ""; search() }
                             .labelStyle(.iconOnly).frame(minWidth: 44, minHeight: 44)
                     }
-                    Button("搜索") { search() }.disabled(store.busy)
+                    Button("搜索") { search() }.disabled(store.busy && !savedOnly)
                 }
-                if !store.channels.isEmpty {
+                if !savedOnly && !store.channels.isEmpty {
                     Picker("资讯频道", selection: $store.channelID) {
                         ForEach(store.channels) { Text($0.name).tag($0.id) }
                     }
@@ -114,7 +130,7 @@ struct NativeNewsView: View {
                     }
                 }
             } footer: { Text("新闻列表来自学校门户。点开资讯可查看学校发布的完整图文与附件。") }
-            if let error = store.error {
+            if let error = store.error, !savedOnly {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     Button("重试") { Task { await store.retry(session: environment.session) } }.disabled(store.busy)
@@ -124,12 +140,12 @@ struct NativeNewsView: View {
                     }
                 }
             }
-            if store.busy, store.items.isEmpty { ProgressView("正在读取校园资讯…") }
-            else if store.items.isEmpty, store.error == nil {
-                ContentUnavailableView("暂无匹配资讯", systemImage: "newspaper", description: Text("试试其他关键词或频道。"))
+            if store.busy, store.items.isEmpty, !savedOnly { ProgressView("正在读取校园资讯…") }
+            else if visibleItems.isEmpty, savedOnly || store.error == nil {
+                ContentUnavailableView(savedOnly ? "暂无收藏资讯" : "暂无匹配资讯", systemImage: "newspaper", description: Text("试试其他关键词或频道。"))
             }
             Section {
-                ForEach(store.items) { item in
+                ForEach(visibleItems) { item in
                     Button {
                         if let url = PortalLink.resolve(item.url) { article = NativeServiceWebLink(url: url) }
                     } label: {
@@ -140,9 +156,18 @@ struct NativeNewsView: View {
                                 Spacer(); Image(systemName: "chevron.right")
                             }.font(.caption).foregroundStyle(.secondary)
                         }.padding(.vertical, 6)
-                    }.disabled(PortalLink.resolve(item.url) == nil)
+                    }
+                    .disabled(PortalLink.resolve(item.url) == nil)
+                    .contextMenu {
+                        Button(saved.contains(item) ? "取消收藏" : "收藏资讯", systemImage: saved.contains(item) ? "bookmark.slash" : "bookmark") { saved.toggle(item) }
+                        if let url = PortalLink.resolve(item.url) { ShareLink(item: url) }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(saved.contains(item) ? "取消收藏" : "收藏", systemImage: saved.contains(item) ? "bookmark.slash" : "bookmark") { saved.toggle(item) }
+                            .tint(.blue)
+                    }
                 }
-                if store.hasMore {
+                if store.hasMore && !savedOnly {
                     Button { Task { await load(reset: false) } } label: {
                         HStack { Text("加载更多资讯"); if store.busy { ProgressView() } }
                     }.disabled(store.busy)
@@ -150,14 +175,17 @@ struct NativeNewsView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: savedOnly) { _, onlySaved in if !onlySaved { search() } }
         .refreshable { await load(reset: true) }
         .task(id: "\(active)|\(environment.session.requestEpoch)") {
-            if store.bind(to: environment.session.requestEpoch) { draft = "" }
+            saved.bind(account: account)
+            if store.bind(to: environment.session.requestEpoch) { draft = ""; savedOnly = false }
             if active, !store.hasLoaded { await load(reset: true) }
         }
         .onChange(of: environment.session.requestEpoch) { _, epoch in
             store.bind(to: epoch)
-            article = nil; draft = ""; searchFocused = false
+            saved.bind(account: account)
+            article = nil; draft = ""; savedOnly = false; searchFocused = false
         }
         .onChange(of: active) { _, value in
             if !value { searchFocused = false }
@@ -170,9 +198,13 @@ struct NativeNewsView: View {
         .sheet(item: $article) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
     }
 
-    private func load(reset: Bool) async { await store.load(session: environment.session, reset: reset) }
+    private func load(reset: Bool) async {
+        guard !savedOnly else { return }
+        await store.load(session: environment.session, reset: reset)
+    }
     private func search() {
         searchFocused = false
+        guard !savedOnly else { return }
         store.keyword = draft
         Task { await load(reset: true) }
     }

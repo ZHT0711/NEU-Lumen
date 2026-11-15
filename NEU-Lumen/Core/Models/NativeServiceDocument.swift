@@ -28,6 +28,11 @@ struct NativeServiceDocument: Decodable {
         let title: String
         let context: String
         let query: Bool?
+        var isPaging: Bool {
+            guard query == true else { return false }
+            return Int(title.trimmingCharacters(in: .whitespacesAndNewlines)) != nil ||
+                ["上一页", "下一页", "首页", "末页", "Next »", "« Previous", "›", "‹", "»", "«"].contains(title)
+        }
     }
     struct Table: Decodable, Identifiable {
         let id: String
@@ -50,6 +55,8 @@ struct NativeServiceDocument: Decodable {
     /// hidden CSRF fields, form actions, JavaScript validators and order identifiers.
     static let bridge = #"""
     const key='__neuServiceDocument';
+    const snapshotID=()=>typeof crypto.randomUUID==='function'?crypto.randomUUID():
+        Array.from(crypto.getRandomValues(new Uint8Array(16)),byte=>byte.toString(16).padStart(2,'0')).join('');
     const clean=(value,max=4096)=>String(value??'').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,'').trim().slice(0,max);
     const visible=el=>el.isConnected && !el.closest('[hidden],[aria-hidden="true"]') && el.getClientRects().length>0 &&
         el.ownerDocument.defaultView.getComputedStyle(el).visibility!=='hidden';
@@ -81,7 +88,7 @@ struct NativeServiceDocument: Decodable {
     };
     const actionState=el=>JSON.stringify([el.getAttribute('href'),el.getAttribute('onclick'),el.getAttribute('formaction'),
         el.getAttribute('formmethod'),el.getAttribute('target'),el.getAttribute('type'),el.form?.action,el.form?.method,
-        el.getAttribute('aria-disabled'),el.getAttribute('pager-flag'),el.getAttribute('emap-role'),el.getAttribute('data-action')]);
+        el.getAttribute('aria-disabled'),el.getAttribute('pager-flag'),el.getAttribute('emap-role'),el.getAttribute('data-action'),el.getAttribute('wire:click')]);
     const currentValue=entry=>entry.kind==='choice'?clean(entry.node.getAttribute('aria-valuetext') ||
         entry.node.querySelector('[id^=dropdownlistContent],.ant-select-selection-item,.el-select__selected-item')?.textContent || (entry.node.matches('input')?entry.node.value:entry.node.querySelector('input:not([type=hidden])')?.value) || text(entry.node),256):
         entry.kind==='toggle'?String(entry.node.getAttribute('aria-checked')==='true' || !!entry.node.querySelector('.jqx-checkbox-check-checked')):
@@ -225,7 +232,7 @@ struct NativeServiceDocument: Decodable {
         el.click();
         return {activated:true};
     }
-    const state={token:crypto.randomUUID(),url:location.href,documents:docs,fields:new Map(),actions:new Map(),hidden:[],consumed:false};
+    const state={token:snapshotID(),url:location.href,documents:docs,fields:new Map(),actions:new Map(),hidden:[],consumed:false};
     let needsWeb=false,requiresWebsite=false,serial=0;
     const fields=[],actions=[],tables=[],notices=[];
     const radios=new Set(),customNodes=new Set();
@@ -286,7 +293,8 @@ struct NativeServiceDocument: Decodable {
             state.fields.set(id,entry);
             fields.push({id,key:fieldKey(el),label:name,kind,value:entry.original,required:nodes?nodes.some(x=>x.required):!!el.required,
                 readOnly:!!(entry.disabled||entry.readOnly||locked),hint:locked?'学校此入口仅支持当天查询':null,
-                commit:el.getAttribute('pager-flag')==='gotoPage'?'page':null,queryField:!!el.closest('.emap-FQ-container'),options});
+                commit:el.getAttribute('pager-flag')==='gotoPage'?'page':Array.from(el.attributes).some(a=>a.name.startsWith('wire:model.live'))?'live':null,
+                queryField:!!el.closest('.emap-FQ-container') || Array.from(el.attributes).some(a=>a.name.startsWith('wire:model.live')),options});
         }
         for (const table of doc.querySelectorAll('table,[role=grid],[role=table]')) {
             if (!visible(table) || table.querySelector('table,[role=grid],[role=table]')) continue;
@@ -311,7 +319,8 @@ struct NativeServiceDocument: Decodable {
             const title=actionTitle(el);
             if (!title) continue;
             const id='a'+serial++;
-            const query=el.getAttribute('role')==='tab' || /^(查询|搜索|检索|筛选|刷新|重置|清空|清空条件|更多条件|收起[>＞]?|展开[>＞]?|确定查询|上一页|下一页|首页|末页)$/.test(title.replace(/\s+/g,'')) ||
+            const query=el.getAttribute('role')==='tab' || /^(查询|搜索|检索|筛选|刷新|重置|清空|清空条件|更多条件|收起[>＞]?|展开[>＞]?|确定查询|上一页|下一页|首页|末页|search|find|reset|next(?:\s*[»>])?|[«<]?\s*previous|[‹›«»])$/i.test(title.replace(/\s+/g,'')) ||
+                /^(?:gotoPage|previousPage|nextPage)\(/.test(el.getAttribute('wire:click') || '') ||
                 (/^[0-9]+$/.test(title) && !!el.closest('.pagination,.ant-pagination,.jqx-grid-pager,.bh-pager,[role=navigation]'));
             state.actions.set(id,{node:el,label:title,context:context(el),signature:actionState(el),query});
             actions.push({id,title,context:context(el),query});
@@ -327,7 +336,7 @@ struct NativeServiceDocument: Decodable {
     const sameDraft=previousDraft && previousDraft.url===state.url && previousDraft.documents?.length===docs.length &&
         docs.every((doc,index)=>previousDraft.documents[index]===doc) && previousDraft.hidden.length===state.hidden.length &&
         state.hidden.every((entry,index)=>previousDraft.hidden[index].node===entry.node && previousDraft.hidden[index].value===entry.value);
-    state.draftIdentity=sameDraft && previousDraft.draftIdentity ? previousDraft.draftIdentity : crypto.randomUUID();
+    state.draftIdentity=sameDraft && previousDraft.draftIdentity ? previousDraft.draftIdentity : snapshotID();
     const contents={title:clean(document.title,256),fields,actions,tables,notices:notices.slice(0,20),needsWeb,requiresWebsite,draftIdentity:state.draftIdentity};
     const fingerprint=JSON.stringify(contents);
     if (command==='watch') {

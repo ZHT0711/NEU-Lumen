@@ -11,8 +11,8 @@ struct GradeCourse: Identifiable, Hashable {
     var id: String { name + "|" + scoreText }
 
     var scoreText: String {
-        if let score {
-            return score == score.rounded() ? String(Int(score)) : String(format: "%.1f", score)
+        if let score, score.isFinite {
+            return score == score.rounded() ? String(format: "%.0f", score) : String(format: "%.1f", score)
         }
         return scoreRaw.isEmpty ? "暂无" : scoreRaw
     }
@@ -21,6 +21,7 @@ struct GradeCourse: Identifiable, Hashable {
     /// （优≈95 / 良≈85 / 中≈75 / 及格≈65 / 不及格≈50）。
     var scoreValue: Double {
         if let score { return score }
+        if let value = Double(scoreRaw.trimmingCharacters(in: .whitespacesAndNewlines)), value.isFinite { return value }
         switch scoreRaw.trimmingCharacters(in: .whitespaces) {
         case "优", "优秀": return 95
         case "良", "良好": return 85
@@ -31,7 +32,15 @@ struct GradeCourse: Identifiable, Hashable {
         }
     }
 
-    var hasScore: Bool { score != nil || !scoreRaw.isEmpty }
+    var normalizedScore: Double? {
+        if let score { return score.isFinite && (0...100).contains(score) ? score : nil }
+        let text = scoreRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let value = Double(text) { return value.isFinite && (0...100).contains(value) ? value : nil }
+        guard ["优", "优秀", "良", "良好", "中", "中等", "及格", "合格", "不及格", "不合格"].contains(text) else { return nil }
+        return scoreValue
+    }
+
+    var hasScore: Bool { normalizedScore != nil }
 }
 
 /// 一个学期的成绩单。
@@ -44,12 +53,12 @@ struct GradeSemester: Identifiable, Hashable {
     var id: String { termCode.isEmpty ? name : termCode }
 
     var credits: Double {
-        courses.filter(\.hasScore).reduce(0) { $0 + $1.credit }
+        courses.filter { $0.hasScore && $0.credit.isFinite && $0.credit > 0 }.reduce(0) { $0 + $1.credit }
     }
 
     var weightedAvg: Double {
         var ws = 0.0, wc = 0.0
-        for c in courses where c.hasScore {
+        for c in courses where c.hasScore && c.credit.isFinite && c.credit > 0 {
             ws += c.scoreValue * c.credit
             wc += c.credit
         }
@@ -58,7 +67,7 @@ struct GradeSemester: Identifiable, Hashable {
 
     var gpa: Double {
         var ws = 0.0, wc = 0.0
-        for c in courses where c.hasScore {
+        for c in courses where c.hasScore && c.credit.isFinite && c.credit > 0 {
             ws += Self.gpaOf(c.scoreValue) * c.credit
             wc += c.credit
         }

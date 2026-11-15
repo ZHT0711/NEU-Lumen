@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Eight original line drawings: campus landmarks, dining and everyday university life.
+/// Original line drawings: campus landmarks, dining and everyday university life.
 /// Normalized paths stay sharp at every text size and require no network assets.
 struct NativeServiceCardArt: Shape {
     let service: NativeCampusService
@@ -90,6 +90,33 @@ struct NativeServiceCardArt: Shape {
             for x in [25, 35, 45, 55, 65, 75] as [CGFloat] { line([(x, 47), (x, 64)]) }
             oval(6, 70, 88, 23); oval(15, 75, 70, 13)
             line([(45, 71), (45, 75)]); line([(56, 88), (56, 93)])
+        case .analysis:
+            // A notebook and the steps of the teaching building.
+            box(16, 22, 62, 60); line([(24, 17), (24, 85)])
+            for y in [34, 46, 58] as [CGFloat] { line([(34, y), (65, y)]) }
+            line([(8, 91), (36, 91), (36, 86), (65, 86), (65, 91), (92, 91)])
+            line([(65, 71), (75, 55), (85, 61), (94, 37)])
+        case .map:
+            // Folded campus map and a compass above a tree-lined path.
+            line([(6, 30), (32, 23), (60, 31), (87, 23), (87, 83), (60, 91), (32, 83), (6, 91), (6, 30)])
+            line([(32, 23), (32, 83)]); line([(60, 31), (60, 91)])
+            curve((13, 72), (75, 46), (25, 30), (53, 96))
+            oval(64, 7, 29, 29); line([(78, 10), (73, 28), (87, 20), (78, 10)])
+        case .library:
+            // Library facade with a central reading window and an open book.
+            box(13, 32, 74, 42); line([(8, 29), (50, 12), (92, 29), (8, 29)])
+            for x in [21, 34, 59, 72] as [CGFloat] { box(x, 41, 7, 20) }
+            box(46, 44, 8, 30)
+            line([(18, 84), (18, 73), (50, 78), (82, 73), (82, 84), (50, 91), (18, 84)])
+            line([(50, 78), (50, 91)])
+        case .telephone:
+            // Campus information board beside the main building's entrance.
+            box(11, 23, 48, 57); box(17, 30, 36, 36)
+            for y in [39, 49, 59] as [CGFloat] { line([(23, y), (47, y)]) }
+            line([(20, 80), (20, 94)]); line([(49, 80), (49, 94)])
+            box(66, 39, 24, 51); line([(62, 37), (78, 22), (94, 37)])
+            for y in [48, 61] as [CGFloat] { box(72, y, 5, 6); box(81, y, 5, 6) }
+            line([(63, 93), (96, 93)])
         case .downloads:
             // Library study table, stacked books and a reading lamp.
             line([(7, 78), (93, 78)]); line([(15, 78), (15, 94)]); line([(84, 78), (84, 94)])

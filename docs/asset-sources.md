@@ -11,3 +11,5 @@
 - [信息科学大楼](https://jjch.neu.edu.cn/2016/0319/c2837a51627/page.htm)
 - [南湖校区风景](https://www.neu.edu.cn/zjdd/xyfj.htm)
 - [大学文化](https://www.neu.edu.cn/xygk/dxwh.htm) · [历史沿革](https://www.neu.edu.cn/xygk/lsyg.htm)
+
+原生服务卡面使用 SwiftUI Shape 校园简笔画，涵盖教学馆、校门、图书馆、火箭广场、体育场、银杏、食堂面碗与书桌等主题。十二项服务分别配图，深浅色与增强对比度下调整线条颜色。

@@ -179,7 +179,7 @@ let nativePayment = NativeCampusService.payment
 precondition(CampusPaymentEntry.electricity.path == "/openPayElecPagesDbdx51414E039.html")
 precondition(CampusPaymentEntry.isElectricity(CampusPaymentEntry.electricity))
 precondition(!CampusPaymentEntry.isElectricity(URL(string: "https://pay.neu.edu.cn.evil.example/openPayElecPagesDbdx51414E039.html")!))
-precondition(NativeCampusService.allCases.count == 8)
+precondition(NativeCampusService.allCases.count == 12)
 precondition(!NativeCampusService.downloads.hasSchoolPage && !NativeCampusService.downloads.owns(host: "personal.neu.edu.cn"))
 precondition(NativeCampusService.news.owns(host: "neunews.neu.edu.cn") && !NativeCampusService.news.owns(host: "neunews.neu.edu.cn.evil.example"))
 precondition(nativePayment.entryURL(apps: [routingApp("https://pay.neu.edu.cn.evil.example/",id:"62")]) == nativePayment.fallbackURL)
@@ -188,7 +188,7 @@ precondition(NativeCampusService.mail.owns(host: "mails.neu.edu.cn") && !NativeC
 let mailRows = try NativeMailProtocol.messages([["id":"fixture-1","subject":"合成邮件","sender":"fixture@example.invalid","unread":false]])
 precondition(mailRows.count == 1 && mailRows[0].unread == false)
 do { _ = try NativeMailProtocol.messages([["id":"x"],["id":"x"]]); preconditionFailure("Duplicate mail IDs must fail") } catch { }
-print("Native services: original routes, verified hosts, eight native services and Coremail decoder passed")
+print("Native services: original routes, verified hosts, twelve native services and Coremail decoder passed")
 
 var mailSearch = NativeMailSearch()
 mailSearch.from = " fixture@example.invalid "

@@ -264,14 +264,8 @@ struct LiveActivityAcademic {
             ?? semesters.first { $0.current } ?? semesters.first
         semester = selected
         courseCount = selected?.courses.count ?? 0
-        func score(_ course: GradeCourse) -> Double? {
-            if let value = course.score { return value.isFinite && (0...100).contains(value) ? value : nil }
-            let value = course.scoreRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard ["优", "优秀", "良", "良好", "中", "中等", "及格", "合格", "不及格", "不合格"].contains(value) else { return nil }
-            return course.scoreValue
-        }
         let scored = (selected?.courses ?? []).compactMap { course -> (Double, Double)? in
-            guard course.credit.isFinite, course.credit > 0, let value = score(course) else { return nil }
+            guard course.credit.isFinite, course.credit > 0, let value = course.normalizedScore else { return nil }
             return (value, course.credit)
         }
         scoredCount = scored.count

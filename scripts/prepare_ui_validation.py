@@ -76,7 +76,9 @@ extension PortalRepository {
         netInfo = NetUsageInfo(balance: 25.00, monthBytes: 3 * 1024 * 1024 * 1024,
             monthSeconds: 7200, monthTimes: 12, flowFromPortal: true)
         netState = .loaded
-        electricInfo = ElectricInfo(unbound: true, remainKwh: nil, roomNo: nil, roomLabel: nil, lastReadAt: nil)
+        electricRoom = "1234567"
+        electricRoomHistory = ["1234567", "2345678"]
+        electricInfo = ElectricInfo(unbound: false, remainKwh: 48.5, roomNo: "1234567", roomLabel: "合成房间", lastReadAt: "合成抄表时间")
         electricState = .loaded
         cardBills = [
             CardBill(time: Date(), timeText: "09:00", subject: "餐费", amount: -8.50, fee: 0, balanceAfter: 66.50, station: "第一食堂"),
@@ -258,9 +260,9 @@ struct UIValidationRoot: View {
                 case "schedule": ScheduleView()
                 case "services", "services-directory": ServicesView()
                 case "services-art": NavigationStack {
-                    ScrollView { NativeServicesCarousel(services: NativeCampusService.allCases, searching: true) { _ in }.padding() }
+                    ScrollView { NativeServicesCarousel(services: NativeCampusService.allCases.filter { $0.group == "校园资源" }, searching: true) { _ in }.padding() }
                         .background(Color(.systemGroupedBackground)).navigationTitle("原生服务")
-                        .nativeUIFixtureCaption("本次构建原生服务 · 分组入口")
+                        .nativeUIFixtureCaption("本次构建原生服务卡面 · 东大校园简笔画")
                 }
                 case "profile": ProfileView()
                 case "favorites": FavoritesEditor()
@@ -277,6 +279,10 @@ struct UIValidationRoot: View {
                 case "academic-exams": NavigationStack { AcademicExamsView().nativeUIFixtureCaption("模拟器合成考试 · 非真实考试安排") }
                 case "notifications": NavigationStack { CampusReminderView().nativeUIFixtureCaption("模拟器合成提醒设置 · 非系统通知到达证明") }
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
+                case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
+                case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
+                case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
+                case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
                 case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
@@ -1064,6 +1070,43 @@ service_fixture('NEU-Lumen/Features/Services/ServicesView.swift',
                 'catalogReadFailed = false; readingCatalog = false', r'''
                     showDirectory = ProcessInfo.processInfo.arguments.contains("--screen=services-directory")
 ''')
+
+# Exercise the new telephone and map views with synthetic local data only.
+service_fixture('NEU-Lumen/Features/Services/NativeCampusMapView.swift',
+                'func search(campus: Campus, keyword: String) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-map") {
+            let location = CLLocation(latitude: 41.66, longitude: 123.42)
+            let item: MKMapItem
+            if #available(iOS 26.0, *) { item = MKMapItem(location: location, address: nil) }
+            else { item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate)) }
+            item.name = "合成校园地点"
+            places = [CampusMapPlace(item: item)]; loading = false; error = nil; return
+        }
+''')
+service_fixture('NEU-Lumen/Core/Models/NativeCampusService.swift',
+                'func owns(host: String) -> Bool {', r'''
+        if host == "127.0.0.1", self == .telephone { return true }
+''')
+service_fixture('NEU-Lumen/Core/Models/NativeCampusService.swift',
+                'func allowsNativeDocument(_ url: URL) -> Bool {', r'''
+        if url.host == "127.0.0.1", self == .telephone { return true }
+''')
+phone_view = destination / 'NEU-Lumen/Features/Services/NativeLibraryView.swift'
+phone_source = phone_view.read_text(encoding='utf-8')
+phone_hook = 'url: NativeCampusService.telephone.fallbackURL, nativeService: .telephone'
+if phone_source.count(phone_hook) != 1:
+    raise RuntimeError('Telephone fixture entry hook changed')
+phone_view.write_text(phone_source.replace(phone_hook, 'url: URL(string: "http://127.0.0.1:8787/telephone.html")!, nativeService: .telephone'), encoding='utf-8')
+service_fixture('NEU-Lumen/Features/Web/PortalWebView.swift',
+                'private var presentsNativeDocument: Bool {', r'''
+        if nativeService == .telephone, showNativeDocument, browser.currentURL?.host == "127.0.0.1" { return true }
+''')
+(fixtures / 'telephone.html').write_text('''<!doctype html><meta charset="utf-8"><title>校内电话簿 · 合成数据</title>
+<label>搜索部门<input id="search" wire:model.live.debounce.500ms="search" oninput="document.getElementById('department').textContent=this.value || '合成部门'"></label>
+<table><thead><tr><th>部门名称</th><th>办公室名称</th><th>办公电话</th><th>办公地址</th></tr></thead>
+<tbody><tr><td id="department">合成部门</td><td>合成办公室</td><td>00000000</td><td>合成校区 A101</td></tr></tbody></table>
+<nav role="navigation"><button wire:click="nextPage('page')" onclick="document.getElementById('department').textContent='合成部门第2页'">Next »</button></nav>
+''', encoding='utf-8')
 
 # The actual production e-code reader and view run against an explicitly synthetic
 # local canvas. This page is not a usable QR credential and never enters the IPA.

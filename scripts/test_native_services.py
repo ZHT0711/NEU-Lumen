@@ -51,7 +51,7 @@ class NativeServicesTests(unittest.TestCase):
     def test_grouped_native_navigation_with_accessible_grid(self):
         source=(ROOT/'NEU-Lumen/Features/Services/NativeServicesCarousel.swift').read_text(encoding='utf-8')
         for key in ['dynamicTypeSize', 'isAccessibilitySize', 'NativeCampusService.groups',
-                    'Menu("切换服务"', 'tabViewStyle(.page', 'accessibilityElement(children: .combine)']:
+                    'Menu("切换服务"', 'tabViewStyle(.page', 'accessibilityElement(children: .combine)', 'NativeServiceCardArt(service: service)', 'colorSchemeContrast']:
             self.assertIn(key,source)
         self.assertNotIn('Timer.publish',source)
 

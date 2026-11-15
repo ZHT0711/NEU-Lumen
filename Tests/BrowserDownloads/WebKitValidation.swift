@@ -652,5 +652,27 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     try require(stableKey != nil && snapshot.fields.first(where: { $0.label == "合成控件" })?.key == stableKey, "random jqxWidget ID regeneration preserves the semantic field identity")
     let counts = try await web.evaluateJavaScript("[window.syntheticQueries,window.syntheticWrites]") as? [Int]
     try require(counts == [1, 0], "EMAP read-only validation never invokes a business write")
+    // Match the school's Livewire phone directory without a real telephone or account.
+    _ = try await web.evaluateJavaScript(#"""
+    document.body.innerHTML='<label>部门搜索<input id="search" wire:model.live.debounce.500ms="search"></label><table><thead><tr><th>部门名称</th><th>办公室名称</th><th>办公电话</th><th>办公地址</th></tr></thead><tbody><tr><td id="department">合成部门</td><td>合成办公室</td><td>00000000</td><td>合成地址</td></tr></tbody></table><nav role="navigation"><button id="phone-next">Next »</button><button id="phone-page">2</button></nav>';
+    document.getElementById('search').addEventListener('input',event=>{document.getElementById('department').textContent=event.target.value});
+    document.getElementById('phone-next').setAttribute('wire:click',"nextPage('page')");
+    document.getElementById('phone-next').onclick=()=>{document.getElementById('department').textContent='合成第二页'};
+    document.getElementById('phone-page').onclick=()=>{document.getElementById('department').textContent='合成页码2'};
+    """#)
+    snapshot = try await read()
+    guard let liveSearch = snapshot.fields.first(where: { $0.commit == "live" }) else { throw NetworkError(message: "Missing Livewire live input") }
+    try require(liveSearch.queryField == true, "Livewire search is recognized as a query draft")
+    result = try await call("change", token: snapshot.token, action: liveSearch.id, values: [liveSearch.id: "合成检索"])
+    try require(result["filled"] as? Bool == true, "live search dispatches the original input handler")
+    snapshot = try await read()
+    try require(snapshot.tables.first?.rows.first?.first == "合成检索", "Livewire results update after native search")
+    guard let nextPage = snapshot.actions.first(where: { $0.title == "Next »" }) else { throw NetworkError(message: "Missing Livewire pagination") }
+    try require(nextPage.query == true && nextPage.isPaging, "English pagination stays a read-only page action")
+    result = try await call("act", token: snapshot.token, action: nextPage.id)
+    try require(result["activated"] as? Bool == true, "Livewire next page uses the school's click handler")
+    snapshot = try await read()
+    try require(snapshot.tables.first?.rows.first?.first == "合成第二页", "next page yields the new telephone rows")
+    try require(snapshot.actions.first(where: { $0.title == "2" })?.isPaging == true, "numeric paging is grouped with page controls")
     print("PASS: isolated WebKit native forms/orders, required validation, hidden tokens, select/radio/checkbox editing, original handlers, one-shot actions, changed amount/token/navigation and webpage continuation")
 }

@@ -55,6 +55,13 @@ struct NativePaymentView: View {
             }
             if section == "电费" {
                 Section("宿舍电费") {
+                    if !repo.electricRoomHistory.isEmpty {
+                        Menu("最近查询房间", systemImage: "clock.arrow.circlepath") {
+                            ForEach(repo.electricRoomHistory, id: \.self) { code in
+                                Button(code) { room = code; queryRoom() }
+                            }
+                        }
+                    }
                     if let electric = repo.electricInfo, !electric.unbound {
                         LabeledContent("房间", value: electric.roomLabel ?? electric.roomNo ?? "已绑定")
                         LabeledContent("剩余电量", value: electric.remainKwh.map { $0.formatted(.number.precision(.fractionLength(0...2))) + " kWh" } ?? "未提供")
@@ -195,11 +202,13 @@ struct NativeVPNView: View {
     @State private var checkedAt: Date?
     @State private var web: NativeServiceWebLink?
     @State private var query = ""
+    @State private var favoritesOnly = false
     @State private var owner: UUID?
     @State private var checkRequest = UUID()
     private var resources: [PortalApp] {
         environment.repository.apps.filter { app in
             guard let url = URL(string: app.entryUrl()), WebVPN.shouldProxyBrowserURL(url) else { return false }
+            if favoritesOnly && !environment.repository.favorites.contains(app) { return false }
             let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
             return keyword.isEmpty || [app.name, app.desc, app.category].contains { $0.localizedCaseInsensitiveContains(keyword) }
         }
@@ -221,6 +230,7 @@ struct NativeVPNView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("校内资源") {
+                Toggle("只看收藏资源", isOn: $favoritesOnly).toggleStyle(.button)
                 HStack {
                     TextField("搜索校内应用", text: $query).autocorrectionDisabled().textInputAutocapitalization(.never)
                     if !query.isEmpty {
@@ -240,7 +250,7 @@ struct NativeVPNView: View {
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
             if owner != environment.session.requestEpoch {
                 owner = environment.session.requestEpoch; checkRequest = UUID()
-                campus = nil; ticket = false; checkedAt = nil; query = ""; web = nil; busy = false
+                campus = nil; ticket = false; checkedAt = nil; query = ""; favoritesOnly = false; web = nil; busy = false
             }
             guard active else { return }
             _ = await environment.repository.loadAppsIfNeeded()
@@ -334,9 +344,14 @@ struct NativeAffairsView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var store = NativeAffairsStore()
     @State private var query = ""
+    @State private var status = "全部"
     @State private var web: NativeServiceWebLink?
     private var visible: [TodoItem] {
-        store.items.filter { query.isEmpty || ($0.title + $0.instance + $0.node).localizedCaseInsensitiveContains(query) }
+        store.items.filter { item in
+            let complete = item.progressKnown && item.percent >= 100
+            let matchesStatus = status == "全部" || (status == "已完成" ? complete : !complete)
+            return matchesStatus && (query.isEmpty || (item.title + item.instance + item.node).localizedCaseInsensitiveContains(query))
+        }
     }
     var body: some View {
         List {
@@ -344,6 +359,11 @@ struct NativeAffairsView: View {
                 NavigationLink { NativeAffairsDirectoryView() } label: { Label("办事服务中心", systemImage: "square.grid.2x2") }
             }
             Section("我的在办事项") {
+                Picker("事项进度", selection: $status) {
+                    Text("全部").tag("全部")
+                    Text("未完成").tag("未完成")
+                    Text("已完成").tag("已完成")
+                }.pickerStyle(.segmented)
                 TextField("搜索事项或处理节点", text: $query)
                     .autocorrectionDisabled().textInputAutocapitalization(.never)
                 if let error = store.error {
@@ -380,7 +400,7 @@ struct NativeAffairsView: View {
             if active, !store.loaded { await store.load(session: environment.session, reset: true) }
         }
         .onChange(of: environment.session.requestEpoch) { _, epoch in
-            store.bind(to: epoch); query = ""; web = nil
+            store.bind(to: epoch); query = ""; status = "全部"; web = nil
         }
         .refreshable { await store.load(session: environment.session, reset: true) }
         .onChange(of: environment.session.networkRevision) { _, _ in
@@ -392,7 +412,7 @@ struct NativeAffairsView: View {
     }
 }
 
-private struct ServiceLoadNotice: View {
+struct ServiceLoadNotice: View {
     let state: LoadState
     var body: some View {
         if case .loading = state { ProgressView() }

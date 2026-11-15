@@ -1,0 +1,167 @@
+import SwiftUI
+import MapKit
+import Observation
+
+struct CampusMapPlace: Identifiable {
+    let item: MKMapItem
+    var coordinate: CLLocationCoordinate2D {
+        if #available(iOS 26.0, *) { return item.location.coordinate }
+        else { return item.placemark.coordinate }
+    }
+    var id: String { "\(item.name ?? "")|\(coordinate.latitude)|\(coordinate.longitude)" }
+}
+
+@MainActor @Observable
+final class CampusMapStore {
+    private(set) var places: [CampusMapPlace] = []
+    private(set) var loading = false
+    private(set) var error: String?
+    private var operation: MKLocalSearch?
+    private var request = UUID()
+    private var anchors: [String: MKMapItem] = [:]
+
+    func cancel() {
+        request = UUID()
+        operation?.cancel()
+        operation = nil
+        loading = false
+    }
+
+    func search(campus: Campus, keyword: String) async {
+        cancel()
+        let token = request
+        loading = true
+        error = nil
+        places = []
+        defer { if request == token { loading = false } }
+        do {
+            let anchor: MKMapItem
+            if let cached = anchors[campus.rawValue] { anchor = cached }
+            else {
+                let query = MKLocalSearch.Request()
+                query.naturalLanguageQuery = "东北大学 " + campus.title + " " + campus.address
+                let search = MKLocalSearch(request: query)
+                operation = search
+                let response = try await search.start()
+                guard request == token, !Task.isCancelled else { return }
+                guard let match = response.mapItems.first(where: { ($0.name ?? "").contains("东北大学") }) else {
+                    throw NetworkError(message: "地图暂未返回该校区，请稍后重试")
+                }
+                anchor = match
+                anchors[campus.rawValue] = match
+            }
+            guard request == token, !Task.isCancelled else { return }
+            let center = CampusMapPlace(item: anchor).coordinate
+            let term = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+            if term.isEmpty { places = [CampusMapPlace(item: anchor)]; return }
+            let query = MKLocalSearch.Request()
+            query.naturalLanguageQuery = "东北大学 " + campus.title + " " + term
+            query.region = MKCoordinateRegion(center: center, latitudinalMeters: 3500, longitudinalMeters: 3500)
+            let search = MKLocalSearch(request: query)
+            operation = search
+            let response = try await search.start()
+            guard request == token, !Task.isCancelled else { return }
+            let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
+            var seen = Set<String>()
+            places = response.mapItems.map(CampusMapPlace.init).filter { place in
+                let location = CLLocation(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude)
+                return location.distance(from: origin) <= 5000 && seen.insert(place.id).inserted
+            }
+        } catch {
+            guard request == token, !Task.isCancelled else { return }
+            self.error = NetworkError.from(error).message
+        }
+    }
+}
+
+struct NativeCampusMapView: View {
+    var active = true
+    @Environment(AppEnvironment.self) private var environment
+    @State private var store = CampusMapStore()
+    @State private var campus = Campus.hunnan
+    @State private var query = ""
+    @State private var camera: MapCameraPosition = .automatic
+    @State private var selected: String?
+    @State private var owner: UUID?
+    @State private var searchTask: Task<Void, Never>?
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Picker("校区", selection: $campus) {
+                    ForEach(Campus.allCases) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented)
+                Text(campus.address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                HStack {
+                    TextField("搜索教学楼、食堂或地点", text: $query)
+                        .submitLabel(.search).focused($searchFocused).autocorrectionDisabled()
+                        .onSubmit { search() }
+                    Button("搜索") { search() }.disabled(store.loading)
+                }.padding(14).background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(["校区", "教学楼", "食堂", "图书馆", "体育馆"], id: \.self) { title in
+                            Button(title) { query = title == "校区" ? "" : title; search() }.buttonStyle(.bordered)
+                        }
+                    }
+                }
+                Map(position: $camera, selection: $selected) {
+                    ForEach(store.places) { place in
+                        Marker(place.item.name ?? "校园地点", coordinate: place.coordinate).tag(place.id)
+                    }
+                }
+                .mapControls { MapCompass(); MapScaleView() }
+                .frame(height: 280).clipShape(RoundedRectangle(cornerRadius: 18))
+                if store.loading { ProgressView("正在搜索校园地点…") }
+                if let error = store.error {
+                    ErrorStateView(message: error) { search() }
+                } else if !store.loading && store.places.isEmpty {
+                    ContentUnavailableView("暂无匹配地点", systemImage: "mappin.slash", description: Text("可更换关键词或校区重试。"))
+                }
+                ForEach(store.places) { place in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Button {
+                            selected = place.id
+                            camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 600, longitudinalMeters: 600))
+                        } label: {
+                            Label(place.item.name ?? "校园地点", systemImage: "mappin.and.ellipse")
+                                .font(.headline).foregroundStyle(.primary)
+                        }
+                        HStack {
+                            Button("步行导航", systemImage: "figure.walk") {
+                                place.item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+                            }
+                            Spacer()
+                            if let url = place.item.url { Link("地点网站", destination: url).font(.subheadline) }
+                        }
+                    }
+                    .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                }
+                Text("地点由系统地图实时检索，结果范围为所选校区附近。步行导航在系统地图中打开。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(16)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .task(id: String(active) + environment.session.requestEpoch.uuidString) {
+            guard active else { store.cancel(); return }
+            if owner != environment.session.requestEpoch {
+                campus = environment.repository.campus
+                query = ""
+                owner = environment.session.requestEpoch
+            }
+            await store.search(campus: campus, keyword: query)
+        }
+        .onChange(of: campus) { _, _ in if active { search() } }
+        .onChange(of: store.places.map(\.id)) { _, _ in camera = .automatic; selected = nil }
+        .onDisappear { searchTask?.cancel(); store.cancel() }
+    }
+
+    private func search() {
+        searchFocused = false
+        let target = campus, term = query
+        searchTask?.cancel()
+        searchTask = Task { await store.search(campus: target, keyword: term) }
+    }
+}
