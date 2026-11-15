@@ -1,10 +1,25 @@
 import Foundation
 
 enum CampusPaymentEntry {
+    static let cardRecharge = URL(string: "https://pay.neu.edu.cn/scardrecharge51264Z006.html")!
     /// School project 414 / factory E039; never send electricity actions to the general portal.
     static let electricity = URL(string: "https://pay.neu.edu.cn/openPayElecPagesDbdx51414E039.html")!
     static func isElectricity(_ url: URL) -> Bool {
         url.scheme == "https" && url.host == "pay.neu.edu.cn" && url.path == electricity.path
+    }
+    static func resumableDestination(_ url: URL) -> URL? {
+        [electricity, cardRecharge].first { $0 == url }
+    }
+}
+
+enum HomeQuickServiceCount {
+    static func normalized(_ value: Int) -> Int { value == 8 ? 8 : 4 }
+}
+
+enum NativeServicePosition {
+    static func index(at x: Double, width: Double, count: Int) -> Int {
+        guard x.isFinite, width.isFinite, width > 0, count > 0 else { return 0 }
+        return min(count - 1, max(0, Int((min(width, max(0, x)) / width * Double(count)).rounded(.down))))
     }
 }
 

@@ -32,6 +32,7 @@ if kind.hasPrefix("screen:") {
         "native-bills": ["缴费大厅", "校园卡月流水", "刷新所选月份"],
         "native-analysis": ["成绩分析", "成绩概览", "分数分布"],
         "native-map": ["校园地图", "楼内导航", "教学楼"],
+        "campus-journey": ["跨楼路线", "起点建筑", "终点建筑"],
         "indoor-navigation": ["楼内导航", "校区与教学楼", "起点与终点", "A102"],
         "indoor-points": ["一号楼", "起点", "楼门平面图", "本层电梯位置"],
         "indoor-route": ["楼内导航", "导航路线", "合成楼层图"],

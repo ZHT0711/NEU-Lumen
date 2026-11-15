@@ -10,7 +10,7 @@ import zipfile
 import zlib
 
 SCREENSHOTS = (
-    'home-light.png', 'home-nanhu-light.png', 'home-dark.png',
+    'home-light.png', 'home-dark.png',
     'schedule-light.png', 'services-light.png', 'grades-light.png',
     'mooc-light.png', 'chaoxing-light.png', 'card-light.png',
     'profile-light.png', 'favorites-light.png', 'holidays-light.png',
@@ -23,7 +23,7 @@ LIVE_KINDS = ('nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'ass
 LIVE_SCREENSHOTS = tuple(f'live-expanded-{kind}-light.png' for kind in LIVE_KINDS) + ('live-expanded-ax-stale-light.png',)
 SYSTEM_ISLAND_SCREENSHOTS = tuple(f'system-island-{kind}.png' for kind in ('nextCourse', 'custom', 'electricBalance'))
 NATIVE_SCREENS = ('academic-center', 'academic-calendar', 'academic-plan', 'academic-services', 'academic-exams')
-SERVICE_SCREENS = ('indoor-points', 'indoor-route', 'indoor-navigation', 'native-analysis', 'native-map', 'native-library', 'native-telephone', 'services-directory', 'native-electricity', 'native-bills', 'native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
+SERVICE_SCREENS = ('campus-journey', 'indoor-points', 'indoor-route', 'indoor-navigation', 'native-analysis', 'native-map', 'native-library', 'native-telephone', 'services-directory', 'native-electricity', 'native-bills', 'native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
 ACADEMIC_WEB_CHECK = 'academic-web-sync-checks.txt'
 ACADEMIC_WEB_CASES = ('same-account', 'wrong-account', 'spoofed-page-world',
                       'identity-changes-between-checks', 'account-epoch-rejects-old-snapshot')
@@ -45,8 +45,9 @@ CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-di
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
           LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
 MANIFEST = 'ui-preview.json'
+LEGACY_SCREENSHOTS = ('home-nanhu-light.png',)
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
-NIGHTLY_SCREENSHOTS = ('home-light.png', 'home-dark.png', 'schedule-light.png', 'services-light.png',
+NIGHTLY_SCREENSHOTS = ('home-light.png', 'campus-journey-light.png', 'schedule-light.png', 'services-light.png',
                        'services-art-light.png', 'native-map-light.png', 'indoor-navigation-light.png',
                        'indoor-route-light.png', 'indoor-points-light.png', 'native-vpn-light.png')
 NIGHTLY_CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt',
@@ -193,6 +194,7 @@ def package(directory, environment=None):
             'academic': 'actual AcademicCenterView / AcademicCalendarView / AcademicPlanView; explicit DEBUG seedAcademicPreview; synthetic only',
             'services': 'actual native services including analysis / map / library / telephone and twelve vector card illustrations; disposable Debug synthetic fixtures only; no real account',
             'indoor_navigation': 'actual SwiftUI selectors, bundled public Pathly catalog, native response decoder and UIKit route drawing with synthetic endpoints and floor image; no on-site accuracy validation',
+            'campus_journey': 'actual cross-building endpoint and entrance/exit selection form; door coordinates require user confirmation; this screenshot does not validate live MapKit directions or on-site access',
         },
         'screenshots': images,
     }

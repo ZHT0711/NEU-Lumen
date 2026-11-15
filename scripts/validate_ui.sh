@@ -90,7 +90,7 @@ xcrun simctl ui "$SIM_ID" appearance light
 if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
   # Nightly captures the current app and changed native services, without the
   # full browser/persistence/ActivityKit matrix used by formal releases.
-  for SCREEN in home schedule services services-art native-map indoor-navigation indoor-route indoor-points native-vpn; do
+  for SCREEN in home campus-journey schedule services services-art native-map indoor-navigation indoor-route indoor-points native-vpn; do
     launch_screenshot_page "$SCREEN"
     case "$SCREEN" in
       indoor-navigation|indoor-route|indoor-points) wait_ui_marker "$SCREEN-screenshot.txt" 60 ;;
@@ -99,18 +99,14 @@ if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
     sleep 1
     xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
   done
-  xcrun simctl ui "$SIM_ID" appearance dark
-  launch_screenshot_page home
-  sleep 1
-  xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/home-dark.png"
   swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-  for SCREEN in services services-art native-map indoor-navigation indoor-route indoor-points native-vpn; do
+  for SCREEN in services services-art native-map campus-journey indoor-navigation indoor-route indoor-points native-vpn; do
     "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   done
   python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"
   exit 0
 fi
-for SCREEN in native-ecode home home-nanhu schedule services services-directory services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
+for SCREEN in native-ecode home home-nanhu campus-journey schedule services services-directory services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
   launch_screenshot_page "$SCREEN"
   if [[ "$SCREEN" == "native-ecode" ]]; then wait_ui_marker ecode-screenshot.txt 60; fi
   if [[ "$SCREEN" == "native-telephone" ]]; then wait_ui_marker telephone-screenshot.txt 60; fi

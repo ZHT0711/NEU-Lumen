@@ -76,6 +76,7 @@ final class CampusMapStore {
 
 struct NativeCampusMapView: View {
     var active = true
+    var initialCampus: Campus?
     @Environment(AppEnvironment.self) private var environment
     @State private var store = CampusMapStore()
     @State private var campus = Campus.hunnan
@@ -103,6 +104,13 @@ struct NativeCampusMapView: View {
                     }
                     .foregroundStyle(.primary).padding(16)
                     .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                }.buttonStyle(.plain)
+                NavigationLink {
+                    CampusJourneyView()
+                } label: {
+                    Label("跨楼路线 · 楼内 + Apple 地图步行", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 48)
+                        .background(AppTheme.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
                 }.buttonStyle(.plain)
                 Picker("校区", selection: $campus) {
                     ForEach(Campus.allCases) { Text($0.title).tag($0) }
@@ -162,7 +170,7 @@ struct NativeCampusMapView: View {
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
             guard active else { store.cancel(); return }
             if owner != environment.session.requestEpoch {
-                campus = environment.repository.campus
+                campus = initialCampus ?? environment.repository.campus
                 query = ""
                 owner = environment.session.requestEpoch
             }

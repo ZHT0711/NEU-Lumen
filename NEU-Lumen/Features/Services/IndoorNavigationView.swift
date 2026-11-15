@@ -150,6 +150,9 @@ struct IndoorNavigationView: View {
                     }
                 }.id("indoor-route")
             }
+            Section("跨建筑出行") {
+                NavigationLink("规划跨楼路线", destination: CampusJourneyView(destination: destination))
+            }
             Section { Link("Pathly 原站", destination: URL(string: "https://pathly.top/user/user-path")!) }
         }
         .onChange(of: store.route != nil) { _, ready in
@@ -185,7 +188,7 @@ struct IndoorNavigationView: View {
     }
 }
 
-private struct IndoorPointPicker: View {
+struct IndoorPointPicker: View {
     let building: IndoorBuilding
     let selected: String
     let forStart: Bool

@@ -24,7 +24,7 @@
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/home-light.png" width="245" alt="首页" />
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/home-dark.png" width="245" alt="深色首页" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/campus-journey-light.png" width="245" alt="跨楼路线规划（模拟器表单）" />
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/schedule-light.png" width="245" alt="课表" />
 </p>
 <p align="center">

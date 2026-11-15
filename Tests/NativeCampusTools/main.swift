@@ -75,6 +75,20 @@ enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal"
         let gate = building.rooms.first { $0.isGate }!
         let endpoint = building.matchingRooms("浑南一号楼 Ａ１０２ 教室").first!
         precondition(endpoint.name == "A102")
+        let journey = CampusJourneyEndpoint(buildingID: building.id, roomID: endpoint.id, gateID: gate.id)
+        precondition(journey.valid(in: building))
+        precondition(Set(building.gates.map(\.id)).count == building.gates.count)
+        let leaving = try journey.indoorLeg(in: building, departing: true)!
+        let entering = try journey.indoorLeg(in: building, departing: false)!
+        precondition(leaving.start == endpoint.id && leaving.end == gate.id)
+        precondition(entering.start == gate.id && entering.end == endpoint.id)
+        let atDoor = CampusJourneyEndpoint(buildingID: building.id, roomID: gate.id, gateID: gate.id)
+        let skipped = try atDoor.indoorLeg(in: building, departing: true)
+        precondition(skipped == nil, "Already at the gate needs no duplicate indoor path request")
+        precondition(!journey.valid(in: wingBuilding), "Cross-building legs must use each building's own catalog")
+        let invalidGate = CampusJourneyEndpoint(buildingID: building.id, roomID: endpoint.id, gateID: endpoint.id)
+        do { _ = try invalidGate.indoorLeg(in: building, departing: true); preconditionFailure() }
+        catch { precondition(error as? IndoorNavigationError == .endpoints) }
         precondition(building.matchingRooms("A1020").isEmpty, "Do not confuse room number substrings")
         for preference in IndoorRoutePreference.allCases {
             let fields = try IndoorRoute.request(building: building, start: gate.id, end: endpoint.id, preference: preference)

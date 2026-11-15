@@ -72,6 +72,10 @@ struct IndoorBuilding: Decodable, Identifiable {
     let maps: [String: [String: IndoorCoordinate]]
     var campusName: String { campus == "south" ? "浑南校区" : "南湖校区" }
     var rooms: [IndoorRoom] { floors.flatMap(\.uniqueRooms) }
+    var gates: [IndoorRoom] {
+        var seen = Set<String>()
+        return rooms.filter { $0.isGate && seen.insert($0.id).inserted }
+    }
     var gateImageURL: URL? { URL(string: "https://pathly.top/images/" + id + "-gate-map.jpg") }
     func elevatorImageURL(on floor: IndoorFloor) -> URL? {
         elevatorReferences(on: floor).first?.url
@@ -97,6 +101,20 @@ struct IndoorBuilding: Decodable, Identifiable {
             let pattern = "(?<![A-Z0-9])" + NSRegularExpression.escapedPattern(for: room.name.uppercased()) + "(?![A-Z0-9])"
             return text.range(of: pattern, options: .regularExpression) != nil
         }
+    }
+}
+
+struct CampusJourneyEndpoint: Equatable {
+    var buildingID = ""
+    var roomID = ""
+    var gateID = ""
+    func valid(in building: IndoorBuilding) -> Bool {
+        building.id == buildingID && building.room(roomID) != nil && building.gates.contains { $0.id == gateID }
+    }
+    func indoorLeg(in building: IndoorBuilding, departing: Bool) throws -> (start: String, end: String)? {
+        guard valid(in: building) else { throw IndoorNavigationError.endpoints }
+        guard roomID != gateID else { return nil }
+        return departing ? (roomID, gateID) : (gateID, roomID)
     }
 }
 

@@ -462,8 +462,9 @@ final class PortalRepository {
 
     func dataCardURL(_ card: DataCard) -> URL {
         if card.name.contains("电费") || card.name.contains("电量") { return CampusPaymentEntry.electricity }
+        if card.name.contains("校园卡") || card.name.contains("一卡通") { return CampusPaymentEntry.cardRecharge }
         if let url = PortalLink.resolve(card.destination) { return url }
-        if card.name.contains("卡") && (card.name.contains("余额") || card.name.contains("补助")) { return URL(string: PortalClient.serviceCard)! }
+        if card.name.contains("卡") && (card.name.contains("余额") || card.name.contains("补助")) { return CampusPaymentEntry.cardRecharge }
         let terms: [String]
         if card.name.contains("图书") || card.name.contains("借阅") { terms = ["图书馆"] }
         else if card.name.contains("网费") || card.name.contains("流量") { terms = ["网络计费", "网费"] }

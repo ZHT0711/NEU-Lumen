@@ -32,6 +32,7 @@ struct NativePaymentView: View {
             if section == "账户" {
                 Section("校园账户") {
                     LabeledContent("校园卡余额", value: money(repo.cardBalance?.balance))
+                    Button("校园卡充值", systemImage: "creditcard.and.123") { openPaymentURL(CampusPaymentEntry.cardRecharge) }
                     if let subsidy = repo.cardBalance?.subsidy { LabeledContent("补助余额", value: money(subsidy)) }
                     LabeledContent("网费余额", value: money(repo.netInfo?.balance))
                     if let date = repo.cardUpdatedAt { Text("校园卡更新于 " + date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary) }

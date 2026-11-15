@@ -281,6 +281,7 @@ struct UIValidationRoot: View {
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
                 case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
+                case "campus-journey": NavigationStack { CampusJourneyView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器跨楼规划表单 · 未连接现场楼门坐标") }
                 case "indoor-navigation", "indoor-route", "indoor-points": NavigationStack { IndoorNavigationView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器原生导航 · 合成路线与楼层图，非现场验证") }
                 case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
                 case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }

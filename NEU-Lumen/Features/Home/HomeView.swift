@@ -7,6 +7,7 @@ struct HomeView: View {
     @Binding var selection: AppTab
     @ScaledMetric(relativeTo: .caption) private var appColumnWidth: CGFloat = 72
     @State private var showFavorites = false
+    @AppStorage("lumen.home.quickServiceCount") private var quickServiceCount = 4
     @State private var path: [AppDestination] = []
     @State private var refreshTask: Task<Void, Never>?
 
@@ -319,6 +320,10 @@ struct HomeView: View {
                 sectionHeader("常用应用", icon: "square.grid.2x2")
                 Spacer()
                 Menu {
+                    Picker("显示数量", selection: $quickServiceCount) {
+                        Text("4 个常用应用").tag(4)
+                        Text("8 个常用应用").tag(8)
+                    }
                     Button("编辑常用应用", systemImage: "star") { showFavorites = true }
                     Button("全部服务", systemImage: "square.grid.2x2") { selection = .services }
                 } label: {
@@ -332,7 +337,7 @@ struct HomeView: View {
             } else {
                 GlassCard {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: appColumnWidth), spacing: 8)], spacing: 12) {
-                        ForEach(Array(favorites.prefix(4))) { app in
+                        ForEach(Array(favorites.prefix(HomeQuickServiceCount.normalized(quickServiceCount)))) { app in
                             Button { open(app) } label: {
                                 VStack(spacing: 8) {
                                     ServiceAppIcon(app: app).frame(width: 40, height: 40)
@@ -432,7 +437,7 @@ struct HomeView: View {
     private var cardEntrySection: some View {
         GlassCard {
             Button {
-                path.append(.card)
+                path.append(.web(CampusPaymentEntry.cardRecharge))
             } label: {
                 HStack(spacing: 14) {
                     ZStack {
@@ -473,11 +478,11 @@ struct HomeView: View {
             if let net = repo.netInfo, net.flowFromPortal {
                 parts.append("网费 \(String(format: "%.2f", net.balance)) 元")
             }
-            return parts.isEmpty ? "查看余额与流水" : parts.joined(separator: " · ")
+            return parts.isEmpty ? "充值与缴费" : parts.joined(separator: " · ") + " · 充值"
         case .loading:
             return "正在同步…"
         default:
-            return "查看余额、流水、网费与电费"
+            return "充值校园卡 · 学校缴费页面"
         }
     }
 

@@ -401,7 +401,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var provisionalUnsafeMethod = false
     @ObservationIgnored private var documentUnsafeMethod = false
     @ObservationIgnored private var service: NativeCampusService?
-    @ObservationIgnored private var electricityResume = false
+    @ObservationIgnored private var paymentResumeURL: URL?
     @ObservationIgnored private var electricityResumeAttempted = false
     @ObservationIgnored private var electricityPrefillTask: Task<Void, Never>?
     @ObservationIgnored private var electricityPrefillStatus = "unavailable"
@@ -494,7 +494,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         self.client = client
         self.session = session
         let source = WebVPN.unwrap(url) ?? url
-        electricityResume = CampusPaymentEntry.isElectricity(source)
+        paymentResumeURL = CampusPaymentEntry.resumableDestination(source)
         let service = service ?? (source.host?.lowercased() == "pay.neu.edu.cn" ? NativeCampusService.payment : nil)
         self.service = service
         if let session {
@@ -515,7 +515,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         clientEpoch = client.sessionGeneration
         webView.customUserAgent = client.browserUserAgent ?? HTTPClient.userAgent
         isLoading = true
-        let destination = service == .payment ? source : await client.prepareBrowserURL(url)
+        let destination = service == .payment || paymentResumeURL != nil ? source : await client.prepareBrowserURL(url)
         let store = webView.configuration.websiteDataStore.httpCookieStore
         if let learningPlatform, webView.configuration.websiteDataStore.isPersistent {
             let existing = await store.allCookies()
@@ -640,7 +640,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     }
 
     private func routedDestination(_ url: URL) -> URL? {
-        if service == .payment {
+        if service == .payment || paymentResumeURL != nil {
             let source = WebVPN.unwrap(url) ?? url
             if ["pay.neu.edu.cn", "pass.neu.edu.cn"].contains(source.host?.lowercased() ?? "") { return source }
             return url
@@ -671,7 +671,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         guard let current = currentURL ?? entryURL else { return }
         let epoch = session.requestEpoch
         let source = WebVPN.unwrap(current) ?? current
-        let destination = service == .payment ? source : await client.prepareBrowserURL(source)
+        let destination = service == .payment || paymentResumeURL != nil ? source : await client.prepareBrowserURL(source)
         guard session.requestEpoch == epoch, client.sessionGeneration == clientEpoch, !Task.isCancelled else { return }
         webView.stopLoading(); error = nil
         webView.load(URLRequest(url: destination))
@@ -781,13 +781,13 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     }
 
     private func resumeElectricityAfterLogin() async {
-        guard electricityResume, !electricityResumeAttempted, let current = webView.url,
+        guard let paymentResumeURL, !electricityResumeAttempted, let current = webView.url,
               let client, client.sessionGeneration == clientEpoch else { return }
         let source = WebVPN.unwrap(current) ?? current
         guard source.host == "pay.neu.edu.cn", ["/openPortal", "/openPortal/", "/portal.html", "/index.html", "/", "/openApplication"].contains(source.path) else { return }
         // The normal school CAS landing succeeded. Resume one verified read-only destination once.
         electricityResumeAttempted = true
-        webView.load(URLRequest(url: CampusPaymentEntry.electricity))
+        webView.load(URLRequest(url: paymentResumeURL))
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { show(error) }

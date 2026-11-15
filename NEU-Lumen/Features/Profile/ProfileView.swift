@@ -9,6 +9,7 @@ struct ProfileView: View {
         colorScheme == .dark ? Color(red: 0.59, green: 0.69, blue: 0.95) : AppTheme.accent
     }
     @State private var showWebLogin = false
+    @AppStorage("lumen.home.quickServiceCount") private var quickServiceCount = 4
     @State private var confirmLogout = false
     @State private var showAquaCoreEasterEgg = false
 
@@ -58,6 +59,7 @@ struct ProfileView: View {
                 campusLink("东大官网", icon: "globe.asia.australia", url: "https://www.neu.edu.cn/")
                 campusLink("校史纵览", icon: "building.columns", url: "https://www.neu.edu.cn/xygk/lsyg.htm")
             }
+            CampusExploreContent()
         }
     }
 
@@ -175,6 +177,14 @@ struct ProfileView: View {
 
     private var appearanceSettings: some View {
         Form {
+            Section("首页常用应用") {
+                Picker("显示数量", selection: $quickServiceCount) {
+                    Text("4 个").tag(4)
+                    Text("8 个").tag(8)
+                }.pickerStyle(.segmented)
+                Text("按收藏顺序显示，应用不足时显示已有收藏。可在首页编辑与排序。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("校园外观") {
                 Picker("首页校区", selection: Binding(
                     get: { environment.repository.campusOverride?.rawValue ?? "auto" },
