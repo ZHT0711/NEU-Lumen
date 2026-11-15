@@ -14,6 +14,7 @@ class NativeCampusToolsTests(unittest.TestCase):
         sources = ['Core/Support/JSONHelpers.swift', 'Core/Support/LoadState.swift',
                    'Core/Models/PortalModels.swift', 'Core/Models/GradeModels.swift',
                    'Core/Models/GradeAnalysis.swift', 'Core/Models/CampusPhoneEntry.swift',
+                   'Core/Models/IndoorNavigation.swift', 'Core/Models/WebVPNDirectory.swift',
                    'Core/Models/DataReliability.swift', 'Core/Models/NativeCampusService.swift',
                    'Core/Persistence/SavedCampusNews.swift']
         with tempfile.TemporaryDirectory() as directory:
@@ -24,7 +25,7 @@ class NativeCampusToolsTests(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotRegex(result.stdout + result.stderr, r'(?im)\bwarning:')
-            result = subprocess.run([str(binary)], capture_output=True, text=True, encoding='utf-8')
+            result = subprocess.run([str(binary), str(ROOT)], capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

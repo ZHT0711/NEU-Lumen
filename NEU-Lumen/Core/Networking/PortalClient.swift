@@ -16,6 +16,27 @@ final class PortalClient {
 
     // MARK: - 校园网 / WebVPN
 
+    /// Wengine's actual portal APIs; validate the current account before and after reading.
+    func loadWebVPNDirectory(expectedAccount: String) async throws -> WebVPNDirectory {
+        let epoch = sessionEpoch
+        guard await ensureWebVPN() else { throw WebVPNDirectoryError.authentication }
+        let revision = accessRouteRevision
+        func read(_ path: String) async throws -> Any {
+            let url = URL(string: WebVPN.base + path)!
+            let response = try await http.get(url, xhr: true, extraHeaders: ["Referer": WebVPN.base + "/", "Accept": "application/json"])
+            guard sessionEpoch == epoch, accessRouteRevision == revision, !Task.isCancelled else { throw CancellationError() }
+            guard response.status == 200, response.finalURL.scheme == "https",
+                  response.finalURL.host == "webvpn.neu.edu.cn", response.finalURL.path == path,
+                  let json = try? JSONSerialization.jsonObject(with: response.body) else { throw WebVPNDirectoryError.authentication }
+            return json
+        }
+        try WebVPNDirectory.validateIdentity(await read("/user/info"), expected: expectedAccount)
+        let groups = try await read("/user/portal_groups")
+        let recent = try await read("/user/recent")
+        try WebVPNDirectory.validateIdentity(await read("/user/info"), expected: expectedAccount)
+        return try WebVPNDirectory.parse(groups: groups, recent: recent)
+    }
+
     /// WebVPN 模式开启后，校内主机的重定向与请求都会改写为网关地址。
     private(set) var webvpnOn = false
     private var routeInvalidated = false

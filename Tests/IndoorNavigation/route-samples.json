@@ -1,0 +1,107 @@
+{
+  "NORMAL": {
+    "code": 200,
+    "message": "操作成功",
+    "data": {
+      "steps": [
+        {
+          "type": "PLAN",
+          "picName": "BuildingOne-1-N",
+          "points": [
+            4,
+            55,
+            56,
+            32
+          ],
+          "fromFloor": null,
+          "toFloor": null,
+          "elevator": false
+        }
+      ],
+      "hasElevator": false
+    },
+    "total": null
+  },
+  "FORCE_ELEVATOR": {
+    "code": 200,
+    "message": "操作成功",
+    "data": {
+      "steps": [
+        {
+          "type": "PLAN",
+          "picName": "BuildingOne-1-N",
+          "points": [
+            4,
+            55,
+            54,
+            1
+          ],
+          "fromFloor": null,
+          "toFloor": null,
+          "elevator": false
+        },
+        {
+          "type": "VERTICAL",
+          "picName": null,
+          "points": null,
+          "fromFloor": 1.0,
+          "toFloor": 2.0,
+          "elevator": true
+        },
+        {
+          "type": "PLAN",
+          "picName": "BuildingOne-2-S",
+          "points": [
+            118
+          ],
+          "fromFloor": null,
+          "toFloor": null,
+          "elevator": false
+        },
+        {
+          "type": "VERTICAL",
+          "picName": null,
+          "points": null,
+          "fromFloor": 2.0,
+          "toFloor": 1.0,
+          "elevator": true
+        },
+        {
+          "type": "PLAN",
+          "picName": "BuildingOne-1-S",
+          "points": [
+            1,
+            54,
+            55,
+            56,
+            57
+          ],
+          "fromFloor": null,
+          "toFloor": null,
+          "elevator": false
+        },
+        {
+          "type": "VERTICAL",
+          "picName": null,
+          "points": null,
+          "fromFloor": 1.0,
+          "toFloor": 2.0,
+          "elevator": false
+        },
+        {
+          "type": "PLAN",
+          "picName": "BuildingOne-2-S",
+          "points": [
+            157,
+            115
+          ],
+          "fromFloor": null,
+          "toFloor": null,
+          "elevator": false
+        }
+      ],
+      "hasElevator": false
+    },
+    "total": null
+  }
+}

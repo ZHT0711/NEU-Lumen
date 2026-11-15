@@ -281,10 +281,10 @@ struct UIValidationRoot: View {
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
                 case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
-                case "indoor-navigation": NavigationStack { IndoorNavigationView(destination: "合成教学楼 A101").nativeUIFixtureCaption("模拟器本地合成页面 · 非 Pathly 实时路线") }
+                case "indoor-navigation", "indoor-route": NavigationStack { IndoorNavigationView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器原生导航 · 合成路线与楼层图，非现场验证") }
                 case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
                 case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }
-                case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
+                case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成 WebVPN 目录 · 非真实账号资源") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
                 case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
                 case "native-news": NavigationStack { NativeServiceHost(initial: .news).nativeUIFixtureCaption("模拟器合成资讯 · 非学校实际新闻") }
@@ -1046,7 +1046,7 @@ extension NativeMailStore {
     }
 }
 ''')
-service_fixture('NEU-Lumen/Features/Services/NativeCampusPages.swift',
+service_fixture('NEU-Lumen/Features/Services/NativeVPNView.swift',
                 'private func check(force: Bool) async {', r'''
         if ProcessInfo.processInfo.arguments.contains("--screen=native-vpn") {
             campus = false; ticket = true; checkedAt = Date(); return
@@ -1073,31 +1073,79 @@ service_fixture('NEU-Lumen/Features/Services/ServicesView.swift',
 ''')
 
 # Exercise the new telephone and map views with synthetic local data only.
+service_fixture('NEU-Lumen/Features/Services/NativeVPNView.swift',
+                'func load(client: PortalClient, force: Bool = false) async {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=native-vpn") {
+            let resource: [String: Any] = ["id": 1, "name": "合成教务站点", "url": "https://jwxt.neu.edu.cn/", "redirect": "/https/abcdef/"]
+            let database: [String: Any] = ["id": 2, "name": "合成图书数据库", "url": "https://example.org/library", "redirect": "/https/123abc/library"]
+            directory = try? WebVPNDirectory.parse(groups: ["data": [["type": "common", "group": ["id": 3, "group_name": "合成校内网站"], "resource": [resource]], ["type": "common", "group": ["id": 4, "group_name": "合成图书馆资源"], "resource": [database]]]], recent: ["data": [resource]])
+            error = nil; loading = false; updatedAt = Date()
+            if directory?.resources.count == 2 {
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                try? "PASS: actual native WebVPN groups, database routes and recent resources loaded with synthetic account data".write(to: folder.appendingPathComponent("vpn-directory-screenshot.txt"), atomically: true, encoding: .utf8)
+            }
+            return
+        }
+''')
+service_fixture('NEU-Lumen/Features/Services/IndoorNavigationView.swift',
+                'prepared = true', r'''
+            if ProcessInfo.processInfo.arguments.contains(where: { $0 == "--screen=indoor-navigation" || $0 == "--screen=indoor-route" }) {
+                self.campus = "south"; selectBuilding("BuildingOne")
+                if let gate = building?.rooms.first(where: { $0.isGate }) { select(gate, forStart: true) }
+                if let end = building?.rooms.first(where: { $0.name == "A102" }) { select(end, forStart: false) }
+                if canSearch {
+                    let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    try? "PASS: actual native campus, building and room selectors with bundled Pathly data and synthetic endpoints".write(to: folder.appendingPathComponent("indoor-navigation-screenshot.txt"), atomically: true, encoding: .utf8)
+                }
+            }
+''')
 indoor_view = destination / 'NEU-Lumen/Features/Services/IndoorNavigationView.swift'
 indoor_source = indoor_view.read_text(encoding='utf-8')
-indoor_source = indoor_source.replace('https://pathly.top/user/user-path', 'http://127.0.0.1:8787/indoor.html')
-indoor_hook = 'func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { updateState() }'
-if indoor_source.count(indoor_hook) != 1:
-    raise RuntimeError('Indoor navigation ready hook changed')
-indoor_source = indoor_source.replace(indoor_hook, r'''
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        updateState()
-        Task { @MainActor in
-            let ready = try? await webView.evaluateJavaScript("document.getElementById('indoor-fixture')?.textContent") as? String
-            guard ready == "合成楼内导航页面", !webView.configuration.websiteDataStore.isPersistent,
-                  webView.configuration.userContentController.userScripts.isEmpty else { return }
-            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            try? "PASS: actual indoor browser loaded synthetic local content in an isolated WebKit session".write(to: folder.appendingPathComponent("indoor-navigation-screenshot.txt"), atomically: true, encoding: .utf8)
-        }
-    }
-''')
+indoor_task = '.task { store.prepare(destination: destination, campus: environment.repository.campus == .hunnan ? "south" : "main") }'
+if indoor_source.count(indoor_task) != 1: raise RuntimeError('Native indoor prepare hook changed')
+indoor_source = indoor_source.replace(indoor_task, '''.task {
+            store.prepare(destination: destination, campus: environment.repository.campus == .hunnan ? "south" : "main")
+            if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route") {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await store.search()
+            }
+        }''')
 indoor_view.write_text(indoor_source, encoding='utf-8')
-(fixtures / 'indoor.html').write_text('''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>合成楼内导航</title><style>body{font-family:system-ui;padding:24px;color:#172554;background:#f8fafc}h1{font-size:24px}p{line-height:1.8}button{font-size:17px;margin:8px 0;padding:16px;border-radius:14px;border:1px solid #cbd5e1;background:white;width:100%;text-align:left}</style>
-<h1 id="indoor-fixture">合成楼内导航页面</h1><p>此页面仅供应用内浏览器界面验证。</p>
-<button>教学楼 · 合成教学楼</button><button>起点 · 合成入口</button><button>终点 · A101</button>
-<p>实际楼层平面图与寻路结果由 Pathly 提供。</p>''', encoding='utf-8')
-
+service_fixture('NEU-Lumen/Core/Networking/PathlyClient.swift',
+                'func route(building: IndoorBuilding, start: String, end: String, preference: IndoorRoutePreference) async throws -> IndoorRoute {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route") {
+            let payload: [String: Any] = ["code":200, "data":["steps":[["type":"PLAN", "picName":"BuildingOne-1-N", "points":[4,55,56,32]]]]]
+            return try IndoorRoute.parse(payload, building: building)
+        }
+''')
+pathly_fixture = destination / 'NEU-Lumen/Core/Networking/PathlyClient.swift'
+pathly_fixture.write_text('import UIKit\n' + pathly_fixture.read_text(encoding='utf-8'), encoding='utf-8')
+service_fixture('NEU-Lumen/Core/Networking/PathlyClient.swift',
+                'func image(_ url: URL) async throws -> Data {', r'''
+        if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route") {
+            let size = CGSize(width: 1000, height: 760)
+            let image = UIGraphicsImageRenderer(size: size).image { context in
+                UIColor.white.setFill(); context.fill(CGRect(origin: .zero, size: size))
+                UIColor.darkGray.setStroke()
+                for column in 0..<4 {
+                    for row in 0..<3 {
+                        let rect = CGRect(x: 70 + column * 220, y: 140 + row * 160, width: 170, height: 115)
+                        UIBezierPath(rect: rect).stroke()
+                    }
+                }
+                ("合成楼层图 · 非实际建筑平面图" as NSString).draw(at: CGPoint(x: 70, y: 40), withAttributes: [.font: UIFont.boldSystemFont(ofSize: 30), .foregroundColor: UIColor.black])
+                ("A102" as NSString).draw(at: CGPoint(x: 500, y: 260), withAttributes: [.font: UIFont.systemFont(ofSize: 28), .foregroundColor: UIColor.black])
+            }
+            return image.pngData()!
+        }
+''')
+service_fixture('NEU-Lumen/Features/Services/IndoorRouteMap.swift',
+                'image = Self.draw(source: source, points: step.points, first: first, last: last)', r'''
+            if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route"), image != nil, step.points.count == 4 {
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                try? "PASS: actual native route decoder and UIKit line rendering on a synthetic floor image".write(to: folder.appendingPathComponent("indoor-route-screenshot.txt"), atomically: true, encoding: .utf8)
+            }
+''')
 service_fixture('NEU-Lumen/Features/Services/NativeCampusMapView.swift',
                 'func search(campus: Campus, keyword: String) async {', r'''
         if ProcessInfo.processInfo.arguments.contains("--screen=native-map") {

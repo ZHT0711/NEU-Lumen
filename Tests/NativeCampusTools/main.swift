@@ -3,7 +3,7 @@ import Foundation
 enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal" }
 
 @main struct NativeCampusToolsTests {
-    @MainActor static func main() {
+    @MainActor static func main() throws {
         func grade(_ score: Double?, _ text: String = "", credit: Double = 2) -> GradeCourse {
             GradeCourse(name: "synthetic", credit: credit, category: "", score: score, scoreRaw: text)
         }
@@ -55,6 +55,57 @@ enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal"
         saved.bind(account: nil)
         saved.toggle(item)
         precondition(saved.items.isEmpty)
-        print("PASS: native grade analysis, pending states, nonfinite/zero scores, phone rows, library host/port bounds, room history and saved-news account persistence")
+        let root = URL(fileURLWithPath: CommandLine.arguments[1])
+        let catalog = try IndoorCatalog.load(data: Data(contentsOf: root.appendingPathComponent("NEU-Lumen/Resources/PathlyCatalog.json")))
+        precondition(catalog.buildings.count == 19)
+        precondition(catalog.buildings.filter { $0.campus == "main" }.count == 13)
+        precondition(catalog.buildings.filter { $0.campus == "south" }.count == 6)
+        for building in catalog.buildings {
+            precondition(!building.rooms.isEmpty)
+            precondition(building.maps.values.allSatisfy { $0.values.allSatisfy(\.isValid) })
+            precondition(building.rooms.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty })
+        }
+        let building = catalog.buildings.first { $0.id == "BuildingOne" }!
+        let gate = building.rooms.first { $0.isGate }!
+        let endpoint = building.matchingRooms("浑南一号楼 Ａ１０２ 教室").first!
+        precondition(endpoint.name == "A102")
+        precondition(building.matchingRooms("A1020").isEmpty, "Do not confuse room number substrings")
+        for preference in IndoorRoutePreference.allCases {
+            let fields = try IndoorRoute.request(building: building, start: gate.id, end: endpoint.id, preference: preference)
+            precondition(fields["strategy"] == preference.rawValue && fields["start"] == "ref_" + gate.id)
+        }
+        do { _ = try IndoorRoute.request(building: building, start: gate.id, end: gate.id, preference: .shortest); preconditionFailure() }
+        catch { precondition(error as? IndoorNavigationError == .samePoint) }
+        do { _ = try IndoorRoute.request(building: building, start: "foreign-room", end: endpoint.id, preference: .shortest); preconditionFailure() }
+        catch { precondition(error as? IndoorNavigationError == .endpoints) }
+        let routes = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("Tests/IndoorNavigation/route-samples.json"))) as! [String: Any]
+        let normal = try IndoorRoute.parse(routes["NORMAL"]!, building: building)
+        precondition(normal.steps.count == 1 && normal.steps[0].points.count == 4 && !normal.usesElevator)
+        let elevator = try IndoorRoute.parse(routes["FORCE_ELEVATOR"]!, building: building)
+        precondition(elevator.usesElevator, "Actual vertical steps override the backend's inconsistent hasElevator flag")
+        precondition(elevator.steps.contains { $0.isVertical && $0.title.contains("走楼梯") })
+        for key in ["OtherBuilding-1-N", "../BuildingOne-1-N"] {
+            let invalid: [String: Any] = ["code":200, "data":["steps":[["type":"PLAN","picName":key,"points":[4,55]]]]]
+            do { _ = try IndoorRoute.parse(invalid, building: building); preconditionFailure() }
+            catch { precondition(error as? IndoorNavigationError == .incompatibleMap) }
+        }
+        let missing: [String: Any] = ["code":200,"data":["steps":[["type":"PLAN","picName":"BuildingOne-1-N","points":[999999]]]]]
+        do { _ = try IndoorRoute.parse(missing, building: building); preconditionFailure() }
+        catch { precondition(error as? IndoorNavigationError == .incompatibleMap) }
+
+        try WebVPNDirectory.validateIdentity(["username":" SYNTH-A "], expected:"SYNTH-A")
+        do { try WebVPNDirectory.validateIdentity(["username":"SYNTH-B"], expected:"SYNTH-A"); preconditionFailure() }
+        catch { precondition(error as? WebVPNDirectoryError == .accountMismatch) }
+        do { try WebVPNDirectory.validateIdentity(["login":true], expected:"SYNTH-A"); preconditionFailure() }
+        catch { precondition(error as? WebVPNDirectoryError == .authentication) }
+        let entry: [String: Any] = ["id":1,"name":"合成数据库","url":"https://example.org/database?q=1","redirect":"/https/abcdef/database?q=1"]
+        let directory = try WebVPNDirectory.parse(groups: ["data":[["group":["id":4,"group_name":"合成图书馆资源"],"type":"common","resource":[entry]]]], recent:["data":[entry]])
+        precondition(directory.groups[0].name == "合成图书馆资源" && directory.resources.count == 1 && directory.recent.count == 1)
+        precondition(directory.resources[0].gatewayURL.host == "webvpn.neu.edu.cn", "Use gateway-provided routes even for external databases")
+        for redirect in ["https://webvpn.neu.edu.cn.evil.example/https/abcdef/x", "https://evil.example/x", "javascript:alert(1)", "/logout", "http://webvpn.neu.edu.cn/http/abcdef/x"] {
+            var changed = entry; changed["redirect"] = redirect
+            precondition(WebVPNResource(json: changed) == nil)
+        }
+        print("PASS: native campus models, 19 Pathly buildings, full map coordinates, three route preferences, room matching, elevator steps, mismatched map rejection and WebVPN identity/gateway bounds")
     }
 }

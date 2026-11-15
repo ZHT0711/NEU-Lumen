@@ -928,3 +928,49 @@ do {
     precondition(roamingHTTP.cookies.headerFor(URL(string: "https://personal.neu.edu.cn/")!)?.contains("late_mobile") != true)
 }
 print("Mobile transport: one safe read retry, fresh pool with retained cookies, no POST replay and discarded late-network cookies passed")
+
+// Wengine directory: exact school API sequence and account checks around the snapshot.
+let directoryHTTP = HTTPClient(configuration: config)
+let directoryClient = PortalClient(http: directoryHTTP)
+directoryClient.absorbCookies([ticket])
+directoryClient.adoptGatewayTicket()
+var directoryPaths: [String] = []
+var directoryIdentities = 0
+var directoryMode = "same"
+MockPortalProtocol.failure = nil
+MockPortalProtocol.failureForRequest = nil
+MockPortalProtocol.handle = { request in
+    precondition(request.url?.host == "webvpn.neu.edu.cn")
+    precondition(request.httpMethod == "GET", "Directory synchronization is read-only")
+    precondition(request.value(forHTTPHeaderField: "X-Requested-With") == "XMLHttpRequest")
+    let path = request.url!.path
+    directoryPaths.append(path)
+    if directoryMode == "login" { return (200, ["Content-Type":"text/html"], "<form><input type=password></form>") }
+    if path == "/user/info" {
+        directoryIdentities += 1
+        if directoryMode == "network" && directoryIdentities == 2 { directoryClient.invalidateAccessRoute() }
+        let identity = directoryMode == "wrong" || (directoryMode == "changes" && directoryIdentities == 2) ? "SYNTH-B" : "SYNTH-A"
+        return (200, ["Content-Type":"application/json"], "{\"username\":\"\(identity)\"}")
+    }
+    if path == "/user/portal_groups" {
+        return (200, ["Content-Type":"application/json"], #"{"data":[{"group":{"id":4,"group_name":"合成图书馆资源"},"type":"common","resource":[{"id":1,"name":"合成数据库","url":"https://example.org/","redirect":"/https/abcdef/"}]}]}"#)
+    }
+    precondition(path == "/user/recent")
+    return (200, ["Content-Type":"application/json"], "{\"data\":[]}")
+}
+let actualDirectory = try await directoryClient.loadWebVPNDirectory(expectedAccount: "SYNTH-A")
+precondition(actualDirectory.resources.count == 1)
+precondition(directoryPaths == ["/user/info", "/user/portal_groups", "/user/recent", "/user/info"])
+for mode in ["wrong", "changes", "login", "network"] {
+    directoryMode = mode; directoryPaths = []; directoryIdentities = 0
+    do {
+        _ = try await directoryClient.loadWebVPNDirectory(expectedAccount: "SYNTH-A")
+        preconditionFailure("Unverified directory snapshot was accepted")
+    } catch {
+        if mode == "network" { precondition(error is CancellationError) }
+        else if mode == "login" { precondition(error as? WebVPNDirectoryError == .authentication) }
+        else { precondition(error as? WebVPNDirectoryError == .accountMismatch) }
+    }
+    if mode == "wrong" { precondition(directoryPaths == ["/user/info"], "Wrong account stops before the directory read") }
+}
+print("WebVPN directory: real API sequence, external database gateway routes, identity before/after, HTML login rejection and late-network cancellation passed")

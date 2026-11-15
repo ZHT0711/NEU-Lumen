@@ -1,142 +1,226 @@
 import SwiftUI
-import WebKit
 import Observation
 
-/// Pathly owns the floor plans and routing. Keep its website in a separate WebKit session.
+@MainActor @Observable
+final class IndoorNavigationStore {
+    private(set) var catalog: IndoorCatalog?
+    private(set) var campus = "south"
+    private(set) var buildingID = ""
+    private(set) var startID = ""
+    private(set) var endID = ""
+    var preference = IndoorRoutePreference.shortest
+    private(set) var route: IndoorRoute?
+    private(set) var loading = false
+    private(set) var error: String?
+    private var destination = ""
+    private var request = UUID()
+    private var prepared = false
+    private let client = PathlyClient()
+    private let defaults = UserDefaults.standard
+    var buildings: [IndoorBuilding] { catalog?.buildings.filter { $0.campus == campus } ?? [] }
+    var building: IndoorBuilding? { buildings.first { $0.id == buildingID } }
+    var start: IndoorRoom? { building?.room(startID) }
+    var end: IndoorRoom? { building?.room(endID) }
+    var selectionKey: String { [buildingID, startID, endID, preference.rawValue].joined(separator: "|") }
+    var canSearch: Bool { building != nil && start != nil && end != nil && startID != endID }
+
+    func prepare(destination: String, campus: String) {
+        guard !prepared else { return }
+        self.destination = destination
+        do {
+            catalog = try IndoorCatalog.bundled()
+            self.campus = destination.contains("南湖") ? "main" : destination.contains("浑南") ? "south" : campus
+            let saved = defaults.string(forKey: "lumen.pathly.building." + self.campus)
+            let named = buildings.filter { destination.contains($0.name) || destination.contains($0.name.replacingOccurrences(of: "楼", with: "教学楼")) }.max { $0.name.count < $1.name.count }
+            if let selected = named ?? buildings.first(where: { $0.id == saved }) ?? buildings.first { selectBuilding(selected.id) }
+            prepared = true
+        } catch { self.error = IndoorNavigationError.catalog.localizedDescription }
+    }
+    func selectCampus(_ value: String) {
+        guard campus != value else { return }
+        campus = value
+        let saved = defaults.string(forKey: "lumen.pathly.building." + campus)
+        selectBuilding(buildings.first(where: { $0.id == saved })?.id ?? buildings.first?.id ?? "")
+    }
+    func selectBuilding(_ value: String) {
+        cancel(); route = nil; error = nil
+        buildingID = value; startID = ""; endID = ""
+        guard let building else { return }
+        defaults.set(building.id, forKey: "lumen.pathly.building." + campus)
+        let savedStart = defaults.string(forKey: "lumen.pathly.start." + building.id) ?? ""
+        let savedEnd = defaults.string(forKey: "lumen.pathly.end." + building.id) ?? ""
+        if building.room(savedStart) != nil { startID = savedStart }
+        let matches = building.matchingRooms(destination)
+        if !destination.isEmpty {
+            if matches.count == 1 { endID = matches[0].id }
+        } else if building.room(savedEnd) != nil { endID = savedEnd }
+    }
+    func select(_ room: IndoorRoom, forStart: Bool) {
+        guard building?.room(room.id) != nil else { return }
+        clearRoute()
+        if forStart { startID = room.id } else { endID = room.id }
+    }
+    func swap() { let previous = startID; startID = endID; endID = previous; clearRoute() }
+    func cancel() { request = UUID(); loading = false }
+    func clearRoute() { cancel(); route = nil; error = nil }
+    func search() async {
+        guard let building, canSearch else { error = IndoorNavigationError.endpoints.localizedDescription; return }
+        let token = UUID(); request = token
+        let start = startID, end = endID, selected = preference
+        loading = true; error = nil; route = nil
+        defer { if request == token { loading = false } }
+        do {
+            let result = try await client.route(building: building, start: start, end: end, preference: selected)
+            guard request == token, !Task.isCancelled else { return }
+            route = result
+            defaults.set(start, forKey: "lumen.pathly.start." + building.id)
+            defaults.set(end, forKey: "lumen.pathly.end." + building.id)
+        } catch {
+            guard request == token, !Task.isCancelled else { return }
+            self.error = (error as? IndoorNavigationError)?.localizedDescription ?? IndoorNavigationError.unavailable.localizedDescription
+        }
+    }
+}
+
+private struct IndoorPointSelection: Identifiable {
+    let forStart: Bool
+    var id: Bool { forStart }
+}
+
 struct IndoorNavigationView: View {
     var destination = ""
-    @Environment(\.openURL) private var openURL
-    @State private var browser = IndoorNavigationBrowser()
-    @State private var copied = false
-
-    private var room: String { destination.trimmingCharacters(in: .whitespacesAndNewlines) }
+    @Environment(AppEnvironment.self) private var environment
+    @State private var store = IndoorNavigationStore()
+    @State private var picker: IndoorPointSelection?
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !room.isEmpty {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("课程地点").font(.caption).foregroundStyle(.secondary)
-                        Text(room).font(.subheadline.weight(.medium)).textSelection(.enabled)
-                    }
-                    Spacer(minLength: 8)
-                    Button(copied ? "已复制" : "复制地点", systemImage: copied ? "checkmark" : "doc.on.doc") {
-                        UIPasteboard.general.string = room
-                        copied = true
-                    }.font(.subheadline)
-                }.padding(16).background(Color(.secondarySystemBackground))
+        @Bindable var store = store
+        ScrollViewReader { proxy in
+        Form {
+            if !destination.isEmpty {
+                Section("课程地点") { Text(destination).textSelection(.enabled) }
             }
-            HStack(spacing: 6) {
-                Label("Pathly · 楼内导航", systemImage: "point.topleft.down.curvedto.point.bottomright.up")
-                Spacer()
-                Text("pathly.top")
-            }
-            .font(.caption).foregroundStyle(.secondary)
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            if browser.loading { ProgressView().frame(maxWidth: .infinity).padding(.bottom, 6) }
-            IndoorNavigationWebView(browser: browser)
-                .overlay {
-                    if let error = browser.error {
-                        ErrorStateView(message: error, retryTitle: "重新加载") { browser.reload() }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(.regularMaterial)
-                    }
+            Section("校区与教学楼") {
+                Picker("校区", selection: Binding(get: { store.campus }, set: { store.selectCampus($0) })) {
+                    Text("南湖校区").tag("main")
+                    Text("浑南校区").tag("south")
+                }.pickerStyle(.segmented)
+                Picker("教学楼", selection: Binding(get: { store.buildingID }, set: { store.selectBuilding($0) })) {
+                    ForEach(store.buildings) { Text($0.name).tag($0.id) }
                 }
-            HStack {
-                Button("后退", systemImage: "chevron.left") { browser.webView.goBack() }
-                    .disabled(!browser.canGoBack)
-                Spacer()
-                Button("前进", systemImage: "chevron.right") { browser.webView.goForward() }
-                    .disabled(!browser.canGoForward)
-                Spacer()
-                Button("刷新", systemImage: "arrow.clockwise") { browser.reload() }
-                Spacer()
-                Button("浏览器打开", systemImage: "safari") { openURL(browser.webView.url ?? IndoorNavigationBrowser.home) }
             }
-            .labelStyle(.iconOnly).padding(16).background(.bar)
+            Section("起点与终点") {
+                pointButton(title: "起点", room: store.start, forStart: true)
+                pointButton(title: "终点", room: store.end, forStart: false)
+                Button("交换起终点", systemImage: "arrow.up.arrow.down") { store.swap() }
+                    .disabled(store.start == nil && store.end == nil)
+                if store.start != nil, store.startID == store.endID {
+                    Text("起点与终点相同，请调整一个地点。").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                Picker("路线偏好", selection: $store.preference) {
+                    ForEach(IndoorRoutePreference.allCases) { Text($0.title).tag($0) }
+                }.pickerStyle(.segmented)
+                Button {
+                    searchTask?.cancel()
+                    searchTask = Task { await store.search() }
+                } label: { Label("规划楼内路线", systemImage: "figure.walk").frame(maxWidth: .infinity) }
+                    .disabled(!store.canSearch || store.loading)
+                if store.loading { ProgressView("正在规划路线…") }
+                if let error = store.error { Text(error).font(.subheadline).foregroundStyle(.orange) }
+            } header: { Text("路线偏好") } footer: {
+                Text("请选择你所在的起点。楼层图和寻路服务由 Pathly 提供。")
+            }
+            if let route = store.route {
+                Section("导航路线 · \(route.steps.count) 段") {
+                    if route.usesElevator {
+                        Label("路线包含电梯，高峰时可改选“避开电梯”重新规划。", systemImage: "arrow.up.arrow.down.square")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    ForEach(route.steps) { step in
+                        if step.isVertical {
+                            Label(step.title, systemImage: step.elevator ? "arrow.up.arrow.down.square" : "stairs")
+                                .font(.headline).padding(.vertical, 10)
+                        } else {
+                            IndoorRouteMapCard(step: step, first: route.steps.first(where: { !$0.isVertical })?.id == step.id,
+                                               last: route.steps.last(where: { !$0.isVertical })?.id == step.id)
+                        }
+                    }
+                }.id("indoor-route")
+            }
+            Section { Link("Pathly 原站", destination: URL(string: "https://pathly.top/user/user-path")!) }
+        }
+        .onChange(of: store.route != nil) { _, ready in
+            if ready { withAnimation { proxy.scrollTo("indoor-route", anchor: .top) } }
+        }
         }
         .navigationTitle("楼内导航")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { browser.start() }
-        .onDisappear { browser.webView.stopLoading() }
+        .task { store.prepare(destination: destination, campus: environment.repository.campus == .hunnan ? "south" : "main") }
+        .onChange(of: store.selectionKey) { _, _ in searchTask?.cancel(); store.clearRoute() }
+        .onDisappear { searchTask?.cancel(); store.cancel() }
+        .sheet(item: $picker) { selection in
+            if let building = store.building {
+                IndoorPointPicker(building: building, selected: selection.forStart ? store.startID : store.endID, forStart: selection.forStart) { room in
+                    store.select(room, forStart: selection.forStart)
+                }
+            }
+        }
+    }
+    private func pointButton(title: String, room: IndoorRoom?, forStart: Bool) -> some View {
+        Button { picker = IndoorPointSelection(forStart: forStart) } label: {
+            HStack {
+                Label(title, systemImage: forStart ? "location.circle" : "mappin.circle")
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(room?.title ?? "请选择").foregroundStyle(room == nil ? .secondary : .primary)
+                    if let room, let building = store.building { Text(building.floorName(for: room)).font(.caption).foregroundStyle(.secondary) }
+                }
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }.foregroundStyle(.primary)
+        }.disabled(store.building == nil)
     }
 }
 
-@MainActor @Observable
-final class IndoorNavigationBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
-    static let home = URL(string: "https://pathly.top/user/user-path")!
-    let webView: WKWebView
-    private(set) var loading = false
-    private(set) var canGoBack = false
-    private(set) var canGoForward = false
-    private(set) var error: String?
-    @ObservationIgnored private var observations: [NSKeyValueObservation] = []
-
-    override init() {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        webView = WKWebView(frame: .zero, configuration: configuration)
-        super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
-        observations = [
-            webView.observe(\.isLoading) { [weak self] _, _ in Task { @MainActor in self?.updateState() } },
-            webView.observe(\.canGoBack) { [weak self] _, _ in Task { @MainActor in self?.updateState() } },
-            webView.observe(\.canGoForward) { [weak self] _, _ in Task { @MainActor in self?.updateState() } }
-        ]
+private struct IndoorPointPicker: View {
+    let building: IndoorBuilding
+    let selected: String
+    let forStart: Bool
+    let choose: (IndoorRoom) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var floor = -1
+    var body: some View {
+        NavigationStack {
+            List {
+                Picker("楼层", selection: $floor) {
+                    Text("全部楼层").tag(-1)
+                    ForEach(building.floors) { Text($0.name).tag($0.id) }
+                }
+                ForEach(building.floors.filter { floor == -1 || $0.id == floor }) { level in
+                    let rooms = level.uniqueRooms.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
+                    if !rooms.isEmpty {
+                        Section(level.name) {
+                            ForEach(rooms) { room in
+                                Button { choose(room); dismiss() } label: {
+                                    HStack {
+                                        Label(room.title, systemImage: room.isGate ? "door.left.hand.open" : room.isElevator ? "arrow.up.arrow.down.square" : "mappin")
+                                        Spacer()
+                                        if room.id == selected { Image(systemName: "checkmark") }
+                                    }.foregroundStyle(.primary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "搜索教室、楼门或电梯")
+            .navigationTitle(building.name + (forStart ? " · 起点" : " · 终点"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+        }
     }
-
-    func start() {
-        guard webView.url == nil else { return }
-        webView.load(URLRequest(url: Self.home))
-    }
-
-    func reload() {
-        error = nil
-        if webView.url == nil { start() } else { webView.reload() }
-    }
-
-    private func updateState() {
-        loading = webView.isLoading
-        canGoBack = webView.canGoBack
-        canGoForward = webView.canGoForward
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { updateState() }
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError failure: Error) { report(failure) }
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError failure: Error) { report(failure) }
-
-    private func report(_ failure: Error) {
-        guard (failure as NSError).code != NSURLErrorCancelled else { return }
-        error = "楼内导航暂时无法加载，请检查网络后重试。"
-        updateState()
-    }
-
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { error = "导航页面已停止，请重新加载。" }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
-        if url.scheme == "https" || url.scheme == "http" { decisionHandler(.allow) }
-        else if navigationAction.navigationType == .linkActivated {
-            UIApplication.shared.open(url)
-            decisionHandler(.cancel)
-        } else { decisionHandler(.cancel) }
-    }
-
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil, let url = navigationAction.request.url,
-           ["https", "http"].contains(url.scheme ?? "") { webView.load(navigationAction.request) }
-        return nil
-    }
-}
-
-private struct IndoorNavigationWebView: UIViewRepresentable {
-    let browser: IndoorNavigationBrowser
-    func makeUIView(context: Context) -> WKWebView { browser.webView }
-    func updateUIView(_ view: WKWebView, context: Context) {}
 }
