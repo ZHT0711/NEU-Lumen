@@ -110,6 +110,11 @@ struct TimetablePlacement: Identifiable {
         let calendar = Calendar.current
         // 合并按自然日分组；先筛选当天，避免七列各自重复合并整周。
         let daily = occurrences.filter { calendar.isDate($0.date, inSameDayAs: date) }.mergeConsecutive()
+        return layoutMerged(daily)
+    }
+
+    /// Input is already merged and sorted by the week projection.
+    static func layoutMerged(_ daily: [CourseOccurrence]) -> [TimetablePlacement] {
         var assigned: [(CourseOccurrence, Int, Int, Int)] = []
         var laneEnds: [Int] = []
         for occurrence in daily {
@@ -124,6 +129,67 @@ struct TimetablePlacement: Identifiable {
                                lane: $0.3, laneCount: Swift.max(1, laneEnds.count))
         }
     }
+}
+
+struct ScheduleWeekSnapshot {
+    /// Include the raw makeup source week, even when it is outside the displayed range.
+    static func portalWeeks(from first: Date, to end: Date, replacements: [String: String], calendar: Calendar = .current) -> Set<Date> {
+        func sunday(_ date: Date) -> Date {
+            calendar.date(byAdding: .day, value: 1 - calendar.component(.weekday, from: date), to: calendar.startOfDay(for: date))!
+        }
+        var result = Set<Date>()
+        var day = calendar.startOfDay(for: first)
+        while day < end {
+            result.insert(sunday(day))
+            if !replacements.isEmpty, let source = replacements[PortalDate.isoDay(day)], let date = PortalDate.day(source) {
+                result.insert(sunday(date))
+            }
+            day = calendar.date(byAdding: .day, value: 1, to: day)!
+        }
+        return result
+    }
+
+    struct Day: Identifiable {
+        let date: Date
+        let placements: [TimetablePlacement]
+        var id: Date { date }
+    }
+    let days: [Day]
+    let occurrences: [CourseOccurrence]
+    init(sunday: Date, occurrences: [CourseOccurrence], calendar: Calendar = .current) {
+        self.occurrences = occurrences
+        let grouped = Dictionary(grouping: occurrences) { calendar.startOfDay(for: $0.date) }
+        days = (1...7).compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: offset, to: sunday) else { return nil }
+            return Day(date: date, placements: TimetablePlacement.layoutMerged(grouped[calendar.startOfDay(for: date)] ?? []))
+        }
+    }
+}
+
+/// Main-actor-owned, bounded memoization; the build closure is never evaluated on a hit.
+final class ScheduleWeekCache {
+    struct WeekRevision: Hashable {
+        let sunday: Date
+        let revision: Int
+    }
+    struct Key: Hashable {
+        let sunday: Date
+        let courses: [WeekRevision]
+        let holidays: Int
+        let planner: Int
+        let calendar: String
+        let timeZone: String
+    }
+    private var values: [Key: ScheduleWeekSnapshot] = [:]
+    private var order: [Key] = []
+    func value(for key: Key, build: () -> ScheduleWeekSnapshot) -> ScheduleWeekSnapshot {
+        if let saved = values[key] { return saved }
+        let value = build()
+        values[key] = value; order.append(key)
+        while order.count > 8 { values.removeValue(forKey: order.removeFirst()) }
+        return value
+    }
+    func removeAll() { values.removeAll(); order.removeAll() }
 }
 
 /// 手动添加的日程（考试、事务、提醒…），落到具体某天，本机持久化。
@@ -161,8 +227,8 @@ struct PlannerEvent: Identifiable, Codable, Hashable {
     }
 
     /// 转成课表网格/时间轴可渲染的槽位。
-    func toSlot() -> CourseSlot {
-        let weekday = PortalDate.day(dateIso).map(Self.mondayBasedWeekday) ?? 1
+    func toSlot(on date: Date? = nil) -> CourseSlot {
+        let weekday = (date ?? PortalDate.day(dateIso)).map(Self.mondayBasedWeekday) ?? 1
         return CourseSlot(
             weekday: weekday,
             startMinutes: startMinutes,

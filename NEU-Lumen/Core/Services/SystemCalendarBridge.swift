@@ -3,18 +3,6 @@ import EventKit
 import CryptoKit
 import Observation
 
-struct SystemAgendaItem: Identifiable {
-    let id: String
-    let title: String
-    let date: Date
-    let end: Date?
-    let allDay: Bool
-    let location: String
-    let source: String
-    let isReminder: Bool
-    var eventID: String? = nil
-}
-
 /// Explicit week sync, scoped to our dedicated calendars and account marker.
 /// Reading the system never changes the academic portal's source of truth.
 @MainActor @Observable
@@ -25,17 +13,20 @@ final class SystemCalendarBridge {
     private(set) var message: String?
     private(set) var updatedAt: Date?
     private(set) var accountKey = ""
-    var eventCalendarIDs: Set<String> = [] { didSet { saveSelections() } }
-    var reminderCalendarIDs: Set<String> = [] { didSet { saveSelections() } }
+    var eventCalendarIDs: Set<String> = [] { didSet { if eventCalendarIDs != oldValue { invalidateAgenda() }; saveSelections() } }
+    var reminderCalendarIDs: Set<String> = [] { didSet { if reminderCalendarIDs != oldValue { invalidateAgenda() }; saveSelections() } }
     private let defaults = UserDefaults.standard
     private var refreshID = UUID()
+    @ObservationIgnored private var cachedExportIDs: Set<String>?
+    @ObservationIgnored private let loader = SystemAgendaLoader { await SystemAgendaReader.read($0) }
 
     var eventsAllowed: Bool { EKEventStore.authorizationStatus(for: .event) == .fullAccess }
     var remindersAllowed: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
-    var eventCalendars: [EKCalendar] { eventsAllowed ? store.calendars(for: .event).filter { !isExportCalendar($0) } : [] }
-    var reminderCalendars: [EKCalendar] { remindersAllowed ? store.calendars(for: .reminder).filter { !isExportCalendar($0) } : [] }
+    var eventCalendars: [EKCalendar] { availableCalendars(for: .event, allowed: eventsAllowed) }
+    var reminderCalendars: [EKCalendar] { availableCalendars(for: .reminder, allowed: remindersAllowed) }
 
     func activate(account: String) {
+        invalidateAgenda()
         accountKey = account.isEmpty ? "" : SHA256.hash(data: Data(account.utf8)).map { String(format: "%02x", $0) }.joined()
         let savedEvents = Set(defaults.stringArray(forKey: selectionKey("events")) ?? [])
         let savedReminders = Set(defaults.stringArray(forKey: selectionKey("reminders")) ?? [])
@@ -55,41 +46,24 @@ final class SystemCalendarBridge {
         } catch { message = error.localizedDescription }
     }
 
-    func refresh(start: Date, end: Date) async {
+    func invalidateAgenda() {
+        refreshID = UUID()
+        cachedExportIDs = nil
+        loader.invalidate()
+    }
+
+    func refresh(start: Date, end: Date, force: Bool = false) async {
         let account = accountKey
         let requestID = UUID()
         refreshID = requestID
-        var items: [SystemAgendaItem] = []
-        if eventsAllowed {
-            let calendars = eventCalendars.filter { eventCalendarIDs.contains($0.calendarIdentifier) }
-            if !calendars.isEmpty {
-                let predicate = store.predicateForEvents(withStart: start, end: end, calendars: calendars)
-                items += store.events(matching: predicate).filter { !isOwned($0) }.map {
-                    SystemAgendaItem(id: "\($0.eventIdentifier ?? $0.calendarItemIdentifier)|\($0.startDate.timeIntervalSince1970)", title: $0.title ?? "日历日程",
-                        date: $0.startDate, end: $0.endDate, allDay: $0.isAllDay,
-                        location: $0.location ?? "", source: $0.calendar.title, isReminder: false, eventID: $0.eventIdentifier)
-                }
-            }
-        }
-        if remindersAllowed {
-            let calendars = reminderCalendars.filter { reminderCalendarIDs.contains($0.calendarIdentifier) }
-            if !calendars.isEmpty {
-                do {
-                    let reminders = try await fetchReminders(in: calendars)
-                    items += reminders.compactMap { reminder in
-                        guard !reminder.isCompleted, !isOwned(reminder),
-                              let components = reminder.dueDateComponents,
-                              let date = components.date ?? Calendar.current.date(from: components),
-                              date >= start && date < end else { return nil }
-                        return SystemAgendaItem(id: reminder.calendarItemIdentifier, title: reminder.title ?? "提醒事项",
-                            date: date, end: nil, allDay: components.hour == nil, location: reminder.location ?? "",
-                            source: reminder.calendar.title, isReminder: true)
-                    }
-                } catch { message = "提醒事项读取失败：" + error.localizedDescription }
-            }
-        }
-        guard account == accountKey, requestID == refreshID else { return }
-        agenda = items.sorted { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date }
+        let query = SystemAgendaQuery(account: account, start: start, end: end,
+            events: eventsAllowed ? eventCalendarIDs : [], reminders: remindersAllowed ? reminderCalendarIDs : [],
+            excluded: eventCalendarIDs.isEmpty && reminderCalendarIDs.isEmpty ? [] : exportCalendarIDs,
+            timeZone: TimeZone.current.identifier)
+        guard let result = await loader.load(query, force: force),
+              account == accountKey, requestID == refreshID, !Task.isCancelled else { return }
+        agenda = result.items
+        message = result.message
         updatedAt = Date()
     }
 
@@ -108,6 +82,7 @@ final class SystemCalendarBridge {
         do {
             reminder.isCompleted = true
             try store.save(reminder, commit: true)
+            invalidateAgenda()
             agenda.removeAll { $0.id == id }
         } catch { message = error.localizedDescription }
     }
@@ -117,7 +92,7 @@ final class SystemCalendarBridge {
         guard !busy, !accountKey.isEmpty else { return }
         guard events || reminders else { message = "请选择日历或提醒事项"; return }
         busy = true
-        defer { busy = false }
+        defer { busy = false; invalidateAgenda() }
         do {
             if events && !eventsAllowed { throw BridgeError.permission("日历") }
             if reminders && !remindersAllowed { throw BridgeError.permission("提醒事项") }
@@ -202,9 +177,17 @@ final class SystemCalendarBridge {
         defaults.set(Array(reminderCalendarIDs), forKey: selectionKey("reminders"))
     }
 
-    private func isExportCalendar(_ calendar: EKCalendar) -> Bool {
-        let ids = defaults.dictionaryRepresentation().filter { $0.key.hasPrefix("lumen.system.export.") }.values.compactMap { $0 as? String }
-        return ids.contains(calendar.calendarIdentifier)
+    private var exportCalendarIDs: Set<String> {
+        if let cachedExportIDs { return cachedExportIDs }
+        let ids = Set(defaults.dictionaryRepresentation().filter { $0.key.hasPrefix("lumen.system.export.") }.values.compactMap { $0 as? String })
+        cachedExportIDs = ids
+        return ids
+    }
+
+    private func availableCalendars(for type: EKEntityType, allowed: Bool) -> [EKCalendar] {
+        guard allowed else { return [] }
+        let excluded = exportCalendarIDs
+        return store.calendars(for: type).filter { !excluded.contains($0.calendarIdentifier) }
     }
 
     private func exportCalendar(for type: EKEntityType) throws -> EKCalendar {

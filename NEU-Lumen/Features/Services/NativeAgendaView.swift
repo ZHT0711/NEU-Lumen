@@ -109,6 +109,7 @@ struct NativeAgendaView: View {
         }
         .onChange(of: scenePhase) { _, value in if active, value == .active { Task { await refreshSystem() } } }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+            repo.systemCalendar.invalidateAgenda()
             if active { Task { await refreshSystem() } }
         }
         .onChange(of: environment.session.requestEpoch) { _, _ in selected = nil; source = "全部"; systemItem = nil; completing = nil; managing = false; adding = false }
@@ -118,7 +119,7 @@ struct NativeAgendaView: View {
         .sheet(isPresented: $adding) { AddEventSheet(date: day) { repo.planner.add($0) } }
         .sheet(isPresented: $managing, onDismiss: { Task { await refreshSystem() } }) { SystemCalendarSheet(sunday: sunday) }
         .sheet(item: $selected) { item in CourseDetailSheet(occurrence: item) { repo.planner.remove(id: $0) } }
-        .sheet(item: $systemItem, onDismiss: { Task { await refreshSystem() } }) { item in
+        .sheet(item: $systemItem, onDismiss: { Task { await refreshSystem(force: true) } }) { item in
             if let event = repo.systemCalendar.event(for: item) {
                 SystemEventEditor(event: event, store: repo.systemCalendar.store) { systemItem = nil }
             } else { ContentUnavailableView("日程已更新", systemImage: "calendar", description: Text("关闭后刷新，再查看此日程。")) }
@@ -138,11 +139,12 @@ struct NativeAgendaView: View {
     private func refresh(force: Bool = false) async {
         await repo.loadDisplayWeek(starting: sunday, force: force)
         guard !Task.isCancelled else { return }
-        await refreshSystem()
+        await refreshSystem(force: force)
     }
-    private func refreshSystem() async {
+    private func refreshSystem(force: Bool = false) async {
+        guard active, !Task.isCancelled else { return }
         let start = Calendar.current.startOfDay(for: day)
         guard let end = Calendar.current.date(byAdding: .day, value: 1, to: start) else { return }
-        await repo.systemCalendar.refresh(start: start, end: end)
+        await repo.systemCalendar.refresh(start: start, end: end, force: force)
     }
 }

@@ -7,7 +7,8 @@ import Observation
 final class PlannerEventStore {
     static let shared = PlannerEventStore()
 
-    private(set) var events: [PlannerEvent] = []
+    private(set) var revision = 0
+    private(set) var events: [PlannerEvent] = [] { didSet { if events != oldValue { revision &+= 1 } } }
 
     private var fileURL: URL? {
         FileManager.default

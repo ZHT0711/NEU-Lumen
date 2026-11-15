@@ -76,7 +76,7 @@ struct MainTabView: View {
                 .tabItem { Label("首页", systemImage: "house.fill") }
                 .tag(AppTab.home)
 
-            ScheduleView()
+            ScheduleView(active: selection == .schedule)
                 .tabItem { Label("课表", systemImage: "calendar") }
                 .tag(AppTab.schedule)
 

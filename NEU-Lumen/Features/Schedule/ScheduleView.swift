@@ -3,6 +3,7 @@ import EventKit
 
 /// 课表：教学周网格（第1-2节…第9-10节），门户事件 + 本机日程上格。
 struct ScheduleView: View {
+    var active = true
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var showHolidaySettings = false
@@ -11,6 +12,13 @@ struct ScheduleView: View {
     @State private var weekOffset = 0
     @State private var showAddEvent = false
     @State private var selected: CourseOccurrence?
+    @State private var calendarChangeTask: Task<Void, Never>?
+
+    private struct LoadKey: Hashable {
+        let active: Bool
+        let sunday: Date
+        let account: UUID
+    }
 
     private var repo: PortalRepository {
         environment.repository
@@ -70,7 +78,10 @@ struct ScheduleView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await repo.loadDisplayWeek(starting: weekStartSunday, force: true) }
+                        Task {
+                            await repo.loadDisplayWeek(starting: weekStartSunday, force: true)
+                            await refreshSystemAgenda(force: true)
+                        }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -83,17 +94,27 @@ struct ScheduleView: View {
                     }
                 }
             }
-            .task(id: weekOffset) {
+            .task(id: LoadKey(active: active, sunday: weekStartSunday, account: environment.session.requestEpoch)) {
+                guard active else { return }
                 await repo.loadDisplayWeek(starting: weekStartSunday)
+                guard !Task.isCancelled else { return }
                 await refreshSystemAgenda()
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await refreshSystemAgenda() } }
+            if phase == .active, active { Task { await refreshSystemAgenda() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
-            Task { await refreshSystemAgenda() }
+            repo.systemCalendar.invalidateAgenda()
+            calendarChangeTask?.cancel()
+            guard active else { return }
+            calendarChangeTask = Task {
+                do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+                await refreshSystemAgenda()
+            }
         }
+        .onChange(of: active) { _, visible in if !visible { calendarChangeTask?.cancel() } }
+        .onDisappear { calendarChangeTask?.cancel() }
         .sheet(isPresented: $showHolidaySettings, onDismiss: {
             Task { await repo.loadDisplayWeek(starting: weekStartSunday) }
         }) { ScheduleSettingsSheet() }
@@ -101,7 +122,7 @@ struct ScheduleView: View {
             Task { await refreshSystemAgenda() }
         }) { SystemCalendarSheet(sunday: weekStartSunday) }
         .sheet(item: $selectedSystemItem, onDismiss: {
-            Task { await refreshSystemAgenda() }
+            Task { await refreshSystemAgenda(force: true) }
         }) { item in
             if let event = repo.systemCalendar.event(for: item) {
                 SystemEventEditor(event: event, store: repo.systemCalendar.store) { selectedSystemItem = nil }
@@ -119,8 +140,9 @@ struct ScheduleView: View {
         }
     }
 
-    private func refreshSystemAgenda() async {
-        await repo.systemCalendar.refresh(start: weekDates[0], end: Calendar.current.date(byAdding: .day, value: 7, to: weekDates[0])!)
+    private func refreshSystemAgenda(force: Bool = false) async {
+        guard active, !Task.isCancelled else { return }
+        await repo.systemCalendar.refresh(start: weekDates[0], end: Calendar.current.date(byAdding: .day, value: 7, to: weekDates[0])!, force: force)
     }
 
     private var holidaySummary: some View {
@@ -229,7 +251,7 @@ struct ScheduleView: View {
     private var grid: some View {
         let today = Calendar.current.startOfDay(for: Date())
         // 同次网格构建复用整周课程，避免每个日期列重复投影、解析和合并。
-        let weekOccurrences = occurrences
+        let snapshot = repo.displayWeekSnapshot(starting: weekStartSunday)
         return HStack(alignment: .top, spacing: 4) {
             VStack(spacing: 0) {
                 Color.clear.frame(height: 42)
@@ -237,13 +259,14 @@ struct ScheduleView: View {
                     periodLabel(pair).frame(height: periodHeight * 2)
                 }
             }
-            ForEach(weekDates, id: \.self) { date in
+            ForEach(snapshot.days) { day in
+                let date = day.date
                 let isToday = Calendar.current.isDate(date, inSameDayAs: today)
                 VStack(spacing: 0) {
                     dayHeader(date, isToday: isToday)
                         .frame(height: 42)
                     TimetableDayColumn(
-                        placements: TimetablePlacement.layout(weekOccurrences, on: date),
+                        placements: day.placements,
                         isToday: isToday,
                         periodHeight: periodHeight
                     ) { selected = $0 }

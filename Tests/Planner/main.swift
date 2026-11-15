@@ -80,9 +80,14 @@ print("Holiday policy: 33 rest days, 6 work days, validation, overrides, exams, 
     precondition(favorites.ids == Array(apps.prefix(8)).map(\.id))
 
     let holidays = HolidayStore(defaults: defaults)
+    let originalRevision = holidays.revision
+    let wasEnabled = holidays.enabled
+    holidays.enabled = wasEnabled
+    precondition(holidays.revision == originalRevision, "相同配置不应使课表缓存失效")
     holidays.activate(account: "A")
     holidays.setReplacement(PortalDate.day("2026-09-28"), on: PortalDate.day("2026-10-01")!)
     precondition(holidays.overrides["2026-10-01"] == .normal)
+    precondition(holidays.revision > originalRevision, "调课必须使课表缓存失效")
     holidays.activate(account: "B")
     precondition(holidays.overrides.isEmpty && holidays.replacementDates.isEmpty)
     holidays.activate(account: "A")

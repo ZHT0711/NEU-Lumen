@@ -3,10 +3,11 @@ import Observation
 
 @MainActor @Observable
 final class HolidayStore {
-    var enabled: Bool { didSet { defaults.set(enabled, forKey: "lumen.holidays.enabled") } }
-    private(set) var days: [String: HolidayYear.Day] = [:]
-    private(set) var overrides: [String: SchoolDayOverride] = [:]
-    private(set) var replacementDates: [String: String] = [:]
+    private(set) var revision = 0
+    var enabled: Bool { didSet { if enabled != oldValue { revision &+= 1 }; defaults.set(enabled, forKey: "lumen.holidays.enabled") } }
+    private(set) var days: [String: HolidayYear.Day] = [:] { didSet { if days != oldValue { revision &+= 1 } } }
+    private(set) var overrides: [String: SchoolDayOverride] = [:] { didSet { if overrides != oldValue { revision &+= 1 } } }
+    private(set) var replacementDates: [String: String] = [:] { didSet { if replacementDates != oldValue { revision &+= 1 } } }
     private(set) var status = ""
     private let defaults: UserDefaults
     private var overrideKey: String?
@@ -49,9 +50,9 @@ final class HolidayStore {
     }
 
     func refresh(year: Int, force: Bool = false) async {
+        guard force || !attempted.contains(year) else { return }
         let key = "lumen.holidays.\(year)"
         if let data = defaults.data(forKey: key), let cached = try? HolidayYear.decode(data, year: year) { merge(cached) }
-        guard force || !attempted.contains(year) else { return }
         attempted.insert(year)
         do {
             var request = URLRequest(url: URL(string: "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/\(year).json")!)
@@ -73,8 +74,9 @@ final class HolidayStore {
     }
 
     private func merge(_ year: HolidayYear) {
-        days = days.filter { !$0.key.hasPrefix("\(year.year)-") }
-        for day in year.days { days[day.date] = day }
+        var merged = days.filter { !$0.key.hasPrefix("\(year.year)-") }
+        for day in year.days { merged[day.date] = day }
+        if days != merged { days = merged }
         knownYears.insert(year.year)
     }
 }

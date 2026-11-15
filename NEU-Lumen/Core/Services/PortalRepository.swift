@@ -35,6 +35,8 @@ final class PortalRepository {
     private(set) var newsUpdatedAt: Date?
 
     private var weekCache: [Date: [CourseOccurrence]] = [:]
+    private var weekContentRevisions: [Date: Int] = [:]
+    @ObservationIgnored private let scheduleSnapshots = ScheduleWeekCache()
     private var weekUpdatedAt: [Date: Date] = [:]
     private(set) var weekStates: [Date: LoadState] = [:]
     private var weekTasks: [Date: Task<Void, Never>] = [:]
@@ -240,6 +242,8 @@ final class PortalRepository {
         academicExamCache = [:]; academicExamStates = [:]; academicExamDates = [:]; academicExamErrors = [:]; academicExamRequests = [:]
         hotSearch = []
         weekCache.removeAll()
+        weekContentRevisions.removeAll()
+        scheduleSnapshots.removeAll()
         weekUpdatedAt.removeAll()
         for task in weekTasks.values { task.cancel() }
         weekTasks.removeAll()
@@ -585,7 +589,10 @@ final class PortalRepository {
                 let list = try await self.withRecovery { try await self.session.client.fetchWeek(anyDayInWeek: date) }
                 try Task.checkCancellation()
                 guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
-                self.weekCache[weekStart] = list
+                if self.weekCache[weekStart] != list {
+                    self.weekCache[weekStart] = list
+                    self.weekContentRevisions[weekStart, default: 0] &+= 1
+                }
                 self.weekUpdatedAt[weekStart] = Date()
                 self.weekStates[weekStart] = .loaded
             } catch {
@@ -625,16 +632,7 @@ final class PortalRepository {
     }
 
     private func requiredPortalWeeks(from first: Date, to end: Date) -> Set<Date> {
-        var result = Set<Date>()
-        var day = Calendar.current.startOfDay(for: first)
-        while day < end {
-            result.insert(LiveActivityDataPolicy.portalWeekStart(for: day))
-            if let source = holidays.replacementDates[PortalDate.isoDay(day)], let date = PortalDate.day(source) {
-                result.insert(LiveActivityDataPolicy.portalWeekStart(for: date))
-            }
-            day = Calendar.current.date(byAdding: .day, value: 1, to: day)!
-        }
-        return result
+        ScheduleWeekSnapshot.portalWeeks(from: first, to: end, replacements: holidays.replacementDates)
     }
 
     private func states(for weeks: Set<Date>) -> [LoadState] {
@@ -658,15 +656,30 @@ final class PortalRepository {
     }
 
     func displayWeekOccurrences(starting sunday: Date) -> [CourseOccurrence] {
+        displayWeekSnapshot(starting: sunday).occurrences
+    }
+
+    func displayWeekSnapshot(starting sunday: Date) -> ScheduleWeekSnapshot {
+        let calendar = Calendar.current
+        let first = calendar.date(byAdding: .day, value: 1, to: sunday)!
+        let end = calendar.date(byAdding: .day, value: 8, to: sunday)!
+        let revisions = requiredPortalWeeks(from: first, to: end).sorted().map {
+            ScheduleWeekCache.WeekRevision(sunday: $0, revision: weekContentRevisions[$0] ?? 0)
+        }
+        let key = ScheduleWeekCache.Key(sunday: sunday, courses: revisions,
+            holidays: holidays.revision, planner: planner.revision,
+            calendar: String(describing: calendar.identifier), timeZone: calendar.timeZone.identifier)
+        return scheduleSnapshots.value(for: key) { buildDisplayWeek(starting: sunday) }
+    }
+
+    private func buildDisplayWeek(starting sunday: Date) -> ScheduleWeekSnapshot {
         let cal = Calendar.current
         let first = cal.date(byAdding: .day, value: 1, to: sunday)!
         let end = cal.date(byAdding: .day, value: 8, to: sunday)!
         let portal = effectivePortalOccurrences(from: first, to: end)
-        let custom = planner.events.compactMap { event -> CourseOccurrence? in
-            guard let date = PortalDate.day(event.dateIso) else { return nil }
-            return CourseOccurrence(date: date, slot: event.toSlot())
-        }
-        return (portal + custom).filter { $0.date >= first && $0.date < end }.mergeConsecutive()
+        let custom = localOccurrences(from: first, to: end)
+        let occurrences = (portal + custom).filter { $0.date >= first && $0.date < end }.mergeConsecutive()
+        return ScheduleWeekSnapshot(sunday: sunday, occurrences: occurrences, calendar: cal)
     }
 
     func displayWeekIsLoaded(starting sunday: Date) -> Bool {
@@ -682,7 +695,8 @@ final class PortalRepository {
     }
 
     private func effectivePortalOccurrences(from first: Date, to end: Date) -> [CourseOccurrence] {
-        holidays.apply(HolidayRules.project(weekCache.values.flatMap { $0 }, from: first, to: end,
+        let relevant = requiredPortalWeeks(from: first, to: end).flatMap { weekCache[$0] ?? [] }
+        return holidays.apply(HolidayRules.project(relevant, from: first, to: end,
             replacements: holidays.replacementDates))
     }
 
@@ -708,7 +722,7 @@ final class PortalRepository {
     private func localOccurrences(from first: Date, to end: Date) -> [CourseOccurrence] {
         planner.events.compactMap { event in
             guard let date = PortalDate.day(event.dateIso), date >= first && date < end else { return nil }
-            return CourseOccurrence(date: date, slot: event.toSlot())
+            return CourseOccurrence(date: date, slot: event.toSlot(on: date))
         }
     }
 
