@@ -41,26 +41,43 @@ final class SessionStore {
     private var lastIdentityAttempt = Date.distantPast
     private var pendingUsername: String?
     private var pendingPassword: String?
+    private var pendingBrowserCredentials: CampusLoginCredentials?
+    private var passwordLoginBlocked = false
+    private var lastPasswordAttempt = Date.distantPast
+    private var lastBrowserPasswordAttempt = Date.distantPast
 
     let client: PortalClient
     private let webSessions: any WebSessionPersisting
     private let defaults: UserDefaults
+    private let credentials: any CredentialsPersisting
 
-    init(client: PortalClient = PortalClient(), webSessions: any WebSessionPersisting = KeychainWebSessionStore(), defaults: UserDefaults = .standard) {
+    init(client: PortalClient = PortalClient(), webSessions: any WebSessionPersisting = KeychainWebSessionStore(), defaults: UserDefaults = .standard,
+         credentials: any CredentialsPersisting = KeychainCredentialStore()) {
         self.client = client
         self.webSessions = webSessions
         self.defaults = defaults
+        self.credentials = credentials
     }
 
     private static let rememberedKey = "lumen.remembered.username"
     private static let suppressRestoreKey = "lumen.session.suppressAutomaticRestore"
 
     private func saveCredentials(username: String, password: String) {
-        credentialSaveError = CredentialStore.save(username: username, password: password) ? nil : "凭据未能完整保存到本机钥匙串，重启后可能需要重新登录"
+        guard let pair = CampusLoginCredentials(username: username, password: password) else { return }
+        let saved = credentials.save(pair)
+        credentialSaveError = saved ? nil : "凭据未能完整保存到本机钥匙串，重启后可能需要重新登录"
+        passwordLoginBlocked = !saved
+        if saved { defaults.removeObject(forKey: "lumen.passwordLoginPaused." + pair.username) }
+        else { defaults.set(true, forKey: "lumen.passwordLoginPaused." + pair.username) }
+        lastPasswordAttempt = .distantPast
+        lastBrowserPasswordAttempt = .distantPast
     }
 
     private func clearCredentials() {
-        if !CredentialStore.clear() { credentialSaveError = "旧凭据未能从钥匙串完全清除，已禁止自动恢复" }
+        pendingBrowserCredentials = nil
+        passwordLoginBlocked = true
+        if let previous = credentials.load() { defaults.set(true, forKey: "lumen.passwordLoginPaused." + previous.username) }
+        if !credentials.clear() { credentialSaveError = "旧凭据未能从钥匙串完全清除，已禁止自动恢复" }
     }
 
     private func clearWebSession(_ store: any WebSessionPersisting) {
@@ -72,7 +89,50 @@ final class SessionStore {
     }
 
     var hasSavedCredentials: Bool {
-        CredentialStore.hasPassword
+        guard let saved = credentials.load() else { return false }
+        return phase != .loggedIn || user?.sid == saved.username
+    }
+
+    var canAutomaticallySignIn: Bool {
+        guard hasSavedCredentials, !passwordLoginBlocked, keepSession, let pair = credentials.load() else { return false }
+        return !defaults.bool(forKey: "lumen.passwordLoginPaused." + pair.username)
+    }
+
+    func disablePasswordLogin() {
+        credentialSaveError = nil
+        clearCredentials()
+    }
+
+    /// A visible CAS page can run the school's JS when native authentication is
+    /// blocked by device trust. Never borrow a different account's saved password.
+    func beginBrowserPasswordLogin() -> CampusLoginCredentials? {
+        guard !defaults.bool(forKey: Self.suppressRestoreKey),
+              let pair = credentials.load(),
+              !defaults.bool(forKey: "lumen.passwordLoginPaused." + pair.username),
+              Date().timeIntervalSince(lastBrowserPasswordAttempt) >= 60 else { return nil }
+        let account = phase == .loggedIn ? user?.sid : rememberedUsername
+        guard account == pair.username else { return nil }
+        lastBrowserPasswordAttempt = Date()
+        return pair
+    }
+
+    func pauseRejectedBrowserPasswordLogin() {
+        guard let pair = credentials.load(),
+              (phase == .loggedIn ? user?.sid : rememberedUsername) == pair.username else { return }
+        passwordLoginBlocked = true
+        defaults.set(true, forKey: "lumen.passwordLoginPaused." + pair.username)
+        let message = "保存的密码未通过学校验证，请更新网页登录；已停止自动重试"
+        if phase == .loggedIn { profileSyncError = message } else { lastError = message }
+    }
+
+    private func saveVerifiedBrowserCredentials() {
+        guard let draft = pendingBrowserCredentials, let sid = user?.sid, !sid.isEmpty else { return }
+        pendingBrowserCredentials = nil
+        guard draft.username == sid else {
+            credentialSaveError = "网页登录账号与填写账号不一致，未保存密码"
+            return
+        }
+        saveCredentials(username: draft.username, password: draft.password)
     }
 
     /// 启动恢复：有保存凭据则静默续登，否则进登录页。
@@ -80,7 +140,7 @@ final class SessionStore {
         guard phase == .booting else { return }
         guard !defaults.bool(forKey: Self.suppressRestoreKey) else { phase = .loggedOut; return }
         if await restoreWebSession() { return }
-        if let cred = CredentialStore.load() {
+        if let cred = credentials.load(), !defaults.bool(forKey: "lumen.passwordLoginPaused." + cred.username) {
             let ok = await performLogin(username: cred.username, password: cred.password, keep: true)
             if !ok {
                 phase = .loggedOut
@@ -106,6 +166,7 @@ final class SessionStore {
         needsSecondAuth = false
         pendingUsername = username
         pendingPassword = password
+        pendingBrowserCredentials = nil
         do {
             let info = try await client.login(username: username, password: password)
             guard epoch == sessionEpoch, !Task.isCancelled else { return false }
@@ -124,6 +185,8 @@ final class SessionStore {
             lastForegroundValidation = Date()
             lastIdentityAttempt = .distantPast
             phase = .loggedIn
+            pendingUsername = nil
+            pendingPassword = nil
             persistWebSession()
             return true
         } catch let e as NetworkError where e.needsSecondAuth {
@@ -140,11 +203,15 @@ final class SessionStore {
         } catch let e as NetworkError {
             guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             lastError = e.message
+            pendingUsername = nil
+            pendingPassword = nil
             phase = .loggedOut
             return false
         } catch {
             guard epoch == sessionEpoch, !Task.isCancelled else { return false }
             lastError = error.localizedDescription
+            pendingUsername = nil
+            pendingPassword = nil
             phase = .loggedOut
             return false
         }
@@ -190,6 +257,7 @@ final class SessionStore {
             return false
         }
         let wasLoggedIn = phase == .loggedIn
+        pendingBrowserCredentials = nil
         let previousAgent = client.browserUserAgent
         sessionEpoch = UUID()
         stopNetworkRecovery()
@@ -249,7 +317,7 @@ final class SessionStore {
         if let info, previousUser?.isSameAccount(as: info) == true { client.retainMissingCookies(retained) }
         user = info ?? .pending
         if let sid = info?.sid, !sid.isEmpty {
-            if let saved = CredentialStore.load(), saved.username != sid { clearCredentials() }
+            if let saved = credentials.load(), saved.username != sid { clearCredentials() }
             defaults.set(sid, forKey: Self.rememberedKey)
         }
         usesWebSession = true
@@ -258,6 +326,13 @@ final class SessionStore {
         lastForegroundValidation = Date()
         lastIdentityAttempt = .distantPast
         phase = .loggedIn
+        if browser.rememberCredentials == false { clearCredentials() }
+        else if browser.rememberCredentials == true, let draft = browser.credentials {
+            pendingBrowserCredentials = draft
+            saveVerifiedBrowserCredentials()
+        } else if browser.rememberCredentials == true, !canAutomaticallySignIn {
+            credentialSaveError = "本次未取得已核对的登录密码，已保存网页会话；可重新输入账号密码后启用自动续登"
+        }
         persistWebSession()
         return true
     }
@@ -274,9 +349,11 @@ final class SessionStore {
             return false
         }
         var restoredUser = saved.user
+        var authenticationExpired = false
         do {
             if let fresh = try await client.validateSavedSession() { restoredUser = restoredUser.merging(fresh) }
         } catch {
+            authenticationExpired = NetworkError.from(error).isSessionExpired
             // Route-specific login pages / campus gateway restrictions do not revoke the other realm.
             profileSyncError = NetworkError.from(error).isSessionExpired
                 ? "当前网络需要更新认证，可在下方更新网页登录；已保留其它网络的会话"
@@ -290,6 +367,7 @@ final class SessionStore {
         lastIdentityAttempt = .distantPast
         phase = .loggedIn
         persistWebSession()
+        if authenticationExpired, hasSavedCredentials { _ = await silentRelogin(authenticationRequired: true) }
         return true
     }
 
@@ -378,6 +456,7 @@ final class SessionStore {
             let fetched = try await client.fetchUserInfo()
             guard epoch == sessionEpoch, phase == .loggedIn, !Task.isCancelled, canBind(fetched) else { return }
             user = user?.merging(fetched) ?? fetched
+            saveVerifiedBrowserCredentials()
             profileSyncError = user?.hasCoreProfile == true ? nil : "门户尚未提供完整个人资料"
             persistWebSession()
         } catch {
@@ -399,7 +478,7 @@ final class SessionStore {
     }
 
     /// 会话过期后的静默重登（接口报会话失效时由仓储调用并重试一次）。
-    func silentRelogin() async -> Bool {
+    func silentRelogin(authenticationRequired: Bool = false) async -> Bool {
         if let task = recoveryTask { return await task.value }
         let epoch = sessionEpoch
         let request = UUID()
@@ -415,24 +494,50 @@ final class SessionStore {
             }
             self.client.invalidateAccessRoute()
             await self.client.prepareAccess()
-            var authenticationExpired = false
+            var authenticationExpired = authenticationRequired
             do {
                 let fresh = try await self.client.fetchUserInfo()
                 guard epoch == self.sessionEpoch, !Task.isCancelled, self.canBind(fresh) else { return false }
                 self.user = self.user?.merging(fresh) ?? fresh
+                self.saveVerifiedBrowserCredentials()
                 self.profileSyncError = nil
-                return true
-            } catch { authenticationExpired = NetworkError.from(error).isSessionExpired }
+                if !authenticationRequired { return true }
+            } catch { authenticationExpired = authenticationExpired || NetworkError.from(error).isSessionExpired }
             guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             // Native credentials are a last resort, without changing the app's root navigation.
-            if authenticationExpired, let cred = CredentialStore.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
+            if authenticationExpired, self.canAutomaticallySignIn,
+               Date().timeIntervalSince(self.lastPasswordAttempt) >= 60,
+               let cred = self.credentials.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
+                self.lastPasswordAttempt = Date()
                 do {
+                    let previousAgent = self.client.browserUserAgent
                     let fresh = try await self.client.login(username: cred.username, password: cred.password)
-                    guard epoch == self.sessionEpoch, !Task.isCancelled, self.user?.isSameAccount(as: fresh) != false else { return false }
+                    guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
+                    guard self.user?.isSameAccount(as: fresh) == true else {
+                        self.client.clearSession()
+                        self.client.setUserAgent(previousAgent ?? HTTPClient.userAgent)
+                        self.client.absorbCookies(retained)
+                        self.client.adoptGatewayTicket()
+                        self.passwordLoginBlocked = true
+                        self.defaults.set(true, forKey: "lumen.passwordLoginPaused." + cred.username)
+                        self.profileSyncError = "续登返回的账号不匹配，请更新网页登录"
+                        return false
+                    }
                     self.user = self.user?.merging(fresh) ?? fresh
+                    self.lastPasswordAttempt = .distantPast
                     self.profileSyncError = nil
                     return true
-                } catch { }
+                } catch {
+                    let failure = NetworkError.from(error)
+                    if failure.needsSecondAuth || failure.message.contains("【密码校验】") && !failure.message.contains("账号不存在") {
+                        self.passwordLoginBlocked = true
+                        if !failure.needsSecondAuth { self.defaults.set(true, forKey: "lumen.passwordLoginPaused." + cred.username) }
+                        self.profileSyncError = failure.needsSecondAuth
+                            ? "学校要求验证码或二次认证，请更新网页登录后继续"
+                            : "保存的密码未通过验证，请更新网页登录；已停止自动重试"
+                        return false
+                    }
+                }
             }
             guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             self.profileSyncError = "当前网络的认证暂不可用，已保留登录信息；可更新网页登录"
@@ -514,6 +619,10 @@ final class SessionStore {
         lastForegroundValidation = .distantPast
         refreshingProfile = false
         keepSession = false
+        pendingBrowserCredentials = nil
+        pendingUsername = nil
+        pendingPassword = nil
+        lastPasswordAttempt = .distantPast
         clearWebSession(webSessions)
         usesWebSession = false
         clearCredentials()

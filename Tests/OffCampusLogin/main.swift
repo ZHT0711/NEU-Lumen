@@ -725,6 +725,116 @@ func verifySessionRestart() async throws {
 }
 try await verifySessionRestart()
 
+final class MemoryCredentialStore: CredentialsPersisting {
+    var value: CampusLoginCredentials?
+    var refuseSave = false
+    var refuseClear = false
+    func load() -> CampusLoginCredentials? { value }
+    func save(_ credentials: CampusLoginCredentials) -> Bool {
+        guard !refuseSave else { return false }
+        value = credentials
+        return true
+    }
+    func clear() -> Bool {
+        guard !refuseClear else { return false }
+        value = nil; return true
+    }
+}
+
+@MainActor
+func verifyBrowserCredentialRecovery() async throws {
+    func require(_ result: Bool) { precondition(result) }
+    precondition(CampusCredentialBridge.canResume(CasCrypto.casLoginURL))
+    var gatewayCAS = URLComponents(url: CasCrypto.casLoginURL, resolvingAgainstBaseURL: false)!
+    gatewayCAS.queryItems = [URLQueryItem(name: "service", value: WebVPN.casService)]
+    precondition(CampusCredentialBridge.canResume(gatewayCAS.url!))
+    for bad in ["http://pass.neu.edu.cn/tpass/login", "https://pass.neu.edu.cn.attacker.example/tpass/login",
+                "https://pass.neu.edu.cn:444/tpass/login", "https://pass.neu.edu.cn/tpass/login?service=https://attacker.example",
+                "https://pass.neu.edu.cn/tpass/login?service=https://personal.neu.edu.cn/portal&service=https://attacker.example"] {
+        precondition(!CampusCredentialBridge.canResume(URL(string: bad)!))
+    }
+    let pair = CampusLoginCredentials(username: user.sid, password: "SYNTHETIC-only-password")!
+    let other = CampusLoginCredentials(username: "OTHER", password: "SYNTHETIC-other-password")!
+    let suite = "NEU-Lumen.BrowserCredentials." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let vault = MemoryWebSessionStore()
+    let passwords = MemoryCredentialStore()
+    let casCookie = HTTPCookie(properties: [.name:"CASTGC", .value:"synthetic-credentials-cas", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
+    func makeSession() -> SessionStore {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockPortalProtocol.self]
+        return SessionStore(client: PortalClient(http: HTTPClient(configuration: config)), webSessions: vault,
+                            defaults: defaults, credentials: passwords)
+    }
+    func login(_ session: SessionStore, draft: CampusLoginCredentials?, remember: Bool = true, owner: PortalUser?) async -> Bool {
+        await session.completeWebLogin(WebLoginSession(cookies: [casCookie, ticket], user: owner,
+            userAgent: "Synthetic WebKit", credentials: draft, rememberCredentials: remember))
+    }
+    let session = makeSession()
+    require(await login(session, draft: pair, owner: user))
+    precondition(passwords.value == pair && session.hasSavedCredentials && session.canAutomaticallySignIn)
+    precondition(!String(decoding: vault.data!, as: UTF8.self).contains(pair.password), "Web-session snapshots must never contain passwords")
+    precondition(session.beginBrowserPasswordLogin() == pair)
+    precondition(session.beginBrowserPasswordLogin() == nil, "Concurrent pages must not repeatedly submit passwords")
+    session.disablePasswordLogin()
+    precondition(passwords.value == nil && session.phase == .loggedIn && vault.data != nil)
+    require(await login(session, draft: other, owner: user))
+    precondition(passwords.value == nil && session.credentialSaveError != nil, "Mismatched credentials must not be saved")
+    require(await login(session, draft: pair, remember: false, owner: user))
+    precondition(passwords.value == nil)
+
+    // The account may be unknown at landing: keep the draft in RAM until an
+    // actual portal response supplies the same school ID, never persist it early.
+    MockPortalProtocol.failure = URLError(.notConnectedToInternet)
+    let pending = makeSession()
+    require(await login(pending, draft: pair, owner: nil))
+    precondition(passwords.value == nil && !pending.hasConfirmedIdentity)
+    MockPortalProtocol.failure = nil
+    MockPortalProtocol.handle = { _ in (200, [:], "<script>const userInfoDSL = \(raw);</script>") }
+    require(await pending.ensureIdentity())
+    precondition(passwords.value == pair)
+
+    // A rejected password is attempted once and remains paused across restart.
+    var posts = 0
+    MockPortalProtocol.handle = { request in
+        if request.url?.host == "pass.neu.edu.cn" {
+            if request.httpMethod == "POST" { posts += 1; return (200, [:], "<span id=\"errormsg\">密码错误</span>") }
+            return (200, [:], "<input name=\"lt\" value=\"SYNTHETIC-LT\"><input name=\"execution\" value=\"e1s1\">")
+        }
+        return (200, [:], "<script>const userInfoDSL = \(raw);</script>")
+    }
+    require(!(await pending.silentRelogin(authenticationRequired: true)))
+    precondition(posts == 1 && passwords.value == pair && !pending.canAutomaticallySignIn)
+    precondition(pending.beginBrowserPasswordLogin() == nil)
+    require(!(await pending.silentRelogin(authenticationRequired: true)))
+    precondition(posts == 1)
+    let restarted = makeSession()
+    await restarted.restoreSession()
+    precondition(restarted.phase == .loggedIn && restarted.beginBrowserPasswordLogin() == nil)
+    require(await login(restarted, draft: pair, owner: user))
+    precondition(restarted.canAutomaticallySignIn && restarted.beginBrowserPasswordLogin() == pair)
+    restarted.logout()
+    precondition(passwords.value == nil && restarted.beginBrowserPasswordLogin() == nil)
+    require(await login(restarted, draft: pair, owner: user))
+    passwords.refuseClear = true
+    restarted.disablePasswordLogin()
+    precondition(passwords.value == pair && restarted.credentialSaveError != nil && restarted.beginBrowserPasswordLogin() == nil)
+    let residual = makeSession()
+    await residual.restoreSession()
+    precondition(!residual.canAutomaticallySignIn && residual.beginBrowserPasswordLogin() == nil,
+                 "A failed Keychain deletion must not undo the user's opt-out after restart")
+    passwords.refuseClear = false
+    residual.logout()
+    passwords.refuseSave = true
+    require(await login(residual, draft: pair, owner: user))
+    precondition(passwords.value == nil && residual.credentialSaveError != nil && !residual.canAutomaticallySignIn)
+    passwords.refuseSave = false
+    residual.logout()
+    print("Browser credentials: verified identity before Keychain save, no password in snapshots, opt-out/clear/logout, delayed identity, one-attempt recovery and persistent rejection pause passed")
+}
+try await verifyBrowserCredentialRecovery()
+
 let codeApp = PortalApp(name: "e码通", appId: "ecode", url: "https://ecard.neu.edu.cn/desktop", mobileUrl: "https://ecard.neu.edu.cn/code",
                          iconUrl: "", desc: "", category: "校园生活", visits: 0)
 precondition(ServiceCatalog(apps: DemoData.apps + [codeApp]).ecodeURL.absoluteString == codeApp.mobileUrl)

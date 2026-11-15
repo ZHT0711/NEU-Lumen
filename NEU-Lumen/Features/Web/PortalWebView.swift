@@ -391,6 +391,8 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var entryURL: URL?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var attemptedCGLogin = false
+    @ObservationIgnored private var attemptedCampusRecovery = false
+    @ObservationIgnored private var campusRecoveryTask: Task<Void, Never>?
     @ObservationIgnored private var downloadScope: UUID?
     @ObservationIgnored private var downloadSessionEpoch: UUID?
     @ObservationIgnored private var pendingDocumentRequest: URLRequest?
@@ -704,9 +706,35 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         updateState()
         Task {
             await syncCookies()
+            if attemptedCampusRecovery, let session {
+                let page = navigationGeneration
+                await CampusBrowserLogin.checkForRejection(in: webView, session: session) {
+                    !self.isClosed && self.navigationGeneration == page && session.requestEpoch == self.downloadSessionEpoch
+                }
+            }
+            recoverCampusLoginIfNeeded()
             await resumeElectricityAfterLogin()
             await clickCampusUnifiedLoginIfNeeded()
             startElectricityPrefill()
+        }
+    }
+
+    /// Let the visible, trusted CAS page run the school's own login JS once.
+    /// Never replay the page's previous business submission.
+    private func recoverCampusLoginIfNeeded() {
+        guard !attemptedCampusRecovery, !isClosed, let session, let client,
+              session.phase == .loggedIn, session.hasSavedCredentials,
+              client.sessionGeneration == clientEpoch, let url = webView.url,
+              CampusCredentialBridge.canResume(url) else { return }
+        let epoch = session.requestEpoch
+        let document = navigationGeneration
+        attemptedCampusRecovery = true
+        campusRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await CampusBrowserLogin.attempt(in: self.webView, session: session) {
+                session.requestEpoch == epoch && self.navigationGeneration == document &&
+                    client.sessionGeneration == self.clientEpoch && self.webView.url == url && !self.isClosed
+            }
         }
     }
 
@@ -803,6 +831,8 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
 
     func close() {
         isClosed = true
+        campusRecoveryTask?.cancel()
+        campusRecoveryTask = nil
         // Retain an interrupted read, never a submission or a completed form.
         // In particular, a POST -> GET redirect chain remains unsafe to replay.
         let initialReadPending = entryURL != nil && webView.url == nil && documentResponseURL == nil && documentRequest == nil

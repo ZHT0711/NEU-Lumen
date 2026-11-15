@@ -40,6 +40,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var verifiedPage: UUID?
     private static let world = WKContentWorld.world(name: "NEULumen.NativeMail")
     private var backgroundOnly = false
+    private var attemptedCampusLogin = false
 
     private var current: Bool {
         guard let session else { return false }
@@ -333,6 +334,7 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     func close() {
+        attemptedCampusLogin = false
         generation = UUID(); currentOperation = nil
         webView?.stopLoading(); webView?.navigationDelegate = nil; webView?.uiDelegate = nil; webView = nil
         session = nil; ownerEpoch = nil; ownerAccount = ""; boundEmail = ""; email = ""
@@ -364,7 +366,23 @@ final class NativeMailStore: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loadingWeb = false
-        Task { @MainActor in await refresh() }
+        let token = generation, page = pageGeneration
+        Task { @MainActor in
+            if attemptedCampusLogin, current, let session {
+                await CampusBrowserLogin.checkForRejection(in: webView, session: session) {
+                    self.current && self.generation == token && self.pageGeneration == page && self.webView === webView
+                }
+            }
+            if !backgroundOnly, !attemptedCampusLogin, current, let session, let url = webView.url,
+               CampusCredentialBridge.canResume(url) {
+                attemptedCampusLogin = true
+                await CampusBrowserLogin.attempt(in: webView, session: session) {
+                    self.current && self.generation == token && self.pageGeneration == page && self.webView === webView
+                }
+            }
+            guard current, generation == token, pageGeneration == page else { return }
+            await refresh()
+        }
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError failure: Error) { failed(failure) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError failure: Error) { failed(failure) }

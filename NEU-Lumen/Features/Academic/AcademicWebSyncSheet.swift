@@ -86,6 +86,7 @@ final class AcademicReadOnlyBrowser: NSObject, WKNavigationDelegate, WKUIDelegat
     private var browserGeneration = UUID()
     private var pageGeneration = UUID()
     private var syncRequest: UUID?
+    private var attemptedCampusLogin = false
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -166,6 +167,7 @@ final class AcademicReadOnlyBrowser: NSObject, WKNavigationDelegate, WKUIDelegat
     }
 
     func close() {
+        attemptedCampusLogin = false
         browserGeneration = UUID(); pageGeneration = UUID(); syncRequest = nil
         active = false; context = nil; loading = false; syncing = false
         webView.stopLoading(); client = nil; session = nil
@@ -174,7 +176,27 @@ final class AcademicReadOnlyBrowser: NSObject, WKNavigationDelegate, WKUIDelegat
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         pageGeneration = UUID(); loading = true; error = nil
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loading = false; canGoBack = webView.canGoBack }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loading = false; canGoBack = webView.canGoBack
+        guard active, let session, let url = webView.url,
+              CampusCredentialBridge.canResume(url) else { return }
+        let shouldAttempt = !attemptedCampusLogin
+        attemptedCampusLogin = true
+        let generation = browserGeneration, page = pageGeneration
+        Task { @MainActor in
+            if !shouldAttempt {
+                await CampusBrowserLogin.checkForRejection(in: webView, session: session) {
+                    self.active && self.browserGeneration == generation && self.pageGeneration == page &&
+                        session.requestEpoch == self.context?.epoch
+                }
+                return
+            }
+            await CampusBrowserLogin.attempt(in: webView, session: session) {
+                self.active && self.browserGeneration == generation && self.pageGeneration == page &&
+                    session.requestEpoch == self.context?.epoch && session.client.sessionGeneration == self.clientEpoch
+            }
+        }
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { show(error) }
     private func show(_ failure: Error) {
@@ -186,7 +208,7 @@ final class AcademicReadOnlyBrowser: NSObject, WKNavigationDelegate, WKUIDelegat
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard active, let session, session.phase == .loggedIn, session.requestEpoch == context?.epoch,
               session.client.sessionGeneration == clientEpoch else { decisionHandler(.cancel); return }
-        // 仅学校正常 GET 跳转沿用 WebVPN 路由；不重放 POST 或自动填表。
+        // 仅学校正常 GET 跳转沿用 WebVPN 路由；认证之外不自动提交业务表单。
         if navigationAction.targetFrame?.isMainFrame != false,
            (navigationAction.request.httpMethod ?? "GET") == "GET", let url = navigationAction.request.url,
            let destination = client?.browserDestination(for: url), destination != url {

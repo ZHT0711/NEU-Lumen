@@ -1,6 +1,23 @@
 import Foundation
 import Security
 
+protocol CredentialsPersisting {
+    func load() -> CampusLoginCredentials?
+    func save(_ credentials: CampusLoginCredentials) -> Bool
+    func clear() -> Bool
+}
+
+struct KeychainCredentialStore: CredentialsPersisting {
+    func load() -> CampusLoginCredentials? {
+        guard let saved = CredentialStore.load() else { return nil }
+        return CampusLoginCredentials(username: saved.username, password: saved.password)
+    }
+    func save(_ credentials: CampusLoginCredentials) -> Bool {
+        CredentialStore.save(username: credentials.username, password: credentials.password)
+    }
+    func clear() -> Bool { CredentialStore.clear() }
+}
+
 /// A username/password pair is one atomic Keychain record. Legacy two-item
 /// records remain readable until the next successful save; never delete before update.
 enum CredentialStore {

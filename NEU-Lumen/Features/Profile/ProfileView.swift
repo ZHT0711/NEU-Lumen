@@ -196,15 +196,21 @@ struct ProfileView: View {
         Form {
             Section("会话") {
                 LabeledContent("记住的账号", value: environment.session.rememberedUsername.isEmpty ? "未保存" : environment.session.rememberedUsername)
-                LabeledContent("保持登录", value: environment.session.usesWebSession ? "已开启（网页登录会话）" :
-                    (environment.session.hasSavedCredentials ? "已开启（钥匙串加密）" : "关闭"))
+                LabeledContent("保持登录", value: environment.session.hasSavedCredentials ?
+                    (environment.session.canAutomaticallySignIn ? "密码已保存，自动续登" : "密码已保存，需更新认证") :
+                    (environment.session.usesWebSession ? "会话已保存，未保存密码" : "关闭"))
                 if let error = environment.session.sessionSaveError {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
                 if let error = environment.session.credentialSaveError {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
-                Button("更新网页登录（保留账号和收藏）") { showWebLogin = true }
+                Button(environment.session.hasSavedCredentials ? "更新网页登录（保留账号和收藏）" : "保存密码并更新网页登录") { showWebLogin = true }
+                if environment.session.hasSavedCredentials {
+                    Button("清除保存的密码", role: .destructive) { environment.session.disablePasswordLogin() }
+                    Text("清除密码后保留当前会话、账号与收藏，下次认证过期时需手动登录。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 LabeledContent("登录会话", value: environment.session.client.hasLoginSession ? "已取得" : "需重新登录")
                 Button(role: .destructive) {
                     confirmLogout = true

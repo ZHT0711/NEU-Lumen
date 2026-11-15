@@ -59,7 +59,7 @@ struct LoginView: View {
         .scrollDismissesKeyboard(.interactively)
         .background(Color(.systemGroupedBackground))
         .sheet(isPresented: $showWebLogin) {
-            WebLoginSheet { session in
+            WebLoginSheet(rememberCredentials: keepLoggedIn) { session in
                 await environment.session.completeWebLogin(session)
             }
         }
@@ -87,6 +87,7 @@ struct LoginView: View {
                     Image(systemName: "person.text.rectangle")
                         .foregroundStyle(.secondary)
                     TextField("学号 / 工号", text: $username)
+                        .textContentType(.username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.asciiCapable)
@@ -99,10 +100,12 @@ struct LoginView: View {
                     Group {
                         if showPassword {
                             TextField("密码", text: $password)
+                                .textContentType(.password)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                         } else {
                             SecureField("密码", text: $password)
+                                .textContentType(.password)
                         }
                     }
                     .disabled(isLoading)

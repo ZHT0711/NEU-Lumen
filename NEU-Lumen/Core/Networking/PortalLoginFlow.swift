@@ -6,6 +6,8 @@ struct WebLoginSession {
     let user: PortalUser?
     let userAgent: String
     var hasLoginForm = false
+    var credentials: CampusLoginCredentials?
+    var rememberCredentials: Bool?
 }
 
 /// 网关首页不是一号通首页；先在浏览器中换票，再进入代理后的门户。
