@@ -1108,6 +1108,18 @@ service_fixture('NEU-Lumen/Features/Web/PortalWebView.swift',
 <nav role="navigation"><button wire:click="nextPage('page')" onclick="document.getElementById('department').textContent='合成部门第2页'">Next »</button></nav>
 ''', encoding='utf-8')
 
+service_fixture('NEU-Lumen/Features/Services/NativeServiceDocumentView.swift',
+                'document = result', r'''
+            if service == .telephone, ProcessInfo.processInfo.arguments.contains("--screen=native-telephone") {
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                if result.fields.contains(where: { $0.commit == "live" }) && !result.tables.isEmpty && result.actions.contains(where: { $0.isPaging }) {
+                    try? "PASS: actual native telephone query field, office table and paging are ready with synthetic data".write(to: folder.appendingPathComponent("telephone-screenshot.txt"), atomically: true, encoding: .utf8)
+                } else {
+                    try? "fields=\(result.fields.count); tables=\(result.tables.count); actions=\(result.actions.count)".write(to: folder.appendingPathComponent("telephone-diagnostics.txt"), atomically: true, encoding: .utf8)
+                }
+            }
+''')
+
 # The actual production e-code reader and view run against an explicitly synthetic
 # local canvas. This page is not a usable QR credential and never enters the IPA.
 shutil.copyfile(root / 'Tests/ECode/WebKitValidation.swift', destination / 'NEU-Lumen/App/ECodeValidation.swift')

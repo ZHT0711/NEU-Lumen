@@ -33,7 +33,7 @@ if kind.hasPrefix("screen:") {
         "native-analysis": ["成绩分析", "成绩概览", "分数分布"],
         "native-map": ["校园地图", "教学楼", "步行导航"],
         "native-library": ["图书馆", "馆藏书刊检索", "我的借阅与续借"],
-        "native-telephone": ["合成部门", "合成办公室", "00000000"],
+        "native-telephone": ["查询条件", "合成部门", "合成办公室", "00000000"],
         "native-payment": ["缴费大厅", "校园卡余额"],
         "native-vpn": ["WebVPN", "访问状态"],
         "native-affairs": ["办事大厅", "我的在办事项"],

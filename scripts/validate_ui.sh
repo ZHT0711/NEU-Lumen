@@ -60,10 +60,12 @@ wait_ui_marker() {
   if [[ ! -f "$CONTAINER/Documents/$NAME" ]]; then
     echo "Missing current simulator check: $NAME" >&2
     xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/failed-${NAME%.txt}.png" || true
-    if [[ -f "$CONTAINER/Documents/ecode-diagnostics.txt" ]]; then
-      cp "$CONTAINER/Documents/ecode-diagnostics.txt" "$OUTPUT/ecode-diagnostics.txt"
-      cat "$OUTPUT/ecode-diagnostics.txt"
-    fi
+    for DIAGNOSTIC in ecode-diagnostics.txt telephone-diagnostics.txt; do
+      if [[ -f "$CONTAINER/Documents/$DIAGNOSTIC" ]]; then
+        cp "$CONTAINER/Documents/$DIAGNOSTIC" "$OUTPUT/$DIAGNOSTIC"
+        cat "$OUTPUT/$DIAGNOSTIC"
+      fi
+    done
     exit 1
   fi
   cp "$CONTAINER/Documents/$NAME" "$OUTPUT/$NAME"
@@ -76,6 +78,8 @@ trap 'kill "$SERVER_PID" || true' EXIT
 launch_screenshot_page() {
   local SCREEN="$1"
   shift
+  # Stop the previous writer before removing its marker.
+  xcrun simctl terminate "$SIM_ID" edu.neu.lumen >/dev/null 2>&1 || true
   rm -f "$CONTAINER/Documents/screen-ready.txt"
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN" "$@"
   wait_ui_marker screen-ready.txt 60
@@ -86,6 +90,7 @@ xcrun simctl ui "$SIM_ID" appearance light
 for SCREEN in native-ecode home home-nanhu schedule services services-directory services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-electricity native-bills native-analysis native-map native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
   launch_screenshot_page "$SCREEN"
   if [[ "$SCREEN" == "native-ecode" ]]; then wait_ui_marker ecode-screenshot.txt 60; fi
+  if [[ "$SCREEN" == "native-telephone" ]]; then wait_ui_marker telephone-screenshot.txt 60; fi
   sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done

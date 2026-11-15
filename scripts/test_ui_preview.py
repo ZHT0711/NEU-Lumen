@@ -218,6 +218,38 @@ class UIPreviewTests(unittest.TestCase):
         prepare = (root / 'scripts/prepare_ui_validation.py').read_text()
         self.assertIn('contains("--screen=grades") ? "成绩" : "作业"', prepare)
         self.assertNotIn('bash scripts/validate_ui.sh\n          fi', workflow)
+    @unittest.skipUnless(os.name == 'posix', 'Requires the CI bash runtime')
+    def test_screenshot_launch_stops_old_marker_writer(self):
+        source = (Path(__file__).resolve().parents[1] / 'scripts/validate_ui.sh').read_text()
+        function = 'launch_screenshot_page() {' + source.split('launch_screenshot_page() {', 1)[1].split('\nxcrun simctl status_bar', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'Documents').mkdir()
+            # An old process can publish its marker while simctl terminates it.
+            script = r'''
+set -eu
+CONTAINER="$1"
+OUTPUT="$1"
+SIM_ID=synthetic
+old_writer=1
+xcrun() {
+  if [[ "$2" == terminate ]]; then old_writer=0; return; fi
+  if [[ "$2" == launch ]]; then
+    if [[ "$old_writer" == 1 ]]; then
+      printf 'PASS: screenshot page mounted downloads' > "$CONTAINER/Documents/screen-ready.txt"
+    else
+      printf 'PASS: screenshot page mounted home' > "$CONTAINER/Documents/screen-ready.txt"
+    fi
+  fi
+}
+wait_ui_marker() { cp "$CONTAINER/Documents/$1" "$OUTPUT/$1"; }
+''' + function + '\nlaunch_screenshot_page home\n'
+            result = subprocess.run(['bash', '-c', script, 'launcher-test', str(root)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            broken = script.replace('  xcrun simctl terminate "$SIM_ID" edu.neu.lumen >/dev/null 2>&1 || true', '')
+            result = subprocess.run(['bash', '-c', broken, 'launcher-test', str(root)], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0, 'The stale-page negative control must fail')
+
     def test_every_checked_screen_has_content_expectations(self):
         root = Path(__file__).resolve().parents[1]
         shell = (root / 'scripts/validate_ui.sh').read_text()
@@ -231,12 +263,13 @@ class UIPreviewTests(unittest.TestCase):
 
     def test_exact_new_snapshots_and_required_checks(self):
         self.assertEqual(len(preview.SCREENSHOTS), 56)
-        self.assertEqual(len(preview.CHECKS), 19)
+        self.assertEqual(len(preview.CHECKS), 20)
         self.assertEqual(len(set(preview.SCREENSHOTS)), 56)
-        self.assertEqual(len(set(preview.CHECKS)), 19)
+        self.assertEqual(len(set(preview.CHECKS)), 20)
         for screen in ['native-ecode', 'native-electricity', 'native-bills', 'services-directory']:
             self.assertIn(screen + '-light.png', preview.SCREENSHOTS)
         self.assertIn('ecode-screenshot.txt', preview.CHECKS)
+        self.assertIn('telephone-screenshot.txt', preview.CHECKS)
         for kind in preview.LIVE_KINDS:
             self.assertIn(f'live-expanded-{kind}-light.png', preview.SCREENSHOTS)
         self.assertIn('live-expanded-ax-stale-light.png', preview.SCREENSHOTS)

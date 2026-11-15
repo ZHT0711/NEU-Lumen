@@ -19,7 +19,7 @@ struct NativeServiceDocumentView: View {
 
     var body: some View {
         List {
-            if browser.isLoading || busy { ProgressView("读取学校页面…") }
+            if browser.isLoading || (busy && document == nil) { ProgressView("读取学校页面…") }
             if let error {
                 Section {
                     Text(error).foregroundStyle(.secondary)

@@ -40,7 +40,7 @@ LAYOUT_COVERAGE = {
     'dynamic_types': ['large', 'accessibility3'], 'variants': ['fresh', 'stale', 'nil-metadata'],
     'timer_modes': ['system-Text', 'multi-day-string'],
 }
-CHECKS = ('browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt', 'ecode-screenshot.txt',
+CHECKS = ('browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt', 'ecode-screenshot.txt', 'telephone-screenshot.txt',
           'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
           LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)

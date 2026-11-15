@@ -68,7 +68,7 @@ struct BrowserDownloadsView: View {
                             }
                         }
                         if fileType != "全部" { Text("文件类型 · " + fileType).font(.caption).foregroundStyle(.secondary) }
-                        if !query.isEmpty, !store.records.contains(where: matches) {
+                        if !query.isEmpty || fileType != "全部", !store.records.contains(where: matches) {
                             Text("没有匹配的文件").foregroundStyle(.secondary)
                         }
                     }
