@@ -659,6 +659,8 @@ func verifyNativeServiceDocument(browser: PortalBrowser, base: URL) async throws
     document.getElementById('phone-next').setAttribute('wire:click',"nextPage('page')");
     document.getElementById('phone-next').onclick=()=>{document.getElementById('department').textContent='合成第二页'};
     document.getElementById('phone-page').onclick=()=>{document.getElementById('department').textContent='合成页码2'};
+    // WKWebView cannot bridge an event-handler function as the evaluation result.
+    true;
     """#)
     snapshot = try await read()
     guard let liveSearch = snapshot.fields.first(where: { $0.commit == "live" }) else { throw NetworkError(message: "Missing Livewire live input") }
