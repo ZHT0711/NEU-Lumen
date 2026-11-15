@@ -61,10 +61,12 @@ final class SessionStore {
 
     private static let rememberedKey = "lumen.remembered.username"
     private static let suppressRestoreKey = "lumen.session.suppressAutomaticRestore"
+    private static let passwordLoginDisabledKey = "lumen.passwordLoginDisabled"
 
     private func saveCredentials(username: String, password: String) {
         guard let pair = CampusLoginCredentials(username: username, password: password) else { return }
         let saved = credentials.save(pair)
+        defaults.set(!saved, forKey: Self.passwordLoginDisabledKey)
         credentialSaveError = saved ? nil : "凭据未能完整保存到本机钥匙串，重启后可能需要重新登录"
         passwordLoginBlocked = !saved
         if saved { defaults.removeObject(forKey: "lumen.passwordLoginPaused." + pair.username) }
@@ -74,6 +76,9 @@ final class SessionStore {
     }
 
     private func clearCredentials() {
+        // Record intent before accessing Keychain: a locked/unavailable vault
+        // may fail both the read and delete, then become readable after restart.
+        defaults.set(true, forKey: Self.passwordLoginDisabledKey)
         pendingBrowserCredentials = nil
         passwordLoginBlocked = true
         if let previous = credentials.load() { defaults.set(true, forKey: "lumen.passwordLoginPaused." + previous.username) }
@@ -94,7 +99,8 @@ final class SessionStore {
     }
 
     var canAutomaticallySignIn: Bool {
-        guard hasSavedCredentials, !passwordLoginBlocked, keepSession, let pair = credentials.load() else { return false }
+        guard !defaults.bool(forKey: Self.passwordLoginDisabledKey), hasSavedCredentials,
+              !passwordLoginBlocked, keepSession, let pair = credentials.load() else { return false }
         return !defaults.bool(forKey: "lumen.passwordLoginPaused." + pair.username)
     }
 
@@ -107,6 +113,7 @@ final class SessionStore {
     /// blocked by device trust. Never borrow a different account's saved password.
     func beginBrowserPasswordLogin() -> CampusLoginCredentials? {
         guard !defaults.bool(forKey: Self.suppressRestoreKey),
+              !defaults.bool(forKey: Self.passwordLoginDisabledKey),
               let pair = credentials.load(),
               !defaults.bool(forKey: "lumen.passwordLoginPaused." + pair.username),
               Date().timeIntervalSince(lastBrowserPasswordAttempt) >= 60 else { return nil }
@@ -140,7 +147,8 @@ final class SessionStore {
         guard phase == .booting else { return }
         guard !defaults.bool(forKey: Self.suppressRestoreKey) else { phase = .loggedOut; return }
         if await restoreWebSession() { return }
-        if let cred = credentials.load(), !defaults.bool(forKey: "lumen.passwordLoginPaused." + cred.username) {
+        if !defaults.bool(forKey: Self.passwordLoginDisabledKey), let cred = credentials.load(),
+           !defaults.bool(forKey: "lumen.passwordLoginPaused." + cred.username) {
             let ok = await performLogin(username: cred.username, password: cred.password, keep: true)
             if !ok {
                 phase = .loggedOut

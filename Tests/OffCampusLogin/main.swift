@@ -729,7 +729,8 @@ final class MemoryCredentialStore: CredentialsPersisting {
     var value: CampusLoginCredentials?
     var refuseSave = false
     var refuseClear = false
-    func load() -> CampusLoginCredentials? { value }
+    var hideReads = false
+    func load() -> CampusLoginCredentials? { hideReads ? nil : value }
     func save(_ credentials: CampusLoginCredentials) -> Bool {
         guard !refuseSave else { return false }
         value = credentials
@@ -818,7 +819,9 @@ func verifyBrowserCredentialRecovery() async throws {
     precondition(passwords.value == nil && restarted.beginBrowserPasswordLogin() == nil)
     require(await login(restarted, draft: pair, owner: user))
     passwords.refuseClear = true
+    passwords.hideReads = true
     restarted.disablePasswordLogin()
+    passwords.hideReads = false
     precondition(passwords.value == pair && restarted.credentialSaveError != nil && restarted.beginBrowserPasswordLogin() == nil)
     let residual = makeSession()
     await residual.restoreSession()
