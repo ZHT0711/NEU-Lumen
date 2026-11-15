@@ -10,13 +10,19 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 
 def gh(*args):
     if os.environ.get('GITHUB_ACTIONS') != 'true':
         raise RuntimeError('Release commands require GitHub Actions and the publish concurrency lock; mock gh locally')
-    return subprocess.run(['gh', *args], check=True, capture_output=True, text=True).stdout.strip()
+    try:
+        return subprocess.run(['gh', *args], check=True, capture_output=True, text=True).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        if error.stderr:
+            print(error.stderr.strip(), file=sys.stderr)
+        raise
 
 
 def missing(error):
@@ -104,6 +110,17 @@ def transaction_tag(tag):
 def write_record(path, record):
     path.write_text(json.dumps(record, ensure_ascii=False, sort_keys=True) + '\n', encoding='utf-8')
     return str(path)
+
+
+def recovery_metadata(release):
+    """The asset backups have their own specs; omit unused GitHub API metadata.
+
+    Saving full per-asset uploader/link records in the draft body can exceed the
+    Release API's body limit even though every backup file is stored separately.
+    """
+    if release is None:
+        return None
+    return {key: release.get(key) for key in ('id', 'draft', 'name', 'body', 'prerelease', 'target_commitish')}
 
 
 def update_record(tag, path, record, phase):
@@ -238,7 +255,7 @@ def publish_release(repo, tag, sha, title, body, assets):
         record = {'schema': 1, 'repo': repo, 'tag': tag, 'sha': sha,
                   'run_id': os.environ.get('GITHUB_RUN_ID'),
                   'build_attempt': os.environ.get('BUILD_ATTEMPT'),
-                  'phase': 'preparing', 'old': old, 'old_tag': old_tag,
+                  'phase': 'preparing', 'old': recovery_metadata(old), 'old_tag': old_tag,
                   'old_assets': [specification(p) for p in old_paths], 'new_assets': new_specs}
         record_path = root / 'transaction.json'
         try:

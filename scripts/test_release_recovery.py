@@ -74,6 +74,25 @@ class ReleaseRecoveryTests(unittest.TestCase):
                         cases += 1
         print(f'Fault matrix: {cases} publish API cut points')
 
+    def test_large_github_metadata_does_not_overflow_recovery_body(self):
+        fake = FakeGitHub()
+        # Real API responses repeat uploader and link metadata for every asset.
+        fake.releases['nightly']['unused_api_metadata'] = 'x' * 140_000
+        records = []
+        def bounded(*args):
+            if args[:3] == ('release', 'create', 'ci-transaction-nightly'):
+                text = Path(args[args.index('--notes-file') + 1]).read_text(encoding='utf-8')
+                self.assertLess(len(text), 125_000)
+                records.append(json.loads(text))
+            return fake(*args)
+        with patch.object(tx, 'gh', bounded):
+            tx.publish_release('o/r', 'nightly', NEW, 'new title', self.body, self.assets)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['old']['body'], 'old notes')
+        self.assertNotIn('unused_api_metadata', records[0]['old'])
+        self.assertEqual({s['name'] for s in records[0]['old_assets']}, {'app.ipa', 'unmanaged.txt'})
+        self.coherent(fake)
+
     def test_every_publish_api_boundary_ordinary_exception_rolls_back(self):
         for existing in (True, False):
             baseline = FakeGitHub(existing)
