@@ -4,13 +4,18 @@ struct FavoritesEditor: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @AppStorage("lumen.home.quickServiceCount") private var quickServiceCount = 4
     private var repo: PortalRepository { environment.repository }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("收藏与首页常用应用实时联动，首页显示前 4 项，其余应用可在服务页查看。拖动右侧手柄排序，点击减号移除。")
+                    Picker("首页显示", selection: $quickServiceCount) {
+                        Text("4 个").tag(4)
+                        Text("8 个").tag(8)
+                    }.pickerStyle(.segmented)
+                    Text("收藏与首页常用应用实时联动，按所选数量显示排在最前的应用。拖动右侧手柄排序，点击减号移除。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("我的收藏（\(repo.favorites.ids.count)）") {
