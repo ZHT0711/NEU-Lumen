@@ -46,6 +46,26 @@ CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-di
           LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
 MANIFEST = 'ui-preview.json'
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
+NIGHTLY_SCREENSHOTS = ('home-light.png', 'home-dark.png', 'schedule-light.png', 'services-light.png',
+                       'services-art-light.png', 'native-map-light.png', 'indoor-navigation-light.png',
+                       'indoor-route-light.png', 'indoor-points-light.png', 'native-vpn-light.png')
+NIGHTLY_CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt',
+                  'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt')
+
+
+def capture_profile(environment):
+    profile = environment.get('UI_PREVIEW_PROFILE', 'full')
+    if profile not in ('full', 'nightly'):
+        raise ValueError('Unknown UI preview profile')
+    return profile
+
+
+def profile_files(profile):
+    if profile == 'full':
+        return SCREENSHOTS, CHECKS
+    if profile == 'nightly':
+        return NIGHTLY_SCREENSHOTS, NIGHTLY_CHECKS
+    raise ValueError('Unknown UI preview profile')
 
 
 def png_info(path):
@@ -98,9 +118,9 @@ def layout_case_keys():
     return shared
 
 
-def check_info(directory):
+def check_info(directory, checks=CHECKS):
     evidence = []
-    for name in CHECKS:
+    for name in checks:
         raw = (directory / name).read_bytes()
         text = raw.decode('utf-8')
         lines = text.splitlines()
@@ -142,13 +162,16 @@ def check_info(directory):
 def package(directory, environment=None):
     directory = Path(directory)
     env = os.environ if environment is None else environment
+    profile = capture_profile(env)
+    screenshots, required_checks = profile_files(profile)
     # All checks must belong to this run; validate_ui.sh clears its output first.
-    checks = check_info(directory)
-    images = [png_info(directory / name) for name in SCREENSHOTS]
+    checks = check_info(directory, required_checks)
+    images = [png_info(directory / name) for name in screenshots]
     device = json.loads((directory / 'simulator-device.json').read_text(encoding='utf-8'))
     repo, run = env['GITHUB_REPOSITORY'], env['GITHUB_RUN_ID']
     manifest = {
         'schema_version': 2,
+        'validation_profile': profile,
         'commit': env['GITHUB_SHA'], 'run_id': run, 'run_number': env['GITHUB_RUN_NUMBER'],
         'run_url': f'https://github.com/{repo}/actions/runs/{run}',
         'generated_at': datetime.now(timezone.utc).isoformat(),
@@ -157,7 +180,7 @@ def package(directory, environment=None):
         'data_source': 'UI validation fixtures; not a real campus account',
         'build_configuration': 'Debug simulator build from the same commit as the Release IPA',
         'required_checks': checks,
-        'live_activity_layout': LAYOUT_COVERAGE,
+        'live_activity_layout': LAYOUT_COVERAGE if profile == 'full' else None,
         'system_island_preview': {'screenshots': list(SYSTEM_ISLAND_SCREENSHOTS),
             'source': 'SpringBoard ActivityKit expanded alert above Settings; OCR-confirmed title and metric; synthetic simulator data'},
         'live_activity_preview': {
@@ -173,9 +196,13 @@ def package(directory, environment=None):
         },
         'screenshots': images,
     }
+    if profile == 'nightly':
+        manifest['system_island_preview'] = None
+        manifest['live_activity_preview'] = None
+        manifest['validation_scope'] = 'Native tests, device/simulator compilation and selected page smoke checks; full interaction and ActivityKit matrix reserved for formal releases'
     (directory / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     with zipfile.ZipFile(directory / ARCHIVE, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for name in (*SCREENSHOTS, MANIFEST):
+        for name in (*screenshots, MANIFEST):
             archive.write(directory / name, name)
     return manifest
 
@@ -183,23 +210,28 @@ def package(directory, environment=None):
 def release_assets(directory):
     directory = Path(directory)
     manifest = json.loads((directory / MANIFEST).read_text(encoding='utf-8'))
+    profile = capture_profile(os.environ)
+    screenshots, required_checks = profile_files(profile)
+    if manifest.get('validation_profile', 'full') != profile:
+        raise ValueError('UI validation profile does not match publishing policy')
     if manifest['commit'] != os.environ['GITHUB_SHA'] or str(manifest['run_id']) != os.environ['GITHUB_RUN_ID']:
         raise ValueError('Screenshots do not belong to the publishing build')
-    if tuple(item['file'] for item in manifest['screenshots']) != SCREENSHOTS:
+    if tuple(item['file'] for item in manifest['screenshots']) != screenshots:
         raise ValueError('Unexpected screenshot list')
-    if manifest.get('required_checks') != check_info(directory) or manifest.get('live_activity_layout') != LAYOUT_COVERAGE:
+    if (manifest.get('required_checks') != check_info(directory, required_checks)
+            or manifest.get('live_activity_layout') != (LAYOUT_COVERAGE if profile == 'full' else None)):
         raise ValueError('UI validation evidence changed or is incomplete')
     for item in manifest['screenshots']:
         if png_info(directory / item['file']) != item:
             raise ValueError(f'Screenshot checksum mismatch: {item["file"]}')
     with zipfile.ZipFile(directory / ARCHIVE) as archive:
-        expected = (*SCREENSHOTS, MANIFEST)
+        expected = (*screenshots, MANIFEST)
         if len(archive.namelist()) != len(expected) or set(archive.namelist()) != set(expected):
             raise ValueError('Unexpected screenshot archive contents')
         for name in expected:
             if archive.read(name) != (directory / name).read_bytes():
                 raise ValueError(f'Screenshot archive mismatch: {name}')
-    return [directory / name for name in (*SCREENSHOTS, ARCHIVE, MANIFEST)]
+    return [directory / name for name in (*screenshots, ARCHIVE, MANIFEST)]
 
 
 if __name__ == '__main__':

@@ -242,6 +242,8 @@ jobs:
           bash build_ios_unsigned.sh 2>&1 | tee build/ios-build.log
 
       - name: Validate simulator UI and browser behavior
+        env:
+          UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}
         run: bash scripts/validate_ui.sh
 
       - name: Require warning-free compiler logs
@@ -376,6 +378,7 @@ jobs:
       contents: write
       actions: read
     env:
+      UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}
       BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
       IPA_ARTIFACT_ID: ${{ needs.build.outputs.ipa_id }}
       IPA_ARTIFACT_NAME: ${{ needs.build.outputs.ipa_name }}
@@ -419,6 +422,7 @@ jobs:
       contents: write
       actions: read
     env:
+      UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}
       BUILD_ATTEMPT: ${{ needs.build.outputs.attempt }}
       IPA_ARTIFACT_ID: ${{ needs.build.outputs.ipa_id }}
       IPA_ARTIFACT_NAME: ${{ needs.build.outputs.ipa_name }}

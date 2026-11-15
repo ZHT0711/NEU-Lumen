@@ -93,6 +93,27 @@ class ReleaseRecoveryTests(unittest.TestCase):
         self.assertEqual({s['name'] for s in records[0]['old_assets']}, {'app.ipa', 'unmanaged.txt'})
         self.coherent(fake)
 
+    def test_obsolete_screenshots_are_removed_and_recoverable(self):
+        for fail_after_delete in (False, True):
+            fake = FakeGitHub()
+            fake.releases['nightly']['_bytes']['old.png'] = b'previous screenshot'
+            def delete_then_fail(*args):
+                result = fake(*args)
+                if fail_after_delete and args[:4] == ('release', 'delete-asset', 'nightly', 'old.png'):
+                    raise RuntimeError('runner failure after deleting old screenshot')
+                return result
+            with patch.object(tx, 'gh', delete_then_fail):
+                if fail_after_delete:
+                    with self.assertRaises(RuntimeError):
+                        tx.publish_release('o/r', 'nightly', NEW, 'new title', self.body, self.assets, obsolete_assets=['old.png'])
+                else:
+                    tx.publish_release('o/r', 'nightly', NEW, 'new title', self.body, self.assets, obsolete_assets=['old.png'])
+            self.assertEqual(fake.releases['nightly']['_bytes']['unmanaged.txt'], b'keep me')
+            self.assertEqual('old.png' in fake.releases['nightly']['_bytes'], fail_after_delete)
+            self.assertEqual(fake.tags['nightly'], OLD if fail_after_delete else NEW)
+            self.assertFalse(fake.releases['nightly']['draft'])
+            self.assertNotIn('ci-transaction-nightly', fake.releases)
+
     def test_every_publish_api_boundary_ordinary_exception_rolls_back(self):
         for existing in (True, False):
             baseline = FakeGitHub(existing)

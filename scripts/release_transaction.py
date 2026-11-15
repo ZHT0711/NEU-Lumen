@@ -224,7 +224,7 @@ def recover(repo, tag='nightly'):
     return True
 
 
-def publish_release(repo, tag, sha, title, body, assets):
+def publish_release(repo, tag, sha, title, body, assets, obsolete_assets=()):
     """Publish while locked. Durable recovery is installed BEFORE any overwrite."""
     journal_tag = transaction_tag(tag)
     if not re.fullmatch(r'[0-9a-f]{40}', sha):
@@ -273,6 +273,10 @@ def publish_release(repo, tag, sha, title, body, assets):
                    '--notes-file', str(body), '--draft', '--prerelease', '--latest=false')
             gh('release', 'upload', tag, *(str(p) for p in assets), '--clobber')
             verify_uploads(repo, tag, assets)
+            previous_names = {spec['name'] for spec in record['old_assets']}
+            new_names = {spec['name'] for spec in new_specs}
+            for name in sorted(set(obsolete_assets) & previous_names - new_names):
+                gh('release', 'delete-asset', tag, asset_name(name), '--yes')
             set_tag(repo, tag, sha)
             gh('release', 'edit', tag, '--title', title, '--notes-file', str(body),
                '--prerelease', '--latest=false', '--draft=false')

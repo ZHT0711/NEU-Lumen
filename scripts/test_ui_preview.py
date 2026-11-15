@@ -72,6 +72,39 @@ class UIPreviewTests(unittest.TestCase):
         self.assertEqual(len(assets), len(preview.SCREENSHOTS) + 2)
         self.assertNotIn(self.path / 'server.log', assets)
 
+    def test_nightly_profile_is_small_and_cannot_replace_formal_evidence(self):
+        environment = dict(self.env, UI_PREVIEW_PROFILE='nightly')
+        for name in set(preview.SCREENSHOTS) - set(preview.NIGHTLY_SCREENSHOTS):
+            (self.path / name).unlink()
+        for name in set(preview.CHECKS) - set(preview.NIGHTLY_CHECKS):
+            (self.path / name).unlink()
+        manifest = preview.package(self.path, environment)
+        self.assertEqual(len(manifest['screenshots']), 10)
+        self.assertEqual(len(manifest['required_checks']), 4)
+        self.assertIsNone(manifest['live_activity_layout'])
+        self.assertIsNone(manifest['system_island_preview'])
+        with patch.dict(os.environ, environment):
+            self.assertEqual(len(preview.release_assets(self.path)), 12)
+        with patch.dict(os.environ, dict(self.env, UI_PREVIEW_PROFILE='full')):
+            with self.assertRaisesRegex(ValueError, 'profile'):
+                preview.release_assets(self.path)
+        (self.path / preview.NIGHTLY_CHECKS[0]).unlink()
+        with self.assertRaises(FileNotFoundError):
+            preview.package(self.path, environment)
+        with self.assertRaises(ValueError):
+            preview.package(self.path, dict(self.env, UI_PREVIEW_PROFILE='unknown'))
+
+    def test_nightly_readme_uses_only_current_profile_screenshots(self):
+        import re
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / 'README.md').read_text()
+        names = re.findall(r'/releases/download/nightly/([^"\s]+\.png)', readme)
+        self.assertTrue(names)
+        self.assertTrue(set(names).issubset(preview.NIGHTLY_SCREENSHOTS))
+        workflow = (root / '.github/workflows/build-unsigned.yml').read_text()
+        self.assertIn("startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly'", workflow)
+        self.assertEqual(workflow.count("UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}"), 3)
+
     def test_missing_and_invalid_screenshot_block_package(self):
         image = self.path / preview.SCREENSHOTS[0]
         image.unlink()

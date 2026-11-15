@@ -3,7 +3,7 @@ import argparse
 import os
 from pathlib import Path
 
-from package_ui_preview import release_assets
+from package_ui_preview import release_assets, capture_profile, profile_files, SCREENSHOTS
 from build_provenance import validate
 from release_transaction import gh, optional_release, publish_release, recover, release_data, verify_uploads
 
@@ -38,7 +38,9 @@ def publish(recover_only=False):
     ipa = Path('release-assets/NEU-Lumen-iOS-unsigned.ipa')
     body = Path('release-assets/nightly-notes.md')
     body.write_text(notes(repo, sha, run), encoding='utf-8')
-    publish_release(repo, 'nightly', sha, 'NEU-Lumen Nightly', body, [ipa, *previews, provenance])
+    selected, _ = profile_files(capture_profile(os.environ))
+    obsolete = set(SCREENSHOTS) - set(selected)
+    publish_release(repo, 'nightly', sha, 'NEU-Lumen Nightly', body, [ipa, *previews, provenance], obsolete_assets=obsolete)
     print(f'https://github.com/{repo}/releases/tag/nightly')
 
 
