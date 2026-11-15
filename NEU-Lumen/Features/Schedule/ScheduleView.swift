@@ -381,6 +381,7 @@ struct CourseDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppEnvironment.self) private var environment
     @State private var deleting = false
+    @State private var detailDetent = PresentationDetent.medium
 
     var body: some View {
         NavigationStack {
@@ -392,6 +393,7 @@ struct CourseDetailSheet: View {
                 if !occurrence.slot.room.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     NavigationLink {
                         IndoorNavigationView(destination: occurrence.slot.room)
+                            .onAppear { detailDetent = .large }
                     } label: {
                         Label("楼内导航 · Pathly", systemImage: "figure.walk")
                     }
@@ -426,7 +428,7 @@ struct CourseDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detailDetent)
     }
 }
 

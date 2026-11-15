@@ -168,7 +168,8 @@ def package(directory, environment=None):
         },
         'native_preview': {
             'academic': 'actual AcademicCenterView / AcademicCalendarView / AcademicPlanView; explicit DEBUG seedAcademicPreview; synthetic only',
-            'services': 'actual native payment / VPN / affairs / mail / news / daily agenda / downloads and eight vector card illustrations; disposable Debug synthetic fixtures only; no real account',
+            'services': 'actual native services including analysis / map / library / telephone and twelve vector card illustrations; disposable Debug synthetic fixtures only; no real account',
+            'indoor_navigation': 'actual isolated IndoorNavigationView with a local synthetic HTML page; Pathly supplies production floor plans and routes; no live route or on-site accuracy validation',
         },
         'screenshots': images,
     }
