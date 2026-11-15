@@ -61,6 +61,10 @@ struct IndoorFloor: Decodable, Identifiable {
 }
 
 struct IndoorBuilding: Decodable, Identifiable {
+    struct ElevatorReference: Identifiable {
+        let id: String
+        let url: URL
+    }
     let id: String
     let name: String
     let campus: String
@@ -70,12 +74,19 @@ struct IndoorBuilding: Decodable, Identifiable {
     var rooms: [IndoorRoom] { floors.flatMap(\.uniqueRooms) }
     var gateImageURL: URL? { URL(string: "https://pathly.top/images/" + id + "-gate-map.jpg") }
     func elevatorImageURL(on floor: IndoorFloor) -> URL? {
-        guard let elevator = floor.rooms.first(where: { $0.isElevator }) else { return nil }
-        let components = elevator.id.split(separator: "_")
-        guard components.count >= 3 else { return nil }
-        let level = components[components.count - 2]
-        guard level.range(of: #"^[A-Za-z0-9]+$"#, options: .regularExpression) != nil else { return nil }
-        return URL(string: "https://pathly.top/images/" + id + "-" + level + "-elevator.jpg")
+        elevatorReferences(on: floor).first?.url
+    }
+    func elevatorReferences(on floor: IndoorFloor) -> [ElevatorReference] {
+        var seen = Set<String>()
+        return floor.rooms.filter(\.isElevator).compactMap { elevator in
+            let components = elevator.id.split(separator: "_")
+            guard components.count >= 3 else { return nil }
+            let level = String(components[components.count - 2])
+            guard level.range(of: #"^[A-Za-z0-9]+$"#, options: .regularExpression) != nil,
+                  seen.insert(level).inserted,
+                  let url = URL(string: "https://pathly.top/images/" + id + "-" + level + "-elevator.jpg") else { return nil }
+            return ElevatorReference(id: level, url: url)
+        }
     }
     func room(_ id: String) -> IndoorRoom? { rooms.first { $0.id == id } }
     func floorName(for room: IndoorRoom) -> String { floors.first { $0.rooms.contains(room) }?.name ?? "" }

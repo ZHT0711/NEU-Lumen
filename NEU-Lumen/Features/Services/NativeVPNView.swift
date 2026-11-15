@@ -175,9 +175,12 @@ struct NativeVPNView: View {
     }
 
     private func refresh(force: Bool) async {
+        let epoch = environment.session.requestEpoch
         await check(force: force)
-        guard active, environment.session.phase == .loggedIn else { return }
+        guard active, environment.session.phase == .loggedIn, epoch == environment.session.requestEpoch, !Task.isCancelled else { return }
         await store.load(client: environment.session.client, force: force)
+        guard epoch == environment.session.requestEpoch, !Task.isCancelled else { return }
+        ticket = environment.session.client.hasWebVPNTicket
         environment.session.persistWebSession()
     }
 

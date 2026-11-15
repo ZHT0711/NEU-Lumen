@@ -210,9 +210,18 @@ private struct IndoorPointPicker: View {
                     let rooms = level.uniqueRooms.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
                     if !rooms.isEmpty {
                         Section(level.name) {
-                            if let url = building.elevatorImageURL(on: level) {
+                            let references = building.elevatorReferences(on: level)
+                            if references.count == 1, let url = references.first?.url {
                                 Button("查看本层电梯位置", systemImage: "arrow.up.arrow.down.square") {
                                     reference = IndoorReferenceImage(title: building.name + " · " + level.name + "电梯", url: url)
+                                }
+                            } else if !references.isEmpty {
+                                Menu("查看本层电梯位置", systemImage: "arrow.up.arrow.down.square") {
+                                    ForEach(references) { image in
+                                        Button(image.id + " 区电梯位置") {
+                                            reference = IndoorReferenceImage(title: building.name + " · " + image.id + "区电梯", url: image.url)
+                                        }
+                                    }
                                 }
                             }
                             ForEach(rooms) { room in
