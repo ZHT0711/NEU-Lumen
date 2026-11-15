@@ -38,7 +38,7 @@ cat > "$PREVIEW/simulator.entitlements" <<'PLIST'
 </dict></plist>
 PLIST
 xcodebuild build -project "$PREVIEW/NEU-Lumen.xcodeproj" -scheme NEU-Lumen \
-  -configuration Debug -sdk iphonesimulator -destination "id=$SIM_ID,arch=$(uname -m)" \
+  -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' "ARCHS=$(uname -m)" \
   -derivedDataPath "$PREVIEW/DerivedData" CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO \
   "OTHER_LDFLAGS=\$(inherited) -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __entitlements -Xlinker $PREVIEW/simulator.entitlements" \
   2>&1 | tee "$OUTPUT/simulator-build.log"
