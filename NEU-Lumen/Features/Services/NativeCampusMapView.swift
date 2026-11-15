@@ -89,6 +89,21 @@ struct NativeCampusMapView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                NavigationLink {
+                    IndoorNavigationView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "building.2.crop.circle").font(.title2)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("楼内导航").font(.headline)
+                            Text("Pathly · 查教室、找楼梯与电梯").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .foregroundStyle(.primary).padding(16)
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                }.buttonStyle(.plain)
                 Picker("校区", selection: $campus) {
                     ForEach(Campus.allCases) { Text($0.title).tag($0) }
                 }.pickerStyle(.segmented)

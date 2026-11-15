@@ -389,6 +389,13 @@ struct CourseDetailSheet: View {
                 LabeledContent("日期", value: PortalDate.isoDay(occurrence.date))
                 LabeledContent("时间", value: "\(Semester.hm(occurrence.slot.startMinutes)) – \(Semester.hm(occurrence.slot.endMinutes))")
                 LabeledContent("地点", value: occurrence.slot.room)
+                if !occurrence.slot.room.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    NavigationLink {
+                        IndoorNavigationView(destination: occurrence.slot.room)
+                    } label: {
+                        Label("楼内导航 · Pathly", systemImage: "figure.walk")
+                    }
+                }
                 LabeledContent("类型", value: occurrence.slot.kind == "custom" ? "本机日程" : "门户事件")
                 if let eventID = occurrence.slot.eventID,
                    let event = environment.repository.planner.events.first(where: { $0.id == eventID }), !event.note.isEmpty {
@@ -419,7 +426,7 @@ struct CourseDetailSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 }
 

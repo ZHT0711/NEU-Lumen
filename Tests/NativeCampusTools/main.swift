@@ -14,6 +14,7 @@ enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal"
         precondition(stats.weightedAverage == 80)
         precondition(stats.bands.reduce(0) { $0 + $1.count } == 5)
         precondition(grade(nil, "0").hasScore && grade(nil, "0").normalizedScore == 0)
+        precondition(grade(nil, " 优秀\n").normalizedScore == 95)
         precondition(!grade(nil, "缓考").hasScore && !grade(101).hasScore && !grade(.nan).hasScore)
         precondition(grade(.infinity).scoreText == "暂无")
         let semester = GradeSemester(name: "synthetic", termCode: "1", current: true, courses: courses)

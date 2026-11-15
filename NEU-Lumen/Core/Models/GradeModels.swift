@@ -22,7 +22,7 @@ struct GradeCourse: Identifiable, Hashable {
     var scoreValue: Double {
         if let score { return score }
         if let value = Double(scoreRaw.trimmingCharacters(in: .whitespacesAndNewlines)), value.isFinite { return value }
-        switch scoreRaw.trimmingCharacters(in: .whitespaces) {
+        switch scoreRaw.trimmingCharacters(in: .whitespacesAndNewlines) {
         case "优", "优秀": return 95
         case "良", "良好": return 85
         case "中", "中等": return 75

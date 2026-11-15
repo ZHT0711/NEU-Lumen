@@ -281,6 +281,7 @@ struct UIValidationRoot: View {
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
                 case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
+                case "indoor-navigation": NavigationStack { IndoorNavigationView(destination: "合成教学楼 A101").nativeUIFixtureCaption("模拟器本地合成页面 · 非 Pathly 实时路线") }
                 case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
                 case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成网络状态 · 非实际认证") }
@@ -1072,6 +1073,31 @@ service_fixture('NEU-Lumen/Features/Services/ServicesView.swift',
 ''')
 
 # Exercise the new telephone and map views with synthetic local data only.
+indoor_view = destination / 'NEU-Lumen/Features/Services/IndoorNavigationView.swift'
+indoor_source = indoor_view.read_text(encoding='utf-8')
+indoor_source = indoor_source.replace('https://pathly.top/user/user-path', 'http://127.0.0.1:8787/indoor.html')
+indoor_hook = 'func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { updateState() }'
+if indoor_source.count(indoor_hook) != 1:
+    raise RuntimeError('Indoor navigation ready hook changed')
+indoor_source = indoor_source.replace(indoor_hook, r'''
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        updateState()
+        Task { @MainActor in
+            let ready = try? await webView.evaluateJavaScript("document.getElementById('indoor-fixture')?.textContent") as? String
+            guard ready == "合成楼内导航页面", !webView.configuration.websiteDataStore.isPersistent,
+                  webView.configuration.userContentController.userScripts.isEmpty else { return }
+            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            try? "PASS: actual indoor browser loaded synthetic local content in an isolated WebKit session".write(to: folder.appendingPathComponent("indoor-navigation-screenshot.txt"), atomically: true, encoding: .utf8)
+        }
+    }
+''')
+indoor_view.write_text(indoor_source, encoding='utf-8')
+(fixtures / 'indoor.html').write_text('''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>合成楼内导航</title><style>body{font-family:system-ui;padding:24px;color:#172554;background:#f8fafc}h1{font-size:24px}p{line-height:1.8}button{font-size:17px;margin:8px 0;padding:16px;border-radius:14px;border:1px solid #cbd5e1;background:white;width:100%;text-align:left}</style>
+<h1 id="indoor-fixture">合成楼内导航页面</h1><p>此页面仅供应用内浏览器界面验证。</p>
+<button>教学楼 · 合成教学楼</button><button>起点 · 合成入口</button><button>终点 · A101</button>
+<p>实际楼层平面图与寻路结果由 Pathly 提供。</p>''', encoding='utf-8')
+
 service_fixture('NEU-Lumen/Features/Services/NativeCampusMapView.swift',
                 'func search(campus: Campus, keyword: String) async {', r'''
         if ProcessInfo.processInfo.arguments.contains("--screen=native-map") {

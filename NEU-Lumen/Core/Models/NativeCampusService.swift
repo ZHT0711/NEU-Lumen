@@ -46,7 +46,7 @@ enum NativeCampusService: String, CaseIterable, Identifiable, Codable, Hashable 
         case .agenda: "每日课程、本机日程与系统日历"
         case .downloads: "附件预览、分享与下载管理"
         case .analysis: "成绩分布、学期趋势与待公布记录"
-        case .map: "校区、教学楼、食堂与步行导航"
+        case .map: "校园地点、步行与 Pathly 楼内导航"
         case .library: "馆藏检索、借阅与图书续借"
         case .telephone: "部门、办公电话与办公地址"
         }
