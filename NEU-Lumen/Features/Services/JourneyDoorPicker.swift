@@ -78,7 +78,7 @@ struct JourneyDoorPicker: View {
                 if let existing { camera = .region(MKCoordinateRegion(center: existing.coordinate, latitudinalMeters: 450, longitudinalMeters: 450)) }
                 await search()
             }
-            .onDisappear { request = UUID(); task?.cancel(); operation?.cancel() }
+            .onDisappear { request = UUID(); task?.cancel(); operation?.cancel(); loading = false }
         }
     }
     private func startSearch() { task?.cancel(); operation?.cancel(); task = Task { await search() } }
