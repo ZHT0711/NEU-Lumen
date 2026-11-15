@@ -66,6 +66,9 @@ enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal"
             precondition(building.rooms.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty })
         }
         let building = catalog.buildings.first { $0.id == "BuildingOne" }!
+        precondition(building.gateImageURL?.lastPathComponent == "BuildingOne-gate-map.jpg")
+        precondition(building.elevatorImageURL(on: building.floors[0]) == nil)
+        precondition(building.elevatorImageURL(on: building.floors[1])?.lastPathComponent == "BuildingOne-1-elevator.jpg")
         let gate = building.rooms.first { $0.isGate }!
         let endpoint = building.matchingRooms("浑南一号楼 Ａ１０２ 教室").first!
         precondition(endpoint.name == "A102")

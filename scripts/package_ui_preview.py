@@ -23,7 +23,7 @@ LIVE_KINDS = ('nextCourse', 'cardBalance', 'netBalance', 'electricBalance', 'ass
 LIVE_SCREENSHOTS = tuple(f'live-expanded-{kind}-light.png' for kind in LIVE_KINDS) + ('live-expanded-ax-stale-light.png',)
 SYSTEM_ISLAND_SCREENSHOTS = tuple(f'system-island-{kind}.png' for kind in ('nextCourse', 'custom', 'electricBalance'))
 NATIVE_SCREENS = ('academic-center', 'academic-calendar', 'academic-plan', 'academic-services', 'academic-exams')
-SERVICE_SCREENS = ('indoor-route', 'indoor-navigation', 'native-analysis', 'native-map', 'native-library', 'native-telephone', 'services-directory', 'native-electricity', 'native-bills', 'native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
+SERVICE_SCREENS = ('indoor-points', 'indoor-route', 'indoor-navigation', 'native-analysis', 'native-map', 'native-library', 'native-telephone', 'services-directory', 'native-electricity', 'native-bills', 'native-payment', 'native-vpn', 'native-affairs', 'native-mail', 'native-news', 'native-agenda', 'native-downloads', 'services-art', 'notifications', 'native-ecode')
 ACADEMIC_WEB_CHECK = 'academic-web-sync-checks.txt'
 ACADEMIC_WEB_CASES = ('same-account', 'wrong-account', 'spoofed-page-world',
                       'identity-changes-between-checks', 'account-epoch-rejects-old-snapshot')
@@ -40,7 +40,7 @@ LAYOUT_COVERAGE = {
     'dynamic_types': ['large', 'accessibility3'], 'variants': ['fresh', 'stale', 'nil-metadata'],
     'timer_modes': ['system-Text', 'multi-day-string'],
 }
-CHECKS = ('indoor-route-screenshot.txt', 'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt', 'browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt', 'ecode-screenshot.txt', 'telephone-screenshot.txt',
+CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt', 'browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt', 'ecode-screenshot.txt', 'telephone-screenshot.txt',
           'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
           LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)

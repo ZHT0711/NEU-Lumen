@@ -281,7 +281,7 @@ struct UIValidationRoot: View {
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
                 case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
                 case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
-                case "indoor-navigation", "indoor-route": NavigationStack { IndoorNavigationView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器原生导航 · 合成路线与楼层图，非现场验证") }
+                case "indoor-navigation", "indoor-route", "indoor-points": NavigationStack { IndoorNavigationView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器原生导航 · 合成路线与楼层图，非现场验证") }
                 case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
                 case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成 WebVPN 目录 · 非真实账号资源") }
@@ -1089,7 +1089,7 @@ service_fixture('NEU-Lumen/Features/Services/NativeVPNView.swift',
 ''')
 service_fixture('NEU-Lumen/Features/Services/IndoorNavigationView.swift',
                 'prepared = true', r'''
-            if ProcessInfo.processInfo.arguments.contains(where: { $0 == "--screen=indoor-navigation" || $0 == "--screen=indoor-route" }) {
+            if ProcessInfo.processInfo.arguments.contains(where: { $0 == "--screen=indoor-navigation" || $0 == "--screen=indoor-route" || $0 == "--screen=indoor-points" }) {
                 self.campus = "south"; selectBuilding("BuildingOne")
                 if let gate = building?.rooms.first(where: { $0.isGate }) { select(gate, forStart: true) }
                 if let end = building?.rooms.first(where: { $0.name == "A102" }) { select(end, forStart: false) }
@@ -1105,11 +1105,23 @@ indoor_task = '.task { store.prepare(destination: destination, campus: environme
 if indoor_source.count(indoor_task) != 1: raise RuntimeError('Native indoor prepare hook changed')
 indoor_source = indoor_source.replace(indoor_task, '''.task {
             store.prepare(destination: destination, campus: environment.repository.campus == .hunnan ? "south" : "main")
+            if ProcessInfo.processInfo.arguments.contains("--screen=indoor-points") { picker = IndoorPointSelection(forStart: true) }
             if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route") {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 await store.search()
             }
         }''')
+indoor_picker_hook = '.navigationTitle(building.name + (forStart ? " · 起点" : " · 终点"))'
+if indoor_source.count(indoor_picker_hook) != 1: raise RuntimeError('Native indoor point picker hook changed')
+indoor_source = indoor_source.replace(indoor_picker_hook, indoor_picker_hook + r'''
+            .task {
+                if ProcessInfo.processInfo.arguments.contains("--screen=indoor-points"), building.floors.contains(where: { $0.id == 1 }) {
+                    floor = 1
+                    let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    try? "PASS: actual native floor and room picker with gate map and elevator reference controls".write(to: folder.appendingPathComponent("indoor-points-screenshot.txt"), atomically: true, encoding: .utf8)
+                }
+            }
+''')
 indoor_view.write_text(indoor_source, encoding='utf-8')
 service_fixture('NEU-Lumen/Core/Networking/PathlyClient.swift',
                 'func route(building: IndoorBuilding, start: String, end: String, preference: IndoorRoutePreference) async throws -> IndoorRoute {', r'''

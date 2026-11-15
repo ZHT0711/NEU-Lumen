@@ -193,6 +193,7 @@ private struct IndoorPointPicker: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var floor = -1
+    @State private var reference: IndoorReferenceImage?
     var body: some View {
         NavigationStack {
             List {
@@ -200,10 +201,20 @@ private struct IndoorPointPicker: View {
                     Text("全部楼层").tag(-1)
                     ForEach(building.floors) { Text($0.name).tag($0.id) }
                 }
+                if let url = building.gateImageURL {
+                    Button("查看楼门平面图", systemImage: "door.left.hand.open") {
+                        reference = IndoorReferenceImage(title: building.name + " · 楼门平面图", url: url)
+                    }
+                }
                 ForEach(building.floors.filter { floor == -1 || $0.id == floor }) { level in
                     let rooms = level.uniqueRooms.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }
                     if !rooms.isEmpty {
                         Section(level.name) {
+                            if let url = building.elevatorImageURL(on: level) {
+                                Button("查看本层电梯位置", systemImage: "arrow.up.arrow.down.square") {
+                                    reference = IndoorReferenceImage(title: building.name + " · " + level.name + "电梯", url: url)
+                                }
+                            }
                             ForEach(rooms) { room in
                                 Button { choose(room); dismiss() } label: {
                                     HStack {
@@ -221,6 +232,12 @@ private struct IndoorPointPicker: View {
             .navigationTitle(building.name + (forStart ? " · 起点" : " · 终点"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .fullScreenCover(item: $reference) { image in
+                NavigationStack {
+                    IndoorReferenceMapView(reference: image)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { reference = nil } } }
+                }
+            }
         }
     }
 }

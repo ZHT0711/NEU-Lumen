@@ -68,6 +68,15 @@ struct IndoorBuilding: Decodable, Identifiable {
     let maps: [String: [String: IndoorCoordinate]]
     var campusName: String { campus == "south" ? "浑南校区" : "南湖校区" }
     var rooms: [IndoorRoom] { floors.flatMap(\.uniqueRooms) }
+    var gateImageURL: URL? { URL(string: "https://pathly.top/images/" + id + "-gate-map.jpg") }
+    func elevatorImageURL(on floor: IndoorFloor) -> URL? {
+        guard let elevator = floor.rooms.first(where: { $0.isElevator }) else { return nil }
+        let components = elevator.id.split(separator: "_")
+        guard components.count >= 3 else { return nil }
+        let level = components[components.count - 2]
+        guard level.range(of: #"^[A-Za-z0-9]+$"#, options: .regularExpression) != nil else { return nil }
+        return URL(string: "https://pathly.top/images/" + id + "-" + level + "-elevator.jpg")
+    }
     func room(_ id: String) -> IndoorRoom? { rooms.first { $0.id == id } }
     func floorName(for room: IndoorRoom) -> String { floors.first { $0.rooms.contains(room) }?.name ?? "" }
     func matchingRooms(_ destination: String) -> [IndoorRoom] {

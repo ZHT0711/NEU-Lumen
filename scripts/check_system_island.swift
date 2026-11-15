@@ -33,6 +33,7 @@ if kind.hasPrefix("screen:") {
         "native-analysis": ["成绩分析", "成绩概览", "分数分布"],
         "native-map": ["校园地图", "楼内导航", "教学楼"],
         "indoor-navigation": ["楼内导航", "校区与教学楼", "起点与终点", "A102"],
+        "indoor-points": ["一号楼", "起点", "楼门平面图", "本层电梯位置"],
         "indoor-route": ["楼内导航", "导航路线", "合成楼层图"],
         "native-library": ["图书馆", "馆藏书刊检索", "我的借阅与续借"],
         "native-telephone": ["查询条件", "合成部门", "合成办公室", "00000000"],

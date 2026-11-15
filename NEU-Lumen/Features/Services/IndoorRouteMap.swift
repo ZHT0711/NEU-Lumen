@@ -1,5 +1,42 @@
 import SwiftUI
 
+struct IndoorReferenceImage: Identifiable {
+    let title: String
+    let url: URL
+    var id: URL { url }
+}
+
+struct IndoorReferenceMapView: View {
+    let reference: IndoorReferenceImage
+    @State private var image: UIImage?
+    @State private var failed = false
+    @State private var attempt = 0
+    private let client = PathlyClient()
+    var body: some View {
+        Group {
+            if let image { IndoorZoomableMap(image: image).ignoresSafeArea(edges: .bottom) }
+            else if failed {
+                ContentUnavailableView {
+                    Label("位置图暂时无法加载", systemImage: "map")
+                } description: { Text("可以重试或通过 Pathly 原站核对。") } actions: {
+                    Button("重新加载") { attempt += 1 }
+                    Link("Pathly 原站", destination: URL(string: "https://pathly.top/user/user-path")!)
+                }
+            } else { ProgressView("正在加载位置图…") }
+        }
+        .navigationTitle(reference.title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: reference.id.absoluteString + String(attempt)) {
+            failed = false
+            do {
+                let data = try await client.image(reference.url)
+                guard !Task.isCancelled else { return }
+                image = UIImage(data: data); failed = image == nil
+            } catch { if !Task.isCancelled { failed = true } }
+        }
+    }
+}
+
 private struct IndoorMapIdentity: Hashable {
     let key: String?
     let points: [IndoorCoordinate]

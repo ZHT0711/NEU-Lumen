@@ -35,6 +35,7 @@ final class NativeVPNDirectoryStore {
             directory = value; updatedAt = Date()
         } catch {
             guard request == token, owner == account, !Task.isCancelled else { return }
+            if error as? WebVPNDirectoryError == .accountMismatch { directory = nil; updatedAt = nil }
             self.error = (error as? WebVPNDirectoryError)?.localizedDescription ?? NetworkError.from(error).message
         }
     }
@@ -98,7 +99,7 @@ struct NativeVPNView: View {
                 LabeledContent("网络", value: environment.session.networkAvailable ? (campus.map { $0 ? "校园网络可达" : "校外 WebVPN 访问" } ?? "尚未检测") : "网络已断开")
                 LabeledContent("资源站点", value: store.directory.map { "\($0.resources.count) 项" } ?? "等待同步")
                 DisclosureGroup("连接详情") {
-                    LabeledContent("WebVPN 认证", value: store.directory != nil && store.error == nil ? "当前账号已核对" : (ticket ? "会话待核对" : "需要学校认证"))
+                    LabeledContent("WebVPN 认证", value: store.directory != nil && store.error == nil && ticket ? "当前账号已核对" : (ticket ? "会话待核对" : "需要学校认证"))
                     if let updated = store.updatedAt { LabeledContent("目录更新", value: updated.formatted(date: .omitted, time: .shortened)) }
                     if let checkedAt { LabeledContent("网络检测", value: checkedAt.formatted(date: .omitted, time: .shortened)) }
                 }
