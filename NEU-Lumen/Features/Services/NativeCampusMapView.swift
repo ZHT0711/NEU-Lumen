@@ -16,7 +16,7 @@ private struct CampusEntranceMapPlace: Identifiable {
     let entrance: CampusEntrance
     var id: String { entrance.id }
     var title: String { building.name + " · " + (building.room(entrance.gateID)?.title ?? "楼门") }
-    var door: JourneyDoor {
+    @MainActor var door: JourneyDoor {
         JourneyDoor(name: title, coordinate: CampusMapProjection.shared.coordinate(latitude: entrance.latitude, longitude: entrance.longitude),
                     approximateAccuracyMeters: entrance.approximateAccuracyMeters)
     }
