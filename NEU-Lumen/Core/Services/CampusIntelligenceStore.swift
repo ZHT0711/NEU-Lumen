@@ -60,10 +60,16 @@ final class CampusIntelligenceStore {
             defer { if self.generation == epoch { self.worker = nil } }
             while let feature = CampusIntelligenceFeature.allCases.first(where: { self.pending[$0] != nil }) {
                 guard self.generation == epoch, !Task.isCancelled else { return }
-                guard let input = self.pending.removeValue(forKey: feature), self.canUse(feature) else { continue }
+                guard let input = self.pending.removeValue(forKey: feature) else { continue }
+                guard self.canUse(feature) else {
+                    if self.requested[feature] == input.identity { self.requested[feature] = nil }
+                    continue
+                }
                 do {
                     let text = try await self.generate(input)
-                    guard self.generation == epoch, !Task.isCancelled, self.canUse(feature), self.requested[feature] == input.identity else { continue }
+                    guard self.generation == epoch, !Task.isCancelled else { return }
+                    guard self.requested[feature] == input.identity else { continue }
+                    guard self.canUse(feature) else { self.requested[feature] = nil; continue }
                     guard !text.isEmpty, text.count <= 600 else { self.requested[feature] = nil; continue }
                     self.digests[feature] = Digest(identity: input.identity, text: text, caption: input.caption)
                 } catch {

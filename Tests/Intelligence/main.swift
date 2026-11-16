@@ -109,6 +109,18 @@ func waitForCalls(_ gate: GenerationGate, _ count: Int) async {
     await settle { store.digest(for: .assignments) != nil }
     available = false
     precondition(store.digest(for: .assignments) == nil, "Loss of system model availability must hide the region")
+    available = true
+    let changed = CampusIntelligenceInput(feature: .assignments, payload: assignment.payload + " ", caption: assignment.caption)
+    store.request(changed, for: .assignments)
+    await waitForCalls(gate, 6)
+    available = false
+    await gate.finish("模型暂不可用时的结果，不可发布")
+    for _ in 0..<20 { await Task.yield() }
+    available = true
+    store.request(changed, for: .assignments)
+    await waitForCalls(gate, 7)
+    await gate.finish("模型恢复后的新摘要")
+    await settle { store.digest(for: .assignments)?.text == "模型恢复后的新摘要" }
     print("PASS: unsupported/disabled UI gating, serial generation, memoization, feature switches, preference persistence, account isolation and foreground cancellation")
 }
 await testStore()
