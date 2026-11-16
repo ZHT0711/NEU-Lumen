@@ -38,7 +38,8 @@ if kind.hasPrefix("screen:") {
         "indoor-route": ["楼内导航", "导航路线", "合成楼层图"],
         "native-library": ["图书馆", "馆藏书刊检索", "我的借阅与续借"],
         "native-telephone": ["查询条件", "合成部门", "合成办公室", "00000000"],
-        "native-payment": ["缴费大厅", "校园卡余额"],
+        "card": ["校园卡", "校园卡余额", "校园卡充值", "月流水"],
+        "native-payment": ["缴费大厅", "校园卡余额", "充值网费"],
         "native-vpn": ["WebVPN", "访问状态", "资源目录"],
         "native-affairs": ["办事大厅", "我的在办事项"],
         "native-mail": ["学校邮箱", "收件箱"],
@@ -51,6 +52,22 @@ if kind.hasPrefix("screen:") {
     ]
     guard let terms = expected[screen], terms.allSatisfy({ normalized.contains($0) }) else {
         fatalError("Screenshot content missing for " + screen + "; OCR: " + text)
+    }
+    if screen == "native-mail" {
+        // Measured Vision text bounds from THIS simulator image, not source arithmetic.
+        // In the old layout, the batch label occupied the navigation title's row.
+        let boxes = (request.results ?? []).compactMap { observation -> (text: String, rect: CGRect)? in
+            guard let candidate = observation.topCandidates(1).first else { return nil }
+            return (candidate.string.replacingOccurrences(of: " ", with: ""), observation.boundingBox)
+        }
+        guard let title = boxes.first(where: { $0.text.contains("学校邮箱") })?.rect,
+              let switcher = boxes.first(where: { $0.text.contains("左右滑动或长按切换服务") })?.rect,
+              let batch = boxes.first(where: { $0.text.contains("批量操作") })?.rect,
+              switcher.maxY + 0.005 < title.minY,
+              batch.maxY + 0.005 < switcher.minY else {
+            fatalError("Mail navigation, switcher and batch rows overlap or are missing; OCR: " + text)
+        }
+        print("PASS: actual mailbox title, switcher and batch text bounds are vertically separated")
     }
     print("PASS: rendered screenshot content " + screen)
 } else {

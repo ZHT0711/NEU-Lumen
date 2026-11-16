@@ -437,7 +437,7 @@ struct HomeView: View {
     private var cardEntrySection: some View {
         GlassCard {
             Button {
-                path.append(.web(CampusPaymentEntry.cardRecharge))
+                path.append(.card)
             } label: {
                 HStack(spacing: 14) {
                     ZStack {
@@ -465,6 +465,8 @@ struct HomeView: View {
                 .padding(14)
             }
             .buttonStyle(.plain)
+            .accessibilityHint("查看校园卡余额、月流水、网费和电费")
+            .accessibilityIdentifier("home.card")
         }
     }
 
@@ -475,14 +477,14 @@ struct HomeView: View {
             if let balance = repo.cardBalance {
                 parts.append("余额 \(String(format: "%.2f", balance.balance)) 元")
             }
-            if let net = repo.netInfo, net.flowFromPortal {
+            if let net = repo.netInfo {
                 parts.append("网费 \(String(format: "%.2f", net.balance)) 元")
             }
-            return parts.isEmpty ? "充值与缴费" : parts.joined(separator: " · ") + " · 充值"
+            return parts.isEmpty ? "余额 · 流水 · 网费 · 电费" : parts.joined(separator: " · ")
         case .loading:
             return "正在同步…"
         default:
-            return "充值校园卡 · 学校缴费页面"
+            return "余额 · 流水 · 网费 · 电费"
         }
     }
 

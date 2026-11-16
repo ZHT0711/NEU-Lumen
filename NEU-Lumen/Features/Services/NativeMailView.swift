@@ -21,6 +21,20 @@ struct NativeMailView: View {
     var body: some View {
         List {
             Section {
+                if active {
+                    Button {
+                        selecting.toggle(); selection = []
+                    } label: {
+                        Label(selecting ? "完成选择" : "批量操作",
+                              systemImage: selecting ? "checkmark.circle" : "checklist")
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    // Finishing selection remains available if a refresh empties the folder.
+                    .disabled(!selecting && (store.messages.isEmpty || store.busy || store.loadingWeb))
+                    .accessibilityValue(selecting ? "已选择 \(selection.count) 封邮件" : "未开始选择")
+                    .accessibilityIdentifier("mail.batch-selection")
+                }
                 if !store.email.isEmpty { Text(store.email).font(.subheadline).foregroundStyle(.secondary) }
                 HStack {
                     Menu {
@@ -137,14 +151,6 @@ struct NativeMailView: View {
         }
         .privacySensitive()
         .scrollDismissesKeyboard(.interactively)
-        .toolbar {
-            if active {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(selecting ? "完成选择" : "批量操作") { selecting.toggle(); selection = [] }
-                        .disabled(store.messages.isEmpty || store.busy)
-                }
-            }
-        }
         .safeAreaInset(edge: .bottom) {
             if selecting {
                 HStack {

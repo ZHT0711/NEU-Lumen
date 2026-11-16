@@ -47,8 +47,8 @@ CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-di
 MANIFEST = 'ui-preview.json'
 LEGACY_SCREENSHOTS = ('home-nanhu-light.png',)
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
-NIGHTLY_SCREENSHOTS = ('home-light.png', 'campus-journey-light.png', 'schedule-light.png', 'services-light.png',
-                       'services-art-light.png', 'native-map-light.png', 'indoor-navigation-light.png',
+NIGHTLY_SCREENSHOTS = ('home-light.png', 'card-light.png', 'schedule-light.png', 'services-light.png',
+                       'native-payment-light.png', 'native-mail-light.png', 'indoor-navigation-light.png',
                        'indoor-route-light.png', 'indoor-points-light.png', 'native-vpn-light.png')
 NIGHTLY_CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt',
                   'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt')

@@ -67,6 +67,12 @@ struct NativeServiceHost: View {
     }
     var body: some View {
         VStack(spacing: 0) {
+            // Reserve real layout height below navigation. A page-style TabView
+            // may ignore propagated safe-area insets, so the switcher is a sibling.
+            NativeServiceScrubber(selected: $selected, preview: $preview)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+                .background(Color(.systemGroupedBackground))
             TabView(selection: $selected) {
                 AcademicCenterView(active: selected == .academic).tag(NativeCampusService.academic)
                 NativePaymentView(active: selected == .payment).tag(NativeCampusService.payment)
@@ -80,22 +86,15 @@ struct NativeServiceHost: View {
                 NativeCampusMapView(active: selected == .map).tag(NativeCampusService.map)
                 NativeLibraryView().tag(NativeCampusService.library)
                 NativeTelephoneView(active: selected == .telephone).tag(NativeCampusService.telephone)
-            }.tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // A page-style TabView can draw beyond its content safe area. Keep each
+            // service below the separately reserved switcher, not under navigation.
+            .clipped()
         }
         .background(Color(.systemGroupedBackground))
-        .overlay(alignment: .top) {
-            if let preview {
-                Label(preview.title, systemImage: preview.symbol)
-                    .font(.headline).padding(.horizontal, 22).padding(.vertical, 14)
-                    .background(.regularMaterial, in: Capsule()).padding(.top, 16)
-                    .allowsHitTesting(false).accessibilityAddTraits(.updatesFrequently)
-            }
-        }
         .navigationTitle(selected.title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                NativeServiceScrubber(selected: $selected, preview: $preview)
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("切换服务", systemImage: "square.grid.2x2") {
                     ForEach(NativeCampusService.groups, id: \.self) { group in
@@ -108,12 +107,19 @@ struct NativeServiceHost: View {
                         }
                     }
                 }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("切换原生服务")
                 .accessibilityIdentifier("services.switcher")
             }
             if selected.hasSchoolPage { ToolbarItem(placement: .topBarTrailing) {
                 Button("学校原站", systemImage: "globe") {
                     originalWeb = NativeServiceWebLink(url: selected.entryURL(apps: environment.repository.apps))
                 }
+                .labelStyle(.iconOnly)
+                .frame(minWidth: 44, minHeight: 44)
+                .accessibilityLabel("打开\(selected.title)学校原站")
+                .accessibilityIdentifier("services.school-web")
             } }
         }
         .sheet(item: $originalWeb) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
@@ -127,35 +133,46 @@ private struct NativeServiceScrubber: View {
     private let services = NativeCampusService.allCases
     private var visible: NativeCampusService { preview ?? selected }
     var body: some View {
-        VStack(spacing: 5) {
-            Text(visible.title).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
-            HStack(spacing: 2) {
-                ForEach(services) { service in
-                    Capsule().fill(Color.blue.opacity(service == visible ? 1 : 0.16))
-                        .frame(height: service == visible ? 4 : 3)
+        VStack(spacing: 0) {
+            Text(preview == nil ? "左右滑动或长按切换服务" : visible.title)
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+            GeometryReader { geometry in
+                HStack(spacing: 3) {
+                    ForEach(services) { service in
+                        Capsule().fill(Color.blue.opacity(service == visible ? 1 : 0.16))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: service == visible ? 4 : 3)
+                    }
                 }
-            }.frame(height: 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
+                    .updating($dragging) { value, state, _ in
+                        if case .second(true, _) = value { state = true }
+                    }
+                    .onChanged { value in
+                        if case .second(true, let drag) = value {
+                            preview = drag.map { service(at: $0.location.x, width: geometry.size.width) } ?? selected
+                        }
+                    }
+                    .onEnded { value in
+                        if case .second(true, let drag?) = value {
+                            selected = service(at: drag.location.x, width: geometry.size.width)
+                        }
+                        preview = nil
+                    })
+            }
+            .frame(height: 44)
         }
-        .frame(width: 144, height: 44).contentShape(Rectangle())
-        .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($dragging) { value, state, _ in
-                if case .second(true, _) = value { state = true }
-            }
-            .onChanged { value in
-                if case .second(true, let drag) = value {
-                    preview = drag.map { service(at: $0.location.x) } ?? selected
-                }
-            }
-            .onEnded { value in
-                if case .second(true, let drag?) = value { selected = service(at: drag.location.x) }
-                preview = nil
-            })
         .onChange(of: dragging) { _, active in if !active { preview = nil } }
         .sensoryFeedback(.selection, trigger: visible)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("原生服务切换")
         .accessibilityValue(visible.title + "，\((services.firstIndex(of: visible) ?? 0) + 1)/\(services.count)")
-        .accessibilityHint("长按并左右拖动选择服务，松手切换")
+        .accessibilityHint("左右滑动页面，或长按指示条并左右拖动，松手切换；也可使用导航栏服务目录")
+        .accessibilityIdentifier("services.scrubber")
         .accessibilityAdjustableAction { direction in
             let index = services.firstIndex(of: selected) ?? 0
             switch direction {
@@ -165,8 +182,8 @@ private struct NativeServiceScrubber: View {
             }
         }
     }
-    private func service(at x: CGFloat) -> NativeCampusService {
-        services[NativeServicePosition.index(at: Double(x), width: 144, count: services.count)]
+    private func service(at x: CGFloat, width: CGFloat) -> NativeCampusService {
+        services[NativeServicePosition.index(at: Double(x), width: Double(width), count: services.count)]
     }
 }
 

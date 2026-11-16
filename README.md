@@ -24,13 +24,13 @@
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/home-light.png" width="245" alt="首页" />
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/campus-journey-light.png" width="245" alt="跨楼路线规划（模拟器表单）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/card-light.png" width="245" alt="校园卡余额、月流水与独立充值入口" />
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/schedule-light.png" width="245" alt="课表" />
 </p>
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-light.png" width="245" alt="校园服务" />
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-light.png" width="245" alt="校园主题简笔画卡面" />
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-map-light.png" width="245" alt="校园地图" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-payment-light.png" width="245" alt="原生缴费与网费充值入口（合成演示）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-mail-light.png" width="245" alt="原生学校邮箱（合成演示）" />
 </p>
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/indoor-navigation-light.png" width="245" alt="原生楼内导航" />

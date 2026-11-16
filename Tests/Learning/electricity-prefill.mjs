@@ -82,7 +82,8 @@ assert.equal(f.execute().status,'unavailable','ambiguous multiple fields must no
 assert.equal(f.events.length,0);
 for(const location of [
     {hostname:'pay.neu.edu.cn.evil.example'}, {protocol:'http:'}, {port:'8443'},
-    {pathname:'/openPortal'}, {pathname:'/openPayElecPagesDbdx51414E039.html/extra'}
+    {pathname:'/openPortal'}, {pathname:'/openPayElecPagesDbdx51414E039.html/extra'},
+    {pathname:'/netdetails51247N005.html'}, {pathname:'/scardrecharge51264Z006.html'}
 ]) {
     f=fixture({location});assert.equal(f.execute().status,'unavailable');assert.equal(f.events.length,0);
 }

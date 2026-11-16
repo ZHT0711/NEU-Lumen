@@ -46,7 +46,9 @@ struct NativePaymentView: View {
                     if let net = repo.netInfo {
                         ForEach(net.usageFacts, id: \.0) { label, value in LabeledContent(label, value: value) }
                     } else { Text("尚未读取网络用量").foregroundStyle(.secondary) }
-                    Button("充值网费", systemImage: "wifi") { openPayment() }
+                    Button("充值网费", systemImage: "wifi") { openPaymentURL(CampusPaymentEntry.netRecharge) }
+                        .accessibilityIdentifier("payment.netRecharge")
+                        .accessibilityHint("打开学校网费支付页面，不使用宿舍房间码")
                 }
                 Section("缴费服务") {
                     Button("缴费项目", systemImage: "square.grid.2x2") { openPayment(path: "/openApplication") }

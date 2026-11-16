@@ -5,6 +5,7 @@ import SwiftUI
 struct CardView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var showCardWeb = false
+    @State private var showCardRecharge = false
     @State private var cardQuery: String?
     @State private var roomDraft = ""
     @State private var editingRoom = false
@@ -18,6 +19,7 @@ struct CardView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 balanceCard
+                rechargeEntry
                 if let warning = repo.cardWarning {
                     Text(warning).font(.caption).foregroundStyle(.orange)
                 }
@@ -39,6 +41,9 @@ struct CardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showCardWeb) {
             NavigationStack { PortalWebViewScreen(url: URL(string: PortalClient.serviceCard)!, cardMode: true, cardQuery: cardQuery) }
+        }
+        .sheet(isPresented: $showCardRecharge) {
+            NavigationStack { PortalWebViewScreen(url: CampusPaymentEntry.cardRecharge, nativeService: .payment) }
         }
         .sheet(isPresented: $electricityWeb) {
             NavigationStack { PortalWebViewScreen(url: CampusPaymentEntry.electricity, nativeService: .payment) }
@@ -69,6 +74,16 @@ struct CardView: View {
             await repo.loadCardOverview()
             await repo.loadBills(year: repo.billsYear, month: repo.billsMonth)
         }
+    }
+
+    // MARK: - 充值入口
+
+    private var rechargeEntry: some View {
+        Button("校园卡充值", systemImage: "creditcard.and.123") { showCardRecharge = true }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .accessibilityHint("打开学校充值页面，金额与支付由你确认")
+            .accessibilityIdentifier("card.recharge")
     }
 
     // MARK: - 余额

@@ -246,6 +246,22 @@ struct UIValidationApp: App {
     }
 }
 
+struct NativeMailNavigationFixture: View {
+    // Disposable screenshot-only navigation with the same back button pressure
+    // as entering Mail from Services. No private screenshot or real mailbox data.
+    @State private var path: [NativeCampusService] = [.mail]
+    var body: some View {
+        NavigationStack(path: $path) {
+            Color(.systemGroupedBackground)
+                .navigationTitle("服务大厅")
+                .navigationDestination(for: NativeCampusService.self) { service in
+                    NativeServiceHost(initial: service)
+                        .nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件")
+                }
+        }
+    }
+}
+
 struct UIValidationRoot: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var ready = false
@@ -287,7 +303,7 @@ struct UIValidationRoot: View {
                 case "native-telephone": NavigationStack { NativeServiceHost(initial: .telephone).nativeUIFixtureCaption("模拟器合成办公电话 · 非真实联系方式") }
                 case "native-vpn": NavigationStack { NativeServiceHost(initial: .vpn).nativeUIFixtureCaption("模拟器合成 WebVPN 目录 · 非真实账号资源") }
                 case "native-affairs": NavigationStack { NativeServiceHost(initial: .affairs).nativeUIFixtureCaption("模拟器合成办事进度 · 非真实申请") }
-                case "native-mail": NavigationStack { NativeServiceHost(initial: .mail).nativeUIFixtureCaption("模拟器合成邮箱 · 非真实邮件") }
+                case "native-mail": NativeMailNavigationFixture()
                 case "native-news": NavigationStack { NativeServiceHost(initial: .news).nativeUIFixtureCaption("模拟器合成资讯 · 非学校实际新闻") }
                 case "native-agenda": NavigationStack { NativeServiceHost(initial: .agenda).nativeUIFixtureCaption("模拟器合成日程 · 非真实课程安排") }
                 case "native-downloads": NavigationStack { NativeServiceHost(initial: .downloads).nativeUIFixtureCaption("模拟器合成下载 · 非真实账号文件") }

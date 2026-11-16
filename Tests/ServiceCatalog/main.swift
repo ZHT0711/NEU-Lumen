@@ -180,6 +180,18 @@ precondition(CampusPaymentEntry.electricity.path == "/openPayElecPagesDbdx51414E
 precondition(CampusPaymentEntry.isElectricity(CampusPaymentEntry.electricity))
 precondition(CampusPaymentEntry.cardRecharge.path == "/scardrecharge51264Z006.html")
 precondition(CampusPaymentEntry.resumableDestination(CampusPaymentEntry.cardRecharge) == CampusPaymentEntry.cardRecharge)
+precondition(CampusPaymentEntry.netRecharge.absoluteString == "https://pay.neu.edu.cn/netdetails51247N005.html")
+precondition(CampusPaymentEntry.resumableDestination(CampusPaymentEntry.netRecharge) == CampusPaymentEntry.netRecharge)
+precondition(!CampusPaymentEntry.isElectricity(CampusPaymentEntry.netRecharge))
+precondition(!CampusPaymentEntry.isElectricity(CampusPaymentEntry.cardRecharge))
+for unsafe in [
+    "https://pay.neu.edu.cn.evil.example/netdetails51247N005.html",
+    "http://pay.neu.edu.cn/netdetails51247N005.html",
+    "https://pay.neu.edu.cn:8443/netdetails51247N005.html",
+    "https://user:password@pay.neu.edu.cn/netdetails51247N005.html",
+    "https://pay.neu.edu.cn/netdetails51247N005.html?elecroomno=1010203",
+    "https://pay.neu.edu.cn/netdetails51247N005.html/extra",
+] { precondition(CampusPaymentEntry.resumableDestination(URL(string: unsafe)!) == nil) }
 precondition(CampusPaymentEntry.resumableDestination(URL(string: "https://pay.neu.edu.cn.evil.example/scardrecharge51264Z006.html")!) == nil)
 precondition(CampusPaymentEntry.resumableDestination(URL(string: "https://pay.neu.edu.cn/orders.html")!) == nil)
 precondition(HomeQuickServiceCount.normalized(8) == 8 && HomeQuickServiceCount.normalized(4) == 4)

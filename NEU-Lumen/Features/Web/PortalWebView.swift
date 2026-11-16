@@ -402,7 +402,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     @ObservationIgnored private var documentUnsafeMethod = false
     @ObservationIgnored private var service: NativeCampusService?
     @ObservationIgnored private var paymentResumeURL: URL?
-    @ObservationIgnored private var electricityResumeAttempted = false
+    @ObservationIgnored private var paymentResumeAttempted = false
     @ObservationIgnored private var electricityPrefillTask: Task<Void, Never>?
     @ObservationIgnored private var electricityPrefillStatus = "unavailable"
     @ObservationIgnored private var nativeFormDraft = NativeFormDraftCache()
@@ -713,7 +713,7 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
                 }
             }
             recoverCampusLoginIfNeeded()
-            await resumeElectricityAfterLogin()
+            await resumePaymentAfterLogin()
             await clickCampusUnifiedLoginIfNeeded()
             startElectricityPrefill()
         }
@@ -780,13 +780,17 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         }
     }
 
-    private func resumeElectricityAfterLogin() async {
-        guard let paymentResumeURL, !electricityResumeAttempted, let current = webView.url,
-              let client, client.sessionGeneration == clientEpoch else { return }
+    private func resumePaymentAfterLogin() async {
+        guard !Task.isCancelled, !isClosed, !webView.isLoading,
+              let paymentResumeURL, !paymentResumeAttempted,
+              let session, session.phase == .loggedIn, session.requestEpoch == downloadSessionEpoch,
+              let current = webView.url, let client, client.sessionGeneration == clientEpoch else { return }
         let source = WebVPN.unwrap(current) ?? current
-        guard source.host == "pay.neu.edu.cn", ["/openPortal", "/openPortal/", "/portal.html", "/index.html", "/", "/openApplication"].contains(source.path) else { return }
-        // The normal school CAS landing succeeded. Resume one verified read-only destination once.
-        electricityResumeAttempted = true
+        guard NativeCampusService.payment.allowsNativeDocument(source),
+              ["/openPortal", "/openPortal/", "/portal.html", "/index.html", "/openApplication"].contains(source.path) else { return }
+        // The public root is a login redirect, not proof of a successful CAS landing.
+        // Resume one verified GET destination, never the login/business POST or a dorm-room query.
+        paymentResumeAttempted = true
         webView.load(URLRequest(url: paymentResumeURL))
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { show(error) }

@@ -2,13 +2,16 @@ import Foundation
 
 enum CampusPaymentEntry {
     static let cardRecharge = URL(string: "https://pay.neu.edu.cn/scardrecharge51264Z006.html")!
+    /// Official XWB entry (https://xwb.neu.edu.cn/10063/list.htm).
+    /// The school's signed-in network account, never a dorm room, owns this payment.
+    static let netRecharge = URL(string: "https://pay.neu.edu.cn/netdetails51247N005.html")!
     /// School project 414 / factory E039; never send electricity actions to the general portal.
     static let electricity = URL(string: "https://pay.neu.edu.cn/openPayElecPagesDbdx51414E039.html")!
     static func isElectricity(_ url: URL) -> Bool {
         url.scheme == "https" && url.host == "pay.neu.edu.cn" && url.path == electricity.path
     }
     static func resumableDestination(_ url: URL) -> URL? {
-        [electricity, cardRecharge].first { $0 == url }
+        [electricity, cardRecharge, netRecharge].first { $0 == url }
     }
 }
 
