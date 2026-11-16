@@ -90,7 +90,7 @@ struct BrowserDownloadsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle(embedded ? "下载中心" : "下载管理")
+            .navigationTitle(embedded ? "" : "下载管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !embedded { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }

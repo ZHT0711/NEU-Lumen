@@ -1,6 +1,59 @@
 // Explicitly synthetic screenshot helper. Only copied to the disposable Debug app.
 import SwiftUI
 import WebKit
+import MapKit
+
+@MainActor
+func verifyCampusEntranceDefaults() throws {
+    func expect(_ condition: Bool, _ message: String) throws {
+        if !condition { throw NetworkError(message: message) }
+    }
+    let catalog = try IndoorCatalog.bundled()
+    let locations = try CampusEntranceCatalog.bundled(catalog: catalog)
+    let suite = "NEULumen.Entrances.UIValidation." + UUID().uuidString
+    guard let defaults = UserDefaults(suiteName: suite) else { throw NetworkError(message: "No isolated entrance test defaults") }
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = CampusJourneyStore(defaults: defaults)
+    store.prepare(campus: "south", target: "一号楼 A102")
+    var checked = 0
+    for building in catalog.buildings {
+        store.selectBuilding(building.id, start: true)
+        for gate in building.gates {
+            store.selectGate(gate.id, start: true)
+            let preset = locations.entrance(buildingID: building.id, gateID: gate.id)
+            try expect(store.originDoor?.coordinate.latitude == preset?.latitude &&
+                       store.originDoor?.coordinate.longitude == preset?.longitude && preset != nil,
+                       "Selected gate did not load its own bundled coordinate: " + building.id + gate.id)
+            checked += 1
+        }
+    }
+    try expect(checked == 57, "Incomplete preset entrance coverage")
+    let first = catalog.buildings[0], last = catalog.buildings[1]
+    store.selectBuilding(first.id, start: true)
+    store.selectBuilding(last.id, start: false)
+    store.selectRoom(first.gates[0].id, start: true)
+    store.selectRoom(last.gates[0].id, start: false)
+    try expect(store.canPlan, "First-use journey still requires a manual door pin")
+    let originalKey = store.selectionKey
+    store.swap(); store.swap()
+    try expect(store.selectionKey == originalKey && store.canPlan, "Swap lost entrance coordinates")
+    guard let preset = store.originDoor else { throw NetworkError(message: "Missing initial preset") }
+    let adjusted = JourneyDoor(name: preset.name,
+        coordinate: CLLocationCoordinate2D(latitude: preset.coordinate.latitude + 0.00001, longitude: preset.coordinate.longitude))
+    store.setDoor(adjusted, start: true)
+    let restored = CampusJourneyStore(defaults: defaults)
+    restored.prepare(campus: "main", target: last.name)
+    restored.selectBuilding(first.id, start: true)
+    try expect(restored.originDoor?.key == adjusted.key && restored.originDoor?.approximateAccuracyMeters == nil,
+               "Saved adjustment did not take priority over bundled data")
+    restored.resetDoor(start: true)
+    try expect(restored.originDoor?.key == preset.key && restored.originDoor?.approximateAccuracyMeters != nil,
+               "Reset did not restore the preset entrance")
+    if first.gates.count > 1 {
+        restored.selectGate(first.gates[1].id, start: true)
+        try expect(restored.originDoor?.key != preset.key, "Different doors shared one coordinate")
+    }
+}
 
 extension View {
     func nativeUIFixtureCaption(_ caption: String) -> some View {

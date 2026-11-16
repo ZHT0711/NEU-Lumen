@@ -281,6 +281,23 @@ struct NativeMailNavigationFixture: View {
     }
 }
 
+struct NativeServiceNavigationFixture: View {
+    let caption: String
+    @State private var path: [NativeCampusService]
+    init(service: NativeCampusService, caption: String) {
+        self.caption = caption
+        _path = State(initialValue: [service])
+    }
+    var body: some View {
+        NavigationStack(path: $path) {
+            Color(.systemGroupedBackground).navigationTitle("服务大厅")
+                .navigationDestination(for: NativeCampusService.self) { service in
+                    NativeServiceHost(initial: service).nativeUIFixtureCaption(caption)
+                }
+        }
+    }
+}
+
 struct UIValidationRoot: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var ready = false
@@ -299,7 +316,16 @@ struct UIValidationRoot: View {
                         .background(Color(.systemGroupedBackground)).navigationTitle("原生服务")
                         .nativeUIFixtureCaption("本次构建原生服务卡面 · 东大校园简笔画")
                 }
-                case "profile": ProfileView()
+                case "profile": NavigationStack {
+                    ScrollViewReader { proxy in
+                        ScrollView { CampusExploreContent().padding(.horizontal, 16) }
+                            .task {
+                                try? await Task.sleep(for: .milliseconds(150))
+                                proxy.scrollTo("campus-explore-campuses", anchor: .top)
+                            }
+                    }.navigationTitle("走进东大")
+                        .nativeUIFixtureCaption("本次构建校园线稿 · 参考学校公开校园照片")
+                }
                 case "favorites": FavoritesEditor()
                 case "holidays": ScheduleSettingsSheet()
                 case "calendar": SystemCalendarSheet(sunday: Semester.weekStart(forDay: Date()))
@@ -307,15 +333,15 @@ struct UIValidationRoot: View {
                 case "card": NavigationStack { CardView() }
                 case "native-ecode": NavigationStack { NativeECodeView().nativeUIFixtureCaption("模拟器合成校园码 · 不是有效身份或付款凭证") }
                 case "live-activity", "live-activity-custom": NavigationStack { LiveActivitySettingsView() }
-                case "academic-center": NavigationStack { AcademicCenterView().nativeUIFixtureCaption("模拟器合成学业查询 · 非真实账号数据") }
+                case "academic-center": NativeServiceNavigationFixture(service: .academic, caption: "模拟器合成学业查询 · 非真实账号数据")
                 case "academic-calendar": NavigationStack { AcademicCalendarView().nativeUIFixtureCaption("模拟器合成校历与周次 · 非学校实际安排") }
                 case "academic-plan": NavigationStack { PersonalAcademicProgramDetail(program: PersonalAcademicProgram(id: "SYNTH-PROGRAM", name: "合成个人培养方案 · UI 验证", minimumCredits: "154", facts: [])).nativeUIFixtureCaption("模拟器合成培养方案 · 非真实修读记录") }
                 case "academic-services": NavigationStack { AcademicServicesView().nativeUIFixtureCaption("模拟器合成功能目录 · 非账号实际权限") }
                 case "academic-exams": NavigationStack { AcademicExamsView().nativeUIFixtureCaption("模拟器合成考试 · 非真实考试安排") }
                 case "notifications": NavigationStack { CampusReminderView().nativeUIFixtureCaption("模拟器合成提醒设置 · 非系统通知到达证明") }
                 case "native-payment", "native-electricity", "native-bills": NavigationStack { NativeServiceHost(initial: .payment).nativeUIFixtureCaption("模拟器合成缴费账户 · 非真实账单") }
-                case "native-analysis": NavigationStack { NativeServiceHost(initial: .analysis).nativeUIFixtureCaption("模拟器合成成绩分析 · 非真实修读记录") }
-                case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("模拟器合成地点 · 非导航精度验证") }
+                case "native-analysis": NativeServiceNavigationFixture(service: .analysis, caption: "模拟器合成成绩分析 · 非真实修读记录")
+                case "native-map": NavigationStack { NativeServiceHost(initial: .map).nativeUIFixtureCaption("楼门为公开图上配准 · 其他地点为合成演示") }
                 case "campus-journey": NavigationStack { CampusJourneyView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器跨楼规划表单 · 未连接现场楼门坐标") }
                 case "indoor-navigation", "indoor-route", "indoor-points": NavigationStack { IndoorNavigationView(destination: "浑南一号楼 A102").nativeUIFixtureCaption("模拟器原生导航 · 合成路线与楼层图，非现场验证") }
                 case "native-library": NavigationStack { NativeServiceHost(initial: .library).nativeUIFixtureCaption("原生图书馆入口 · 本次构建运行界面") }
@@ -325,7 +351,7 @@ struct UIValidationRoot: View {
                 case "native-mail": NativeMailNavigationFixture()
                 case "native-news": NavigationStack { NativeServiceHost(initial: .news).nativeUIFixtureCaption("模拟器合成资讯 · 非学校实际新闻") }
                 case "native-agenda": NavigationStack { NativeServiceHost(initial: .agenda).nativeUIFixtureCaption("模拟器合成日程 · 非真实课程安排") }
-                case "native-downloads": NavigationStack { NativeServiceHost(initial: .downloads).nativeUIFixtureCaption("模拟器合成下载 · 非真实账号文件") }
+                case "native-downloads": NativeServiceNavigationFixture(service: .downloads, caption: "模拟器合成下载 · 非真实账号文件")
                 case let token where token.hasPrefix("live-expanded-"):
                     LiveActivityExpandedPreview(token: String(token.dropFirst("live-expanded-".count)))
                 case "downloads":
@@ -1205,6 +1231,28 @@ service_fixture('NEU-Lumen/Features/Services/NativeCampusMapView.swift',
             places = [CampusMapPlace(item: item)]; loading = false; error = nil; return
         }
 ''')
+journey_view = destination / 'NEU-Lumen/Features/Services/CampusJourneyView.swift'
+journey_source = journey_view.read_text(encoding='utf-8')
+journey_hook = '.task { store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination) }'
+if journey_source.count(journey_hook) != 1:
+    raise RuntimeError('Campus journey preset fixture hook changed')
+journey_view.write_text(journey_source.replace(journey_hook, r'''.task {
+            store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination)
+            if ProcessInfo.processInfo.arguments.contains("--screen=campus-journey") {
+                let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("campus-entrances-screenshot.txt")
+                do {
+                    try verifyCampusEntranceDefaults()
+                    guard store.originDoor != nil, store.destinationDoor != nil else {
+                        throw NetworkError(message: "Mounted journey has no preset doors")
+                    }
+                    try "PASS: actual journey store loaded all 57 entrance defaults; first-use planning, gate switching, swap, saved override priority and reset passed; no field or live MapKit routing validation"
+                        .write(to: output, atomically: true, encoding: .utf8)
+                } catch {
+                    try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
+                }
+            }
+        }'''), encoding='utf-8')
 service_fixture('NEU-Lumen/Core/Models/NativeCampusService.swift',
                 'func owns(host: String) -> Bool {', r'''
         if host == "127.0.0.1", self == .telephone { return true }

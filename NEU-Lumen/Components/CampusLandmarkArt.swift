@@ -1,5 +1,51 @@
 import SwiftUI
 
+/// The Hunnan library's two brick wings, recessed glass atrium and entrance.
+/// Drawn from the campus committee's "校区风采" library photograph.
+struct CampusLibraryArt: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        func line(_ points: [(CGFloat, CGFloat)]) {
+            guard let first = points.first else { return }
+            path.move(to: point(first.0, first.1))
+            for value in points.dropFirst() { path.addLine(to: point(value.0, value.1)) }
+        }
+        func box(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) {
+            path.addRect(CGRect(origin: point(x, y), size: CGSize(width: w * rect.width, height: h * rect.height)))
+        }
+        // The lower left wing recedes towards the recessed glazed central hall.
+        line([(0.05, 0.80), (0.05, 0.25), (0.28, 0.20), (0.36, 0.27), (0.36, 0.81)])
+        line([(0.28, 0.20), (0.28, 0.81)])
+        line([(0.36, 0.30), (0.54, 0.30), (0.54, 0.65), (0.36, 0.65)])
+        for x in [0.39, 0.42, 0.45, 0.48, 0.51] as [CGFloat] { line([(x, 0.30), (x, 0.65)]) }
+        for y in [0.39, 0.48, 0.57] as [CGFloat] { line([(0.36, y), (0.54, y)]) }
+        // The taller right wing has deep square openings and a projecting sill.
+        line([(0.54, 0.81), (0.54, 0.18), (0.93, 0.13), (0.93, 0.86)])
+        line([(0.53, 0.18), (0.94, 0.13)])
+        for column in 0..<6 {
+            let x = 0.59 + CGFloat(column) * 0.049
+            for row in 0..<5 { box(x, 0.28 + CGFloat(row) * 0.108, 0.026, 0.065) }
+        }
+        for column in 0..<5 {
+            let x = 0.08 + CGFloat(column) * 0.035
+            for row in 0..<5 { box(x, 0.33 + CGFloat(row) * 0.09, 0.018, 0.05) }
+        }
+        box(0.36, 0.69, 0.18, 0.035)
+        box(0.39, 0.74, 0.13, 0.07)
+        line([(0.43, 0.74), (0.43, 0.81), (0.48, 0.81), (0.48, 0.74)])
+        line([(0.33, 0.84), (0.56, 0.84)])
+        line([(0.31, 0.87), (0.58, 0.87)])
+        path.move(to: point(0.02, 0.89))
+        path.addCurve(to: point(0.98, 0.92), control1: point(0.31, 0.94), control2: point(0.72, 0.85))
+        line([(0.41, 0.88), (0.33, 1)])
+        line([(0.51, 0.88), (0.60, 1)])
+        return path
+    }
+}
+
 /// Original vector silhouettes, using each campus landmark's facade and roof profile.
 struct CampusLandmarkArt: Shape {
     let campus: Campus

@@ -118,6 +118,49 @@ struct CampusJourneyEndpoint: Equatable {
     }
 }
 
+struct CampusEntrance: Decodable, Identifiable, Equatable {
+    let buildingID: String
+    let gateID: String
+    let latitude: Double
+    let longitude: Double
+    let approximateAccuracyMeters: Double
+    var id: String { buildingID + "|" + gateID }
+}
+
+struct CampusEntranceCatalog: Decodable {
+    let version: Int
+    let coordinateSystem: String
+    let fieldVerified: Bool
+    let entrances: [CampusEntrance]
+
+    func entrance(buildingID: String, gateID: String) -> CampusEntrance? {
+        entrances.first { $0.buildingID == buildingID && $0.gateID == gateID }
+    }
+
+    static func load(data: Data, catalog: IndoorCatalog) throws -> Self {
+        let result = try JSONDecoder().decode(Self.self, from: data)
+        let expected = Set(catalog.buildings.flatMap { building in building.gates.map { building.id + "|" + $0.id } })
+        guard result.version == 1, result.coordinateSystem == "WGS84",
+              Set(result.entrances.map(\.id)) == expected, result.entrances.count == expected.count,
+              result.entrances.allSatisfy({ entrance in
+                  guard let building = catalog.buildings.first(where: { $0.id == entrance.buildingID }) else { return false }
+                  let latitudes = building.campus == "south" ? 41.64...41.66 : 41.75...41.78
+                  return entrance.latitude.isFinite && entrance.longitude.isFinite &&
+                      latitudes.contains(entrance.latitude) && (123.40...123.43).contains(entrance.longitude) &&
+                      entrance.approximateAccuracyMeters.isFinite && (1...100).contains(entrance.approximateAccuracyMeters)
+              }) else { throw IndoorNavigationError.catalog }
+        return result
+    }
+
+    static func bundled(catalog: IndoorCatalog) throws -> Self {
+        guard let url = Bundle.main.url(forResource: "CampusEntrances", withExtension: "json") ??
+                Bundle.main.url(forResource: "CampusEntrances", withExtension: "json", subdirectory: "Resources") else {
+            throw IndoorNavigationError.catalog
+        }
+        return try load(data: Data(contentsOf: url), catalog: catalog)
+    }
+}
+
 struct IndoorCatalog: Decodable {
     let version: Int
     let importedAt: String

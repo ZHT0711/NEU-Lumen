@@ -1,0 +1,408 @@
+{
+  "version": 1,
+  "alignedAt": "2026-11-16",
+  "coordinateSystem": "WGS84",
+  "fieldVerified": false,
+  "attribution": "Building footprints © OpenStreetMap contributors (ODbL); source diagrams Pathly; Materials hall alignment references Esri World Imagery. Source images are not redistributed.",
+  "entrances": [
+    {
+      "buildingID": "HeShiLi",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.762188,
+      "longitude": 123.4112492,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "HeShiLi",
+      "gateID": "G02_g1_1_N",
+      "latitude": 41.7624243,
+      "longitude": 123.4112492,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "HeShiLi",
+      "gateID": "G03_g1_1_E",
+      "latitude": 41.7623521,
+      "longitude": 123.4115108,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "YiFu",
+      "gateID": "G01_g1_1_N",
+      "latitude": 41.7618205,
+      "longitude": 123.4106682,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "YiFu",
+      "gateID": "G02_g1_1_S",
+      "latitude": 41.7613711,
+      "longitude": 123.4109065,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "DaCheng",
+      "gateID": "G01_g1_1N1S_N",
+      "latitude": 41.7615524,
+      "longitude": 123.4150092,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "DaCheng",
+      "gateID": "G02_g1_1N1S_S",
+      "latitude": 41.7611511,
+      "longitude": 123.4146943,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "DaCheng",
+      "gateID": "G03_g1_1N1S_S",
+      "latitude": 41.7611497,
+      "longitude": 123.4153241,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JiDian",
+      "gateID": "G01_g1_1_N",
+      "latitude": 41.7630869,
+      "longitude": 123.4112362,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JiDian",
+      "gateID": "G02_g1_1_S",
+      "latitude": 41.7627942,
+      "longitude": 123.4112391,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JiDian",
+      "gateID": "G03_g1_1_W",
+      "latitude": 41.7622733,
+      "longitude": 123.4115525,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JiXie",
+      "gateID": "G01_g1_1_N",
+      "latitude": 41.7616862,
+      "longitude": 123.4093141,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JiXie",
+      "gateID": "G02_g1_1_S",
+      "latitude": 41.7614736,
+      "longitude": 123.4093141,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "HuaXueA",
+      "gateID": "G01_g1_1_E",
+      "latitude": 41.7630673,
+      "longitude": 123.4100354,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "HuaXueB",
+      "gateID": "G01_g1_1_N",
+      "latitude": 41.7631605,
+      "longitude": 123.4091148,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "YeJin",
+      "gateID": "G01_g1_2_N",
+      "latitude": 41.7628885,
+      "longitude": 123.4151035,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "CaiKuang",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.7640899,
+      "longitude": 123.4146641,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXiGongCheng",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.7658427,
+      "longitude": 123.4134162,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "LiXueYuan",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.7643218,
+      "longitude": 123.4120088,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "LiXueYuan",
+      "gateID": "G02_g1_1_S",
+      "latitude": 41.7643548,
+      "longitude": 123.4114954,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "LiXueYuan",
+      "gateID": "G03_g1_1_S",
+      "latitude": 41.7643591,
+      "longitude": 123.4109505,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ZiDongHua",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.7643218,
+      "longitude": 123.4120088,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "CaiLiao",
+      "gateID": "G01_g1_1_W",
+      "latitude": 41.7605711,
+      "longitude": 123.4162263,
+      "approximateAccuracyMeters": 35
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G03_g1_1_N",
+      "latitude": 41.6499475,
+      "longitude": 123.4199877,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G07_g1_1_N",
+      "latitude": 41.6500085,
+      "longitude": 123.4200889,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G06_g1_1_S",
+      "latitude": 41.6492991,
+      "longitude": 123.4200787,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G02_g1_1_S",
+      "latitude": 41.6492991,
+      "longitude": 123.4199033,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G01_g1_1_W",
+      "latitude": 41.6494466,
+      "longitude": 123.4190396,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G04_g1_1_S",
+      "latitude": 41.6497949,
+      "longitude": 123.4200383,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "BuildingOne",
+      "gateID": "G05_g1_1_W",
+      "latitude": 41.6499857,
+      "longitude": 123.41907,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G01_g1_1_W",
+      "latitude": 41.6518771,
+      "longitude": 123.4208902,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G02_g1_1_E",
+      "latitude": 41.6515464,
+      "longitude": 123.4212565,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G03_g1_1_N",
+      "latitude": 41.651494,
+      "longitude": 123.4207296,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G04_g1_1_S",
+      "latitude": 41.6512843,
+      "longitude": 123.4205746,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G06_g1_1_W",
+      "latitude": 41.6518932,
+      "longitude": 123.4197264,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G07_g1_1_E",
+      "latitude": 41.6521957,
+      "longitude": 123.4199377,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G08_g1_1_N",
+      "latitude": 41.6523792,
+      "longitude": 123.4201801,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "ShengKe",
+      "gateID": "G09_g1_1_E",
+      "latitude": 41.6518408,
+      "longitude": 123.4206309,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G01_g1_1_S",
+      "latitude": 41.6529294,
+      "longitude": 123.4200679,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G02_g1_1_N",
+      "latitude": 41.6530855,
+      "longitude": 123.4202884,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G03_g1_1_S",
+      "latitude": 41.653345,
+      "longitude": 123.4204195,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G04_g1_1_S",
+      "latitude": 41.6533126,
+      "longitude": 123.4206247,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G05_g1_1_E",
+      "latitude": 41.6535204,
+      "longitude": 123.4210014,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "XinXi",
+      "gateID": "G06_g1_1_E",
+      "latitude": 41.6538556,
+      "longitude": 123.4210124,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G04_g1_1A1B_S",
+      "latitude": 41.6512593,
+      "longitude": 123.4165275,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G06_g1_1A1B_E",
+      "latitude": 41.6515541,
+      "longitude": 123.4166834,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G03_g1_1A1B_E",
+      "latitude": 41.6517874,
+      "longitude": 123.4166627,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G02_g1_1A1B_S",
+      "latitude": 41.6517447,
+      "longitude": 123.4170876,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G01_g1_1A1B_N",
+      "latitude": 41.6523958,
+      "longitude": 123.4164737,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "WenGuan",
+      "gateID": "G05_g1_1A1B_W",
+      "latitude": 41.6516831,
+      "longitude": 123.4158059,
+      "approximateAccuracyMeters": 30
+    },
+    {
+      "buildingID": "JianZhu",
+      "gateID": "G01_g1_1A_N",
+      "latitude": 41.6531652,
+      "longitude": 123.4167919,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JianZhu",
+      "gateID": "G02_g1_1A_N",
+      "latitude": 41.6531652,
+      "longitude": 123.4170134,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JianZhu",
+      "gateID": "G03_g1_1A_W",
+      "latitude": 41.6533271,
+      "longitude": 123.4172146,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JianZhu",
+      "gateID": "G04_g1_1A_E",
+      "latitude": 41.6533271,
+      "longitude": 123.4173317,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JiQiRen",
+      "gateID": "G01_g1_1B_S",
+      "latitude": 41.653384,
+      "longitude": 123.4164659,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JiQiRen",
+      "gateID": "G02_g1_1B_W",
+      "latitude": 41.6534396,
+      "longitude": 123.4156646,
+      "approximateAccuracyMeters": 45
+    },
+    {
+      "buildingID": "JiQiRen",
+      "gateID": "G03_g1_1B_W",
+      "latitude": 41.6539058,
+      "longitude": 123.4156705,
+      "approximateAccuracyMeters": 45
+    }
+  ]
+}

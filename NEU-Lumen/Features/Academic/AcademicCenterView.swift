@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AcademicCenterView: View {
     var active = true
+    var embedded = false
     @Environment(AppEnvironment.self) private var environment
     private var repo: PortalRepository { environment.repository }
 
@@ -36,7 +37,7 @@ struct AcademicCenterView: View {
                 }
             }
         }
-        .navigationTitle("学业查询").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(embedded ? "" : "学业查询").navigationBarTitleDisplayMode(.inline)
         .task(id: String(active) + environment.session.requestEpoch.uuidString) {
             if active { await repo.loadAcademicQuery(.terms) }
         }

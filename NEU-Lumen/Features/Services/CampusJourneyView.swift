@@ -5,6 +5,7 @@ import Observation
 struct JourneyDoor {
     let name: String
     let coordinate: CLLocationCoordinate2D
+    var approximateAccuracyMeters: Double? = nil
     var key: String { "\(coordinate.latitude)|\(coordinate.longitude)" }
     var mapItem: MKMapItem {
         let item: MKMapItem
@@ -19,6 +20,7 @@ struct JourneyDoor {
 @MainActor @Observable
 final class CampusJourneyStore {
     private(set) var catalog: IndoorCatalog?
+    private(set) var entranceCatalog: CampusEntranceCatalog?
     private(set) var origin = CampusJourneyEndpoint()
     private(set) var destination = CampusJourneyEndpoint()
     private(set) var originDoor: JourneyDoor?
@@ -32,8 +34,9 @@ final class CampusJourneyStore {
     private(set) var error: String?
     private var request = UUID()
     private var directions: MKDirections?
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private let client = PathlyClient()
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     var buildings: [IndoorBuilding] { catalog?.buildings ?? [] }
     func building(_ start: Bool) -> IndoorBuilding? {
         buildings.first { $0.id == (start ? origin.buildingID : destination.buildingID) }
@@ -48,7 +51,10 @@ final class CampusJourneyStore {
     func prepare(campus: String, target: String) {
         guard catalog == nil else { return }
         do {
-            catalog = try IndoorCatalog.bundled()
+            let loaded = try IndoorCatalog.bundled()
+            let entrances = try CampusEntranceCatalog.bundled(catalog: loaded)
+            catalog = loaded
+            entranceCatalog = entrances
             let local = buildings.filter { $0.campus == campus }
             let named = buildings.filter { target.contains($0.name) }.max { $0.name.count < $1.name.count }
             let end = named ?? local.dropFirst().first ?? buildings.last
@@ -65,7 +71,7 @@ final class CampusJourneyStore {
         clear()
         guard let building = buildings.first(where: { $0.id == id }) else { return }
         let point = CampusJourneyEndpoint(buildingID: id, roomID: "", gateID: building.gates.first?.id ?? "")
-        if start { origin = point; originDoor = savedDoor(for: point) } else { destination = point; destinationDoor = savedDoor(for: point) }
+        if start { origin = point; originDoor = door(for: point) } else { destination = point; destinationDoor = door(for: point) }
     }
     func selectRoom(_ id: String, start: Bool) {
         clear()
@@ -73,8 +79,8 @@ final class CampusJourneyStore {
     }
     func selectGate(_ id: String, start: Bool) {
         clear()
-        if start { origin.gateID = id; originDoor = savedDoor(for: origin) }
-        else { destination.gateID = id; destinationDoor = savedDoor(for: destination) }
+        if start { origin.gateID = id; originDoor = door(for: origin) }
+        else { destination.gateID = id; destinationDoor = door(for: destination) }
     }
     func setDoor(_ door: JourneyDoor, start: Bool) {
         guard CLLocationCoordinate2DIsValid(door.coordinate) else { return }
@@ -84,6 +90,25 @@ final class CampusJourneyStore {
         defaults.set(["latitude": door.coordinate.latitude, "longitude": door.coordinate.longitude], forKey: doorKey(point))
     }
     private func doorKey(_ point: CampusJourneyEndpoint) -> String { "lumen.pathly.confirmedDoor." + point.buildingID + "." + point.gateID }
+    private func door(for point: CampusJourneyEndpoint) -> JourneyDoor? {
+        savedDoor(for: point) ?? presetDoor(for: point)
+    }
+    func presetDoor(for point: CampusJourneyEndpoint) -> JourneyDoor? {
+        guard let entrance = entranceCatalog?.entrance(buildingID: point.buildingID, gateID: point.gateID),
+              let building = buildings.first(where: { $0.id == point.buildingID }), let gate = building.room(point.gateID) else { return nil }
+        return JourneyDoor(name: building.name + " · " + gate.title,
+                           coordinate: CLLocationCoordinate2D(latitude: entrance.latitude, longitude: entrance.longitude),
+                           approximateAccuracyMeters: entrance.approximateAccuracyMeters)
+    }
+    func presetDoors(in building: IndoorBuilding) -> [JourneyDoor] {
+        building.gates.compactMap { presetDoor(for: CampusJourneyEndpoint(buildingID: building.id, gateID: $0.id)) }
+    }
+    func resetDoor(start: Bool) {
+        clear()
+        let point = start ? origin : destination
+        defaults.removeObject(forKey: doorKey(point))
+        if start { originDoor = presetDoor(for: point) } else { destinationDoor = presetDoor(for: point) }
+    }
     private func savedDoor(for point: CampusJourneyEndpoint) -> JourneyDoor? {
         guard let saved = defaults.dictionary(forKey: doorKey(point)), let latitude = saved["latitude"] as? Double,
               let longitude = saved["longitude"] as? Double, let building = buildings.first(where: { $0.id == point.buildingID }),
@@ -165,7 +190,7 @@ struct CampusJourneyView: View {
             Section {
                 Label("教室 → 出口 → 室外步行 → 入口 → 教室", systemImage: "figure.walk")
                     .font(.subheadline)
-                Text("选好两栋楼内的地点并确认楼门位置后，自动衔接楼内路线和室外最短步行方案。已确认的楼门位置会保存在本机，下次可直接使用。")
+                Text("选好两栋楼内的地点后，使用预置楼门位置衔接楼内路线和室外最短步行方案。楼门位置可在地图中微调，并保存在本机。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             endpoint(start: true)
@@ -241,7 +266,9 @@ struct CampusJourneyView: View {
                 if selection.door {
                     let endpoint = selection.start ? store.origin : store.destination
                     JourneyDoorPicker(building: building, gate: building.room(endpoint.gateID)?.title ?? "楼门",
-                                      existing: selection.start ? store.originDoor : store.destinationDoor) {
+                                      existing: selection.start ? store.originDoor : store.destinationDoor,
+                                      presets: store.presetDoors(in: building),
+                                      reset: { store.resetDoor(start: selection.start) }) {
                         store.setDoor($0, start: selection.start)
                     }
                 } else {
@@ -267,9 +294,17 @@ struct CampusJourneyView: View {
                 ForEach(building?.gates ?? []) { Text($0.title).tag($0.id) }
             }
             Button { selection = JourneySelection(start: start, door: true) } label: {
-                Label(door == nil ? "在地图上确认楼门位置" : "楼门位置已确认 · 可调整",
-                      systemImage: door == nil ? "mappin.and.ellipse" : "checkmark.circle")
+                Label(door == nil ? "在地图上选择楼门位置" : door?.approximateAccuracyMeters != nil ? "使用预置楼门 · 可微调" : "使用自定楼门 · 可调整",
+                      systemImage: "mappin.and.ellipse")
             }.disabled(building?.room(endpoint.gateID) == nil)
+            if door?.approximateAccuracyMeters != nil {
+                Text("图上配准参考位置，尚未现场实测，可按现场情况微调。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if building?.id == "ZiDongHua" {
+                Text("Pathly 将该入口与理学院 A 门映射到同一位置，出发前请核对楼门图。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if building?.gates.isEmpty == true { Text("该建筑暂无楼门点位，暂不能衔接跨楼路线。").font(.caption) }
         }
     }

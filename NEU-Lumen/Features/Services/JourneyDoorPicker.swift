@@ -5,6 +5,8 @@ struct JourneyDoorPicker: View {
     let building: IndoorBuilding
     let gate: String
     let existing: JourneyDoor?
+    var presets: [JourneyDoor] = []
+    var reset: (() -> Void)?
     let choose: (JourneyDoor) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var camera: MapCameraPosition = .automatic
@@ -23,7 +25,7 @@ struct JourneyDoorPicker: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text(building.campusName + " · " + building.name + " · " + gate).font(.headline)
-                    Text("搜索建筑后放大地图，点按实际楼门的位置。建筑检索结果不能直接代表楼门，确认后再用于室外步行段。")
+                    Text("已按 Pathly 楼门图预置各入口。可放大地图点按微调；预置位置为图上配准，楼门开放情况以现场为准。")
                         .font(.subheadline).foregroundStyle(.secondary)
                     HStack {
                         TextField("搜索建筑或附近地标", text: $query).submitLabel(.search).onSubmit { startSearch() }
@@ -31,7 +33,10 @@ struct JourneyDoorPicker: View {
                     }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
                     MapReader { proxy in
                         Map(position: $camera) {
-                            if let door { Marker("待确认楼门", coordinate: door.coordinate).tint(.blue) }
+                            ForEach(presets, id: \.name) { preset in
+                                if preset.key != door?.key { Marker(preset.name, coordinate: preset.coordinate).tint(.gray) }
+                            }
+                            if let door { Marker(door.name, coordinate: door.coordinate).tint(.blue) }
                         }
                         .mapControls { MapCompass(); MapScaleView() }
                         .onTapGesture { point in
@@ -42,6 +47,9 @@ struct JourneyDoorPicker: View {
                     if let door {
                         Text("选中坐标：\(door.coordinate.latitude.formatted(.number.precision(.fractionLength(5))))，\(door.coordinate.longitude.formatted(.number.precision(.fractionLength(5))))")
                             .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    if let reset {
+                        Button("恢复这个楼门的预置位置", systemImage: "arrow.counterclockwise") { reset(); dismiss() }
                     }
                     if loading { ProgressView("正在搜索 Apple 地图…") }
                     if let error { Text(error).font(.subheadline).foregroundStyle(.orange) }
@@ -63,7 +71,7 @@ struct JourneyDoorPicker: View {
                     }
                 }.padding(16)
             }
-            .navigationTitle("确认楼门位置").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("楼门位置").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -75,8 +83,11 @@ struct JourneyDoorPicker: View {
                 prepared = true
                 door = existing
                 query = "东北大学 " + building.campusName + " " + building.name
-                if let existing { camera = .region(MKCoordinateRegion(center: existing.coordinate, latitudinalMeters: 450, longitudinalMeters: 450)) }
-                await search()
+                if let existing {
+                    let nearby = MKCoordinateRegion(center: existing.coordinate, latitudinalMeters: 450, longitudinalMeters: 450)
+                    camera = .region(nearby)
+                    region = nearby
+                } else { await search() }
             }
             .onDisappear { request = UUID(); task?.cancel(); operation?.cancel(); loading = false }
         }

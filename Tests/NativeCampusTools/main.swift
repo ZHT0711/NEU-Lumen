@@ -58,6 +58,31 @@ enum PortalClient { static let portalBase = "https://personal.neu.edu.cn/portal"
         let root = URL(fileURLWithPath: CommandLine.arguments[1])
         let catalog = try IndoorCatalog.load(data: Data(contentsOf: root.appendingPathComponent("NEU-Lumen/Resources/PathlyCatalog.json")))
         precondition(catalog.buildings.count == 19)
+        let entranceData = try Data(contentsOf: root.appendingPathComponent("NEU-Lumen/Resources/CampusEntrances.json"))
+        let entrances = try CampusEntranceCatalog.load(data: entranceData, catalog: catalog)
+        precondition(entrances.entrances.count == 57 && !entrances.fieldVerified)
+        for item in catalog.buildings {
+            for gate in item.gates {
+                precondition(entrances.entrance(buildingID: item.id, gateID: gate.id) != nil)
+            }
+        }
+        let originalEntrances = try JSONSerialization.jsonObject(with: entranceData) as! [String: Any]
+        for mutation in ["missing", "duplicate", "wrong-gate", "wrong-campus", "wrong-crs"] {
+            var changed = originalEntrances
+            var points = changed["entrances"] as! [[String: Any]]
+            switch mutation {
+            case "missing": points.removeLast()
+            case "duplicate": points.append(points[0])
+            case "wrong-gate": points[0]["gateID"] = "G999_unknown"
+            case "wrong-campus": points[0]["latitude"] = 41.65
+            default: changed["coordinateSystem"] = "BD09"
+            }
+            changed["entrances"] = points
+            do {
+                _ = try CampusEntranceCatalog.load(data: JSONSerialization.data(withJSONObject: changed), catalog: catalog)
+                preconditionFailure("Invalid entrance data accepted: " + mutation)
+            } catch { precondition(error as? IndoorNavigationError == .catalog) }
+        }
         precondition(catalog.buildings.filter { $0.campus == "main" }.count == 13)
         precondition(catalog.buildings.filter { $0.campus == "south" }.count == 6)
         for building in catalog.buildings {

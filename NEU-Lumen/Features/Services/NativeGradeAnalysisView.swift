@@ -3,6 +3,7 @@ import Charts
 
 struct NativeGradeAnalysisView: View {
     var active = true
+    var embedded = false
     @Environment(AppEnvironment.self) private var environment
     @State private var term = ""
     @State private var recordFilter = "未及格"
@@ -76,7 +77,7 @@ struct NativeGradeAnalysisView: View {
         }
         .onChange(of: environment.session.requestEpoch) { _, _ in term = ""; recordFilter = "未及格" }
         .refreshable { await repo.loadGrades(force: true) }
-        .navigationTitle("成绩分析").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(embedded ? "" : "成绩分析").navigationBarTitleDisplayMode(.inline)
         .privacySensitive()
     }
 }

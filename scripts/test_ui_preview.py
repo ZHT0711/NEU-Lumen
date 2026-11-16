@@ -101,13 +101,14 @@ class UIPreviewTests(unittest.TestCase):
         names = re.findall(r'/releases/download/nightly/([^"\s]+\.png)', readme)
         self.assertTrue(names)
         self.assertTrue(set(names).issubset(preview.NIGHTLY_SCREENSHOTS))
-        changed_pages = {'card-light.png', 'native-payment-light.png', 'native-mail-light.png'}
+        changed_pages = {'academic-center-light.png', 'native-analysis-light.png', 'native-downloads-light.png',
+                         'profile-light.png', 'native-map-light.png', 'campus-journey-light.png'}
         self.assertTrue(changed_pages.issubset(preview.NIGHTLY_SCREENSHOTS))
         runner = (root / 'scripts/validate_ui.sh').read_text()
         nightly = runner.split('if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]', 1)[1].split('exit 0', 1)[0]
         captured = re.search(r'for SCREEN in ([^;]+); do', nightly).group(1).split()
         self.assertEqual({name + '-light.png' for name in captured}, set(preview.NIGHTLY_SCREENSHOTS))
-        self.assertIn('for SCREEN in card services native-payment native-mail ', nightly)
+        self.assertIn('for SCREEN in card services profile native-map campus-journey;', nightly)
         ocr = (root / 'scripts/check_system_island.swift').read_text()
         self.assertIn('if screen == "native-mail"', ocr)
         self.assertIn('title.midX < 0.55', ocr)
@@ -312,9 +313,9 @@ wait_ui_marker() { cp "$CONTAINER/Documents/$1" "$OUTPUT/$1"; }
 
     def test_exact_new_snapshots_and_required_checks(self):
         self.assertEqual(len(preview.SCREENSHOTS), 59)
-        self.assertEqual(len(preview.CHECKS), 24)
+        self.assertEqual(len(preview.CHECKS), 28)
         self.assertEqual(len(set(preview.SCREENSHOTS)), 59)
-        self.assertEqual(len(set(preview.CHECKS)), 24)
+        self.assertEqual(len(set(preview.CHECKS)), 28)
         for screen in ['native-ecode', 'native-electricity', 'native-bills', 'services-directory']:
             self.assertIn(screen + '-light.png', preview.SCREENSHOTS)
         self.assertIn('ecode-screenshot.txt', preview.CHECKS)
@@ -421,7 +422,7 @@ wait_ui_marker() { cp "$CONTAINER/Documents/$1" "$OUTPUT/$1"; }
         for path in paths:
             self.assertEqual((root / path).read_bytes(), original[path])
         app = (destination / 'NEU-Lumen/App/NEULumenApp.swift').read_text()
-        for view in ('AcademicCenterView()', 'AcademicCalendarView()', 'PersonalAcademicProgramDetail(program:',
+        for view in ('NativeServiceNavigationFixture(service: .academic', 'AcademicCalendarView()', 'PersonalAcademicProgramDetail(program:',
                      'LiveActivityExpandedPreview(', 'runLiveActivityLayoutChecks()',
                      'runAcademicWebSyncChecks(environment)', 'verifyLearningProcessRestart(save: save'):
             self.assertIn(view, app)

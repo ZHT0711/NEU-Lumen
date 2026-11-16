@@ -31,15 +31,13 @@ struct CampusExploreContent: View {
                     .font(.subheadline).foregroundStyle(.secondary)
                 schoolLink("校徽 · 校歌 · 校训", symbol: "music.note", path: "/xygk/dxwh.htm")
             }.padding(18).background(.background, in: RoundedRectangle(cornerRadius: 20))
-            Text("两处校园，日常漫游").font(.title3.bold())
+            Text("两处校园，日常漫游").font(.title3.bold()).id("campus-explore-campuses")
             ForEach(Campus.allCases) { campus in
                 VStack(alignment: .leading, spacing: 12) {
                     Text(campus.title).font(.headline)
-                    CampusLandmarkArt(campus: campus)
-                        .stroke(AppTheme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
-                        .frame(height: 110).accessibilityHidden(true)
+                    campusIllustration(campus)
                     Text(campus.address).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    Text(campus.landmarks.joined(separator: " · ")).font(.subheadline)
+                    Text(campus == .nanhu ? "主楼 · 中心花园" : "浑南图书馆 · 阅读庭院").font(.subheadline)
                     NavigationLink {
                         NativeCampusMapView(initialCampus: campus).navigationTitle(campus.title)
                     } label: { Label("在地图里探索", systemImage: "map") }
@@ -59,6 +57,19 @@ struct CampusExploreContent: View {
                 .font(.caption).foregroundStyle(.secondary)
             schoolLink("内容来源与校区信息", symbol: "link", path: "/zhxx1.htm")
         }.padding(.top, 16)
+    }
+    @ViewBuilder private func campusIllustration(_ campus: Campus) -> some View {
+        // Each placement has its own NEU subject; the home-page landmark groups
+        // and the two campus gates above are deliberately not reused here.
+        if campus == .nanhu {
+            CampusLineArt()
+                .stroke(AppTheme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .frame(height: 130).accessibilityLabel("南湖校区主楼与中心花园线稿")
+        } else {
+            CampusLibraryArt()
+                .stroke(AppTheme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .frame(height: 130).accessibilityLabel("浑南校区图书馆线稿")
+        }
     }
     private func schoolLink(_ title: String, symbol: String, path: String) -> some View {
         NavigationLink {

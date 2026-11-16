@@ -31,6 +31,8 @@ if kind.hasPrefix("screen:") {
         "native-electricity": ["缴费大厅", "宿舍电费", "查询并记住房间"],
         "native-bills": ["缴费大厅", "校园卡月流水", "刷新所选月份"],
         "native-analysis": ["成绩分析", "成绩概览", "分数分布"],
+        "academic-center": ["学业查询", "成绩与绩点", "教学安排"],
+        "profile": ["走进东大", "南湖校区", "浑南校区"],
         "native-map": ["校园地图", "楼内导航", "教学楼"],
         "campus-journey": ["跨楼路线", "起点建筑", "终点建筑"],
         "indoor-navigation": ["楼内导航", "校区与教学楼", "起点与终点", "A102"],
@@ -52,6 +54,16 @@ if kind.hasPrefix("screen:") {
     ]
     guard let terms = expected[screen], terms.allSatisfy({ normalized.contains($0) }) else {
         fatalError("Screenshot content missing for " + screen + "; OCR: " + text)
+    }
+    let serviceTitles = ["academic-center": "学业查询", "native-analysis": "成绩分析", "native-downloads": "下载中心"]
+    if let expectedTitle = serviceTitles[screen] {
+        let titles = (request.results ?? []).filter {
+            $0.boundingBox.midY > 0.86 && $0.topCandidates(1).first?.string.replacingOccurrences(of: " ", with: "").contains(expectedTitle) == true
+        }
+        guard titles.count == 1, let title = titles.first, title.boundingBox.midX < 0.55 else {
+            fatalError("Service header title is duplicated, missing or not in the leading switcher: " + screen + "; OCR: " + text)
+        }
+        print("PASS: exactly one rendered leading service title " + expectedTitle)
     }
     if screen == "native-mail" {
         // Measured Vision text bounds from THIS simulator image, not source arithmetic.

@@ -11,6 +11,17 @@ struct CampusMapPlace: Identifiable {
     var id: String { "\(item.name ?? "")|\(coordinate.latitude)|\(coordinate.longitude)" }
 }
 
+private struct CampusEntranceMapPlace: Identifiable {
+    let building: IndoorBuilding
+    let entrance: CampusEntrance
+    var id: String { entrance.id }
+    var title: String { building.name + " · " + (building.room(entrance.gateID)?.title ?? "楼门") }
+    var door: JourneyDoor {
+        JourneyDoor(name: title, coordinate: CLLocationCoordinate2D(latitude: entrance.latitude, longitude: entrance.longitude),
+                    approximateAccuracyMeters: entrance.approximateAccuracyMeters)
+    }
+}
+
 @MainActor @Observable
 final class CampusMapStore {
     private(set) var places: [CampusMapPlace] = []
@@ -85,7 +96,16 @@ struct NativeCampusMapView: View {
     @State private var selected: String?
     @State private var owner: UUID?
     @State private var searchTask: Task<Void, Never>?
+    @State private var entrances: [CampusEntranceMapPlace] = []
+    @State private var entranceError: String?
     @FocusState private var searchFocused: Bool
+    private var campusEntrances: [CampusEntranceMapPlace] {
+        entrances.filter { $0.building.campus == (campus == .hunnan ? "south" : "main") }
+    }
+    private var visibleEntrances: [CampusEntranceMapPlace] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return campusEntrances.filter { term.isEmpty || term == "教学楼" || $0.title.localizedStandardContains(term) }
+    }
 
     var body: some View {
         ScrollView {
@@ -130,16 +150,41 @@ struct NativeCampusMapView: View {
                     }
                 }
                 Map(position: $camera, selection: $selected) {
+                    ForEach(visibleEntrances) { place in
+                        Marker(place.title, coordinate: place.door.coordinate).tint(.blue).tag(place.id)
+                    }
                     ForEach(store.places) { place in
-                        Marker(place.item.name ?? "校园地点", coordinate: place.coordinate).tag(place.id)
+                        Marker(place.item.name ?? "校园地点", coordinate: place.coordinate).tint(.orange).tag(place.id)
                     }
                 }
                 .mapControls { MapCompass(); MapScaleView() }
                 .frame(height: 280).clipShape(RoundedRectangle(cornerRadius: 18))
+                if let place = visibleEntrances.first(where: { $0.id == selected }) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(place.title, systemImage: "door.left.hand.open").font(.headline)
+                        Text("预置入口 · 可在跨楼路线中微调").font(.caption).foregroundStyle(.secondary)
+                        Button("步行到这个楼门", systemImage: "figure.walk") {
+                            place.door.mapItem.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                }
+                DisclosureGroup("已标注 \(visibleEntrances.count) 个楼门") {
+                    ForEach(visibleEntrances) { place in
+                        Button {
+                            selected = place.id
+                            camera = .region(MKCoordinateRegion(center: place.door.coordinate, latitudinalMeters: 400, longitudinalMeters: 400))
+                        } label: { Label(place.title, systemImage: "mappin.and.ellipse").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading) }
+                    }
+                }
+                Text("蓝色为按 Pathly 楼门图与公开地图配准的预置入口，尚未现场实测。建筑轮廓 © OpenStreetMap 贡献者；材料馆参考 Esri World Imagery。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Link("地图数据来源与许可", destination: URL(string: "https://www.openstreetmap.org/copyright")!).font(.caption)
+                if let entranceError { Text(entranceError).font(.caption).foregroundStyle(.orange) }
                 if store.loading { ProgressView("正在搜索校园地点…") }
                 if let error = store.error {
                     ErrorStateView(message: error) { search() }
-                } else if !store.loading && store.places.isEmpty {
+                } else if !store.loading && store.places.isEmpty && visibleEntrances.isEmpty {
                     ContentUnavailableView("暂无匹配地点", systemImage: "mappin.slash", description: Text("可更换关键词或校区重试。"))
                 }
                 ForEach(store.places) { place in
@@ -173,6 +218,16 @@ struct NativeCampusMapView: View {
                 campus = initialCampus ?? environment.repository.campus
                 query = ""
                 owner = environment.session.requestEpoch
+            }
+            if entrances.isEmpty {
+                do {
+                    let catalog = try IndoorCatalog.bundled()
+                    let locations = try CampusEntranceCatalog.bundled(catalog: catalog)
+                    entrances = locations.entrances.compactMap { entrance in
+                        catalog.buildings.first(where: { $0.id == entrance.buildingID }).map { CampusEntranceMapPlace(building: $0, entrance: entrance) }
+                    }
+                    entranceError = nil
+                } catch { entranceError = "预置楼门暂未能读取，可重新打开页面或更新应用。" }
             }
             await store.search(campus: campus, keyword: query)
         }

@@ -87,20 +87,26 @@ launch_screenshot_page() {
 }
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
+check_service_headers() {
+  for HEADER_SCREEN in academic-center native-analysis native-downloads; do
+    "$PREVIEW/system-island-check" "$OUTPUT/$HEADER_SCREEN-light.png" "screen:$HEADER_SCREEN" 2>&1 | tee "$OUTPUT/service-title-$HEADER_SCREEN.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
+  done
+}
 if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
   # Nightly captures the current app and changed native services, without the
   # full browser/persistence/ActivityKit matrix used by formal releases.
-  for SCREEN in home card schedule services native-payment native-mail indoor-navigation indoor-route indoor-points native-vpn; do
+  for SCREEN in home card schedule services academic-center native-analysis native-downloads profile native-map campus-journey; do
     launch_screenshot_page "$SCREEN"
     case "$SCREEN" in
-      indoor-navigation|indoor-route|indoor-points) wait_ui_marker "$SCREEN-screenshot.txt" 60 ;;
-      native-vpn) wait_ui_marker vpn-directory-screenshot.txt 60 ;;
+      academic-center) wait_ui_marker academic-center-screenshot.txt 60 ;;
+      campus-journey) wait_ui_marker campus-entrances-screenshot.txt 60 ;;
     esac
     sleep 1
     xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
   done
   swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-  for SCREEN in card services native-payment native-mail indoor-navigation indoor-route indoor-points native-vpn; do
+  check_service_headers
+  for SCREEN in card services profile native-map campus-journey; do
     "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   done
   python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"
@@ -255,6 +261,7 @@ sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
 swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
+check_service_headers
 for SCREEN in services services-directory services-art grades mooc chaoxing native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
   "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
 done

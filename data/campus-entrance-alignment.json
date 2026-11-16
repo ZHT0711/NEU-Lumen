@@ -1,0 +1,704 @@
+{
+  "version": 1,
+  "alignedAt": "2026-11-16",
+  "coordinateSystem": "WGS84",
+  "method": "Approximate door-opening alignment, not a field survey or a guarantee of access.",
+  "attribution": "Building footprints © OpenStreetMap contributors (ODbL); source diagrams Pathly; Materials hall alignment references Esri World Imagery. Source images are not redistributed.",
+  "buildings": [
+    {
+      "buildingID": "HeShiLi",
+      "imageURL": "https://pathly.top/images/HeShiLi-gate-map.jpg",
+      "imageSHA256": "9346f6b17709632c5b97874f0ee838d81c5e2692669c9667178b7feed3323ae5",
+      "imageBounds": [
+        447,
+        400,
+        1227,
+        982
+      ],
+      "geographicBounds": [
+        123.4103862,
+        41.7621608,
+        123.4115137,
+        41.7627693
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514992489"
+      ],
+      "gatePixels": {
+        "A": [
+          1044,
+          956
+        ],
+        "B": [
+          1044,
+          730
+        ],
+        "C": [
+          1225,
+          799
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "YiFu",
+      "imageURL": "https://pathly.top/images/YiFu-gate-map.jpg",
+      "imageSHA256": "d80fd9344040c9bd65bfbb375a59dfa0b2bb152ec61cd44110617e81bc716419",
+      "imageBounds": [
+        512,
+        442,
+        1252,
+        919
+      ],
+      "geographicBounds": [
+        123.410331,
+        41.7613711,
+        123.4112127,
+        41.7618205
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/108409762"
+      ],
+      "gatePixels": {
+        "A": [
+          795,
+          442
+        ],
+        "B": [
+          995,
+          919
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "DaCheng",
+      "imageURL": "https://pathly.top/images/DaCheng-gate-map.jpg",
+      "imageSHA256": "64e24ffbf9e456cd9787dd95de9db418c7a80e5e14bcb3ba171b7efe6bb3162f",
+      "imageBounds": [
+        622,
+        433,
+        1533,
+        731
+      ],
+      "geographicBounds": [
+        123.4142254,
+        41.7611497,
+        123.4158017,
+        41.7615783
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/108409989"
+      ],
+      "gatePixels": {
+        "A": [
+          1075,
+          451
+        ],
+        "B": [
+          893,
+          730
+        ],
+        "C": [
+          1257,
+          731
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "JiDian",
+      "imageURL": "https://pathly.top/images/JiDian-gate-map.jpg",
+      "imageSHA256": "8f7db6ce8ed0848aa75511b58b9721ec251e2650e934995ee8e01b95503e4065",
+      "imageBounds": [
+        306,
+        297,
+        1357,
+        1104
+      ],
+      "geographicBounds": [
+        123.410485,
+        41.7621784,
+        123.412024,
+        41.7630903
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514992485"
+      ],
+      "gatePixels": {
+        "A": [
+          819,
+          300
+        ],
+        "B": [
+          821,
+          559
+        ],
+        "C": [
+          1035,
+          1020
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "JiXie",
+      "imageURL": "https://pathly.top/images/JiXie-gate-map.jpg",
+      "imageSHA256": "4f14f88419c75fef3044d294e4d9f3bd3361570364d140a5d11fa93452f5b13d",
+      "imageBounds": [
+        545,
+        424,
+        1454,
+        784
+      ],
+      "geographicBounds": [
+        123.4087875,
+        41.7614602,
+        123.4098535,
+        41.761861
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514992481"
+      ],
+      "gatePixels": {
+        "A": [
+          994,
+          581
+        ],
+        "B": [
+          994,
+          772
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "HuaXueA",
+      "imageURL": "https://pathly.top/images/HuaXueA-gate-map.jpg",
+      "imageSHA256": "810e68e87a814c4cdec6ad392e5db2be7189b403d3f5019cd23a3cd55fbb9a86",
+      "imageBounds": [
+        462,
+        371,
+        1360,
+        925
+      ],
+      "geographicBounds": [
+        123.4087722,
+        41.7628452,
+        123.4100354,
+        41.7631615
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514992483"
+      ],
+      "gatePixels": {
+        "A": [
+          1360,
+          536
+        ]
+      },
+      "approximateAccuracyMeters": 45,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。化学 A/B 使用同一 OSM 北侧轮廓，分别按东西入口配准。"
+    },
+    {
+      "buildingID": "HuaXueB",
+      "imageURL": "https://pathly.top/images/HuaXueB-gate-map.jpg",
+      "imageSHA256": "a85ca5ea1bd42832a6363b5fc6eacdfa0186b5b2cdb4234a39f35c889c754ca3",
+      "imageBounds": [
+        485,
+        451,
+        1285,
+        1058
+      ],
+      "geographicBounds": [
+        123.4087722,
+        41.7628452,
+        123.4100354,
+        41.7631615
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514992483"
+      ],
+      "gatePixels": {
+        "A": [
+          702,
+          453
+        ]
+      },
+      "approximateAccuracyMeters": 45,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。化学 A/B 使用同一 OSM 北侧轮廓，分别按东西入口配准。"
+    },
+    {
+      "buildingID": "YeJin",
+      "imageURL": "https://pathly.top/images/YeJin-gate-map.jpg",
+      "imageSHA256": "61ed6da1f214a3ad3def1591ebf851f2664e10688508e10c8f0cb00d87ebc41a",
+      "imageBounds": [
+        431,
+        357,
+        1243,
+        959
+      ],
+      "geographicBounds": [
+        123.4143691,
+        41.7620248,
+        123.41582,
+        41.7629151
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514987133"
+      ],
+      "gatePixels": {
+        "A": [
+          842,
+          375
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "CaiKuang",
+      "imageURL": "https://pathly.top/images/CaiKuang-gate-map.jpg",
+      "imageSHA256": "e78714adf62b05205862137800f8ddd281079ba51a6018b4b10933f7e5c51277",
+      "imageBounds": [
+        421,
+        395,
+        1255,
+        1008
+      ],
+      "geographicBounds": [
+        123.4145224,
+        41.7640279,
+        123.4157161,
+        41.7648359
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514993670"
+      ],
+      "gatePixels": {
+        "A": [
+          520,
+          961
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "XinXiGongCheng",
+      "imageURL": "https://pathly.top/images/XinXiGongCheng-gate-map.jpg",
+      "imageSHA256": "be9b53c20de6b4e1657a948cc538f964d36de59a6b7e1eedfd6905439f9d4a11",
+      "imageBounds": [
+        455,
+        382,
+        1464,
+        880
+      ],
+      "geographicBounds": [
+        123.4126211,
+        41.7653783,
+        123.4141972,
+        41.7660487
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/87664797"
+      ],
+      "gatePixels": {
+        "A": [
+          964,
+          535
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "LiXueYuan",
+      "imageURL": "https://pathly.top/images/LiXueYuan-gate-map.jpg",
+      "imageSHA256": "c61f065014ab503c494c92bba178c9c42453944edfd4b543706098406234e7b1",
+      "imageBounds": [
+        460,
+        382,
+        1356,
+        915
+      ],
+      "geographicBounds": [
+        123.4108454,
+        41.7643218,
+        123.4121904,
+        41.76489
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514993668"
+      ],
+      "gatePixels": {
+        "A": [
+          1235,
+          915
+        ],
+        "B": [
+          893,
+          884
+        ],
+        "C": [
+          530,
+          880
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "ZiDongHua",
+      "imageURL": "https://pathly.top/images/ZiDongHua-gate-map.jpg",
+      "imageSHA256": "22d18ceaecf7c8fd09169d34884539251f1ca6c073511cec9ee61de43ae95360",
+      "imageBounds": [
+        460,
+        382,
+        1356,
+        915
+      ],
+      "geographicBounds": [
+        123.4108454,
+        41.7643218,
+        123.4121904,
+        41.76489
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/514993668"
+      ],
+      "gatePixels": {
+        "A": [
+          1235,
+          915
+        ]
+      },
+      "approximateAccuracyMeters": 45,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。Pathly 楼门图及 G01→113 路线起点与理学院 A 门重合，保留原站共用入口映射，需现场核对。"
+    },
+    {
+      "buildingID": "BuildingOne",
+      "imageURL": "https://pathly.top/images/BuildingOne-gate-map.jpg",
+      "imageSHA256": "6bdd75351a914de4326c3c727b719de836b0939714ff11bc0e0c92ca8cd129bf",
+      "imageBounds": [
+        276,
+        116,
+        656,
+        424
+      ],
+      "geographicBounds": [
+        123.4190329,
+        41.649294,
+        123.4203149,
+        41.6500772
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1110541739"
+      ],
+      "gatePixels": {
+        "A": [
+          559,
+          167
+        ],
+        "B": [
+          589,
+          143
+        ],
+        "C": [
+          586,
+          422
+        ],
+        "D": [
+          534,
+          422
+        ],
+        "E": [
+          278,
+          364
+        ],
+        "F": [
+          574,
+          227
+        ],
+        "G": [
+          287,
+          152
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "ShengKe",
+      "imageURL": "https://pathly.top/images/ShengKe-gate-map.jpg",
+      "imageSHA256": "5159eec1859f3af91e7ed1490679f7ca4978405cb2e29bda09bba740959f4c00",
+      "imageBounds": [
+        504,
+        313,
+        1600,
+        1404
+      ],
+      "geographicBounds": [
+        123.4197123,
+        41.6512823,
+        123.4212565,
+        41.6523822
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1110541733"
+      ],
+      "gatePixels": {
+        "A": [
+          1340,
+          814
+        ],
+        "B": [
+          1600,
+          1142
+        ],
+        "C": [
+          1226,
+          1194
+        ],
+        "D": [
+          1116,
+          1402
+        ],
+        "E": [
+          514,
+          798
+        ],
+        "F": [
+          664,
+          498
+        ],
+        "G": [
+          836,
+          316
+        ],
+        "H": [
+          1156,
+          850
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "XinXi",
+      "imageURL": "https://pathly.top/images/XinXi-gate-map.jpg",
+      "imageSHA256": "617cfe220fab4b66c12515df9b215cca0662a94156eba784482689e0973231ba",
+      "imageBounds": [
+        440,
+        29,
+        1678,
+        1177
+      ],
+      "geographicBounds": [
+        123.4196693,
+        41.6529276,
+        123.4210211,
+        41.6539876
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1110541732"
+      ],
+      "gatePixels": {
+        "A": [
+          805,
+          1175
+        ],
+        "B": [
+          1007,
+          1006
+        ],
+        "C": [
+          1127,
+          725
+        ],
+        "D": [
+          1315,
+          760
+        ],
+        "E": [
+          1660,
+          535
+        ],
+        "F": [
+          1670,
+          172
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "WenGuan",
+      "imageURL": "https://pathly.top/images/WenGuan-gate-map.jpg",
+      "imageSHA256": "222d862c7a661022ab6c6bce41db368b14fba5c565b1ffae710c8f3981cbd126",
+      "imageBounds": [
+        458,
+        438,
+        1590,
+        1590
+      ],
+      "geographicBounds": [
+        123.4158004,
+        41.6512563,
+        123.4173622,
+        41.6523998
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1115242833",
+        "https://www.openstreetmap.org/way/1111705523"
+      ],
+      "gatePixels": {
+        "A": [
+          985,
+          1587
+        ],
+        "B": [
+          1098,
+          1290
+        ],
+        "C": [
+          1083,
+          1055
+        ],
+        "D": [
+          1391,
+          1098
+        ],
+        "E": [
+          946,
+          442
+        ],
+        "F": [
+          462,
+          1160
+        ]
+      },
+      "approximateAccuracyMeters": 30,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。"
+    },
+    {
+      "buildingID": "JianZhu",
+      "imageURL": "https://pathly.top/images/JianZhu-gate-map.jpg",
+      "imageSHA256": "9f2e5da129782caba0c938df1207238b11e09988d49027d2d205d0ecc0f0c652",
+      "imageBounds": [
+        350,
+        350,
+        1198,
+        1167
+      ],
+      "geographicBounds": [
+        123.41664,
+        41.653029,
+        123.4173597,
+        41.65358
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1110541727"
+      ],
+      "gatePixels": {
+        "A": [
+          529,
+          965
+        ],
+        "B": [
+          790,
+          965
+        ],
+        "C": [
+          1027,
+          725
+        ],
+        "D": [
+          1165,
+          725
+        ]
+      },
+      "approximateAccuracyMeters": 45,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。建筑与机器人共用 OSM 外轮廓，按相邻体量拆分。"
+    },
+    {
+      "buildingID": "JiQiRen",
+      "imageURL": "https://pathly.top/images/JiQiRen-gate-map.jpg",
+      "imageSHA256": "dfbc690d811498260cd8f522b94d000fb316b35e373e9522a5c0fc5217a318c7",
+      "imageBounds": [
+        355,
+        322,
+        1217,
+        1231
+      ],
+      "geographicBounds": [
+        123.4156658,
+        41.65333,
+        123.41668,
+        41.6540735
+      ],
+      "footprintSources": [
+        "https://www.openstreetmap.org/way/1110541727"
+      ],
+      "gatePixels": {
+        "A": [
+          1035,
+          1165
+        ],
+        "B": [
+          354,
+          1097
+        ],
+        "C": [
+          359,
+          527
+        ]
+      },
+      "approximateAccuracyMeters": 45,
+      "note": "由 Pathly 楼门示意图与公开建筑轮廓配准；未现场实测。建筑与机器人共用 OSM 外轮廓，按相邻体量拆分。"
+    },
+    {
+      "buildingID": "CaiLiao",
+      "imageURL": "https://pathly.top/images/CaiLiao-gate-map.jpg",
+      "imageSHA256": "64f2c008b62e23ed44f26481009911b08c0174467b5f67d80537fe31b8e295ea",
+      "footprintSources": [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"
+      ],
+      "directGates": {
+        "A": {
+          "latitude": 41.760571052631576,
+          "longitude": 123.41622631578949
+        }
+      },
+      "imageryReference": {
+        "bbox": [
+          123.408,
+          41.7605,
+          123.418,
+          41.765
+        ],
+        "extent": {
+          "xmin": 123.40800000000002,
+          "ymin": 41.758802631578945,
+          "xmax": 123.41800000000002,
+          "ymax": 41.766697368421056
+        },
+        "size": [
+          1900,
+          1500
+        ],
+        "pixel": [
+          1563,
+          1164
+        ]
+      },
+      "approximateAccuracyMeters": 35,
+      "note": "材料馆西侧 A 门按 Pathly 楼门图与公开影像配准；未现场实测。"
+    }
+  ]
+}

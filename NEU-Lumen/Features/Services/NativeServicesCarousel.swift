@@ -68,7 +68,7 @@ struct NativeServiceHost: View {
     var body: some View {
         VStack(spacing: 0) {
             TabView(selection: $selected) {
-                AcademicCenterView(active: selected == .academic).tag(NativeCampusService.academic)
+                AcademicCenterView(active: selected == .academic, embedded: true).tag(NativeCampusService.academic)
                 NativePaymentView(active: selected == .payment).tag(NativeCampusService.payment)
                 NativeVPNView(active: selected == .vpn).tag(NativeCampusService.vpn)
                 NativeAffairsView(active: selected == .affairs).tag(NativeCampusService.affairs)
@@ -76,7 +76,7 @@ struct NativeServiceHost: View {
                 NativeNewsView(active: selected == .news).tag(NativeCampusService.news)
                 NativeAgendaView(active: selected == .agenda).tag(NativeCampusService.agenda)
                 BrowserDownloadsView(store: .shared, embedded: true).tag(NativeCampusService.downloads)
-                NativeGradeAnalysisView(active: selected == .analysis).tag(NativeCampusService.analysis)
+                NativeGradeAnalysisView(active: selected == .analysis, embedded: true).tag(NativeCampusService.analysis)
                 NativeCampusMapView(active: selected == .map).tag(NativeCampusService.map)
                 NativeLibraryView().tag(NativeCampusService.library)
                 NativeTelephoneView(active: selected == .telephone).tag(NativeCampusService.telephone)
@@ -97,8 +97,10 @@ struct NativeServiceHost: View {
         .navigationTitle("").navigationBarTitleDisplayMode(.inline)
         .toolbarRole(.editor)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                NativeServiceScrubber(selected: $selected, preview: $preview)
+            if #available(iOS 26.0, *) {
+                serviceTitle.sharedBackgroundVisibility(.hidden)
+            } else {
+                serviceTitle
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("切换服务", systemImage: "square.grid.2x2") {
@@ -128,6 +130,12 @@ struct NativeServiceHost: View {
             } }
         }
         .sheet(item: $originalWeb) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
+    }
+
+    private var serviceTitle: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            NativeServiceScrubber(selected: $selected, preview: $preview)
+        }
     }
 }
 

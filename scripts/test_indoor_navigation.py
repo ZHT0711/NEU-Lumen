@@ -5,11 +5,24 @@ from pathlib import Path
 import unittest
 
 from sync_pathly_data import literal
+from build_campus_entrances import build
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class PathlyDataTests(unittest.TestCase):
+    def test_bundled_entrances_match_reviewed_alignments(self):
+        data = json.loads((ROOT / 'NEU-Lumen/Resources/CampusEntrances.json').read_text(encoding='utf-8'))
+        self.assertEqual(data, build())
+        self.assertEqual(len(data['entrances']), 57)
+        self.assertFalse(data['fieldVerified'])
+        # Distinct gates in each building must never collapse to the building centre.
+        by_building = {}
+        for point in data['entrances']:
+            by_building.setdefault(point['buildingID'], []).append((point['latitude'], point['longitude']))
+        for points in by_building.values():
+            self.assertEqual(len(points), len(set(points)))
+
     def test_data_literals_do_not_execute_expressions(self):
         value, end = literal('{x:.5,1e3:{x:2,y:3},rooms:["A102",{name:"A",value:"G01"}]}', 0)
         self.assertEqual(value['1000'], {'x': 2, 'y': 3})

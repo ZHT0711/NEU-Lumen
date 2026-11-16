@@ -139,9 +139,12 @@ class NativeMailToolbarTests(unittest.TestCase):
         self.assertNotIn("mail.batch-selection", self.reader)
         self.assertIn(".privacySensitive()", self.mail)
 
-    def test_layout_does_not_depend_on_ios26_glass_apis(self):
+    def test_only_title_glass_is_removed_with_an_ios17_fallback(self):
+        self.assertIn("if #available(iOS 26.0, *)", self.host)
+        self.assertIn("serviceTitle.sharedBackgroundVisibility(.hidden)", self.host)
+        self.assertIn("} else {\n                serviceTitle", self.host)
         for source in (self.host, self.scrubber, self.batch):
-            for api in (".glassEffect", ".toolbarBackgroundVisibility", "#available(iOS 26"):
+            for api in (".glassEffect", ".toolbarBackgroundVisibility"):
                 self.assertNotIn(api, source)
 
 

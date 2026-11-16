@@ -43,15 +43,16 @@ LAYOUT_COVERAGE = {
 CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt', 'browser-checks.txt', 'download-checks.txt', 'download-restore.txt', 'download-screenshot.txt', 'ecode-screenshot.txt', 'telephone-screenshot.txt',
           'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
-          LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
+          LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt', 'campus-entrances-screenshot.txt',
+          'service-title-academic-center.txt', 'service-title-native-analysis.txt', 'service-title-native-downloads.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
 MANIFEST = 'ui-preview.json'
 LEGACY_SCREENSHOTS = ('home-nanhu-light.png',)
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
 NIGHTLY_SCREENSHOTS = ('home-light.png', 'card-light.png', 'schedule-light.png', 'services-light.png',
-                       'native-payment-light.png', 'native-mail-light.png', 'indoor-navigation-light.png',
-                       'indoor-route-light.png', 'indoor-points-light.png', 'native-vpn-light.png')
-NIGHTLY_CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt',
-                  'vpn-directory-screenshot.txt', 'indoor-navigation-screenshot.txt')
+                       'academic-center-light.png', 'native-analysis-light.png', 'native-downloads-light.png',
+                       'profile-light.png', 'native-map-light.png', 'campus-journey-light.png')
+NIGHTLY_CHECKS = ('campus-entrances-screenshot.txt', 'service-title-academic-center.txt',
+                  'service-title-native-analysis.txt', 'service-title-native-downloads.txt')
 
 
 def capture_profile(environment):
@@ -194,7 +195,7 @@ def package(directory, environment=None):
             'academic': 'actual AcademicCenterView / AcademicCalendarView / AcademicPlanView; explicit DEBUG seedAcademicPreview; synthetic only',
             'services': 'actual native services including analysis / map / library / telephone and twelve vector card illustrations; disposable Debug synthetic fixtures only; no real account',
             'indoor_navigation': 'actual SwiftUI selectors, bundled public Pathly catalog, native response decoder and UIKit route drawing with synthetic endpoints and floor image; no on-site accuracy validation',
-            'campus_journey': 'actual cross-building endpoint and entrance/exit selection form; door coordinates require user confirmation; this screenshot does not validate live MapKit directions or on-site access',
+            'campus_journey': 'actual cross-building form and 57 bundled approximate Pathly entrance alignments; automatic defaults, per-gate switching, override persistence and reset exercised in an isolated defaults suite; no live MapKit directions or on-site access validation',
             'intelligence': 'actual summary views with an explicitly synthetic injected generator on Home only; does not exercise Apple Intelligence inference or a real account; unavailable model UI is hidden on other fixture pages',
         },
         'screenshots': images,
