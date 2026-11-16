@@ -81,6 +81,7 @@ launch_screenshot_page() {
   # Stop the previous writer before removing its marker.
   xcrun simctl terminate "$SIM_ID" edu.neu.lumen >/dev/null 2>&1 || true
   rm -f "$CONTAINER/Documents/screen-ready.txt"
+  if [[ "$SCREEN" == services-art ]]; then rm -f "$CONTAINER/Documents/services-panel-state.txt"; fi
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--screen=$SCREEN" "$@"
   wait_ui_marker screen-ready.txt 60
   grep -Fxq "PASS: screenshot page mounted $SCREEN" "$OUTPUT/screen-ready.txt"
@@ -88,25 +89,44 @@ launch_screenshot_page() {
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
 check_service_headers() {
-  for HEADER_SCREEN in academic-center native-analysis native-downloads; do
+  if [[ "$#" == 0 ]]; then set -- academic-center native-analysis native-downloads; fi
+  for HEADER_SCREEN in "$@"; do
     "$PREVIEW/system-island-check" "$OUTPUT/$HEADER_SCREEN-light.png" "screen:$HEADER_SCREEN" 2>&1 | tee "$OUTPUT/service-title-$HEADER_SCREEN.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
+  done
+}
+check_service_panels() {
+  for MODE in light dark; do
+    cat "$OUTPUT/services-panel-$MODE-state.txt" > "$OUTPUT/services-panel-$MODE-checks.txt"
+    "$PREVIEW/system-island-check" "$OUTPUT/services-art-$MODE.png" screen:services-art 2>&1 | tee -a "$OUTPUT/services-panel-$MODE-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   done
 }
 if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
   # Nightly captures the current app and changed native services, without the
   # full browser/persistence/ActivityKit matrix used by formal releases.
-  for SCREEN in home card schedule services academic-center native-analysis native-downloads profile native-map campus-journey; do
+  for SCREEN in home card schedule services academic-center native-analysis services-art native-map campus-journey; do
     launch_screenshot_page "$SCREEN"
     case "$SCREEN" in
       academic-center) wait_ui_marker academic-center-screenshot.txt 60 ;;
       campus-journey) wait_ui_marker campus-entrances-screenshot.txt 60 ;;
+      native-map) wait_ui_marker map-datum-screenshot.txt 60 ;;
+      services-art)
+        wait_ui_marker services-panel-state.txt 60
+        cp "$OUTPUT/services-panel-state.txt" "$OUTPUT/services-panel-light-state.txt" ;;
     esac
     sleep 1
     xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
   done
+  xcrun simctl ui "$SIM_ID" appearance dark
+  launch_screenshot_page services-art
+  wait_ui_marker services-panel-state.txt 60
+  cp "$OUTPUT/services-panel-state.txt" "$OUTPUT/services-panel-dark-state.txt"
+  sleep 1
+  xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/services-art-dark.png"
+  xcrun simctl ui "$SIM_ID" appearance light
   swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-  check_service_headers
-  for SCREEN in card services profile native-map campus-journey; do
+  check_service_headers academic-center native-analysis
+  check_service_panels
+  for SCREEN in card services native-map campus-journey; do
     "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   done
   python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"
@@ -120,6 +140,11 @@ for SCREEN in native-ecode home home-nanhu campus-journey schedule services serv
   if [[ "$SCREEN" == "indoor-route" ]]; then wait_ui_marker indoor-route-screenshot.txt 60; fi
   if [[ "$SCREEN" == "indoor-points" ]]; then wait_ui_marker indoor-points-screenshot.txt 60; fi
   if [[ "$SCREEN" == "native-vpn" ]]; then wait_ui_marker vpn-directory-screenshot.txt 60; fi
+  if [[ "$SCREEN" == "native-map" ]]; then wait_ui_marker map-datum-screenshot.txt 60; fi
+  if [[ "$SCREEN" == "services-art" ]]; then
+    wait_ui_marker services-panel-state.txt 60
+    cp "$OUTPUT/services-panel-state.txt" "$OUTPUT/services-panel-light-state.txt"
+  fi
   sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/$SCREEN-light.png"
 done
@@ -164,6 +189,8 @@ launch_screenshot_page home
 sleep 1
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/home-dark.png"
 launch_screenshot_page services-art
+wait_ui_marker services-panel-state.txt 60
+cp "$OUTPUT/services-panel-state.txt" "$OUTPUT/services-panel-dark-state.txt"
 sleep 1
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/services-art-dark.png"
 for DARK_SCREEN in profile live-activity; do
@@ -262,6 +289,7 @@ xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
 swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
 check_service_headers
+check_service_panels
 for SCREEN in services services-directory services-art grades mooc chaoxing native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
   "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
 done

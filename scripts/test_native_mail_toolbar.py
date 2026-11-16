@@ -56,14 +56,16 @@ class NativeMailToolbarTests(unittest.TestCase):
         self.assertEqual(toolbar.count("placement: .topBarTrailing"), 2)
         self.assertEqual(toolbar.count(".labelStyle(.iconOnly)"), 2)
         self.assertEqual(toolbar.count(".frame(minWidth: 44, minHeight: 44)"), 2)
-        for token in ['Menu("切换服务", systemImage: "square.grid.2x2")',
-                      "NativeCampusService.groups", "selected = service",
+        for token in ['Button("切换服务", systemImage: "square.grid.2x2")',
                       'Button("学校原站", systemImage: "globe")',
                       "selected.entryURL(apps: environment.repository.apps)",
                       '.accessibilityLabel("切换原生服务")',
                       '.accessibilityIdentifier("services.school-web")']:
             self.assertIn(token, toolbar)
         self.assertIn("PortalWebViewScreen(url: link.url)", self.host)
+        self.assertIn("NativeServiceSwitcherPanel(selected: selected)", self.host)
+        self.assertIn("selected = service", self.host)
+        self.assertIn("Button(action: openSwitcher)", self.scrubber)
 
     def test_drag_index_uses_measured_width_not_navigation_title_width(self):
         self.assertIn("GeometryReader { geometry in", self.scrubber)

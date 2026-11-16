@@ -80,7 +80,7 @@ class UIPreviewTests(unittest.TestCase):
             (self.path / name).unlink()
         manifest = preview.package(self.path, environment)
         self.assertEqual(len(manifest['screenshots']), 10)
-        self.assertEqual(len(manifest['required_checks']), 4)
+        self.assertEqual(len(manifest['required_checks']), 6)
         self.assertIsNone(manifest['live_activity_layout'])
         self.assertIsNone(manifest['system_island_preview'])
         with patch.dict(os.environ, environment):
@@ -101,14 +101,14 @@ class UIPreviewTests(unittest.TestCase):
         names = re.findall(r'/releases/download/nightly/([^"\s]+\.png)', readme)
         self.assertTrue(names)
         self.assertTrue(set(names).issubset(preview.NIGHTLY_SCREENSHOTS))
-        changed_pages = {'academic-center-light.png', 'native-analysis-light.png', 'native-downloads-light.png',
-                         'profile-light.png', 'native-map-light.png', 'campus-journey-light.png'}
+        changed_pages = {'academic-center-light.png', 'native-analysis-light.png', 'services-art-light.png',
+                         'services-art-dark.png', 'native-map-light.png', 'campus-journey-light.png'}
         self.assertTrue(changed_pages.issubset(preview.NIGHTLY_SCREENSHOTS))
         runner = (root / 'scripts/validate_ui.sh').read_text()
         nightly = runner.split('if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]', 1)[1].split('exit 0', 1)[0]
         captured = re.search(r'for SCREEN in ([^;]+); do', nightly).group(1).split()
-        self.assertEqual({name + '-light.png' for name in captured}, set(preview.NIGHTLY_SCREENSHOTS))
-        self.assertIn('for SCREEN in card services profile native-map campus-journey;', nightly)
+        self.assertEqual({name + '-light.png' for name in captured} | {'services-art-dark.png'}, set(preview.NIGHTLY_SCREENSHOTS))
+        self.assertIn('for SCREEN in card services native-map campus-journey;', nightly)
         ocr = (root / 'scripts/check_system_island.swift').read_text()
         self.assertIn('if screen == "native-mail"', ocr)
         self.assertIn('title.midX < 0.55', ocr)
@@ -313,9 +313,9 @@ wait_ui_marker() { cp "$CONTAINER/Documents/$1" "$OUTPUT/$1"; }
 
     def test_exact_new_snapshots_and_required_checks(self):
         self.assertEqual(len(preview.SCREENSHOTS), 59)
-        self.assertEqual(len(preview.CHECKS), 28)
+        self.assertEqual(len(preview.CHECKS), 31)
         self.assertEqual(len(set(preview.SCREENSHOTS)), 59)
-        self.assertEqual(len(set(preview.CHECKS)), 28)
+        self.assertEqual(len(set(preview.CHECKS)), 31)
         for screen in ['native-ecode', 'native-electricity', 'native-bills', 'services-directory']:
             self.assertIn(screen + '-light.png', preview.SCREENSHOTS)
         self.assertIn('ecode-screenshot.txt', preview.CHECKS)

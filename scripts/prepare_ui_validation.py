@@ -311,11 +311,7 @@ struct UIValidationRoot: View {
                 switch screen {
                 case "schedule": ScheduleView()
                 case "services", "services-directory": ServicesView()
-                case "services-art": NavigationStack {
-                    ScrollView { NativeServicesCarousel(services: NativeCampusService.allCases.filter { $0.group == "校园资源" }, searching: true) { _ in }.padding() }
-                        .background(Color(.systemGroupedBackground)).navigationTitle("原生服务")
-                        .nativeUIFixtureCaption("本次构建原生服务卡面 · 东大校园简笔画")
-                }
+                case "services-art": NativeServiceNavigationFixture(service: .map, caption: "本次构建服务切换面板 · 各服务校园线稿")
                 case "profile": NavigationStack {
                     ScrollViewReader { proxy in
                         ScrollView { CampusExploreContent().padding(.horizontal, 16) }
@@ -1222,22 +1218,26 @@ service_fixture('NEU-Lumen/Features/Services/IndoorRouteMap.swift',
 ''')
 service_fixture('NEU-Lumen/Features/Services/NativeCampusMapView.swift',
                 'func search(campus: Campus, keyword: String) async {', r'''
-        if ProcessInfo.processInfo.arguments.contains("--screen=native-map") {
-            let location = CLLocation(latitude: 41.66, longitude: 123.42)
+        if ProcessInfo.processInfo.arguments.contains(where: { $0 == "--screen=native-map" || $0 == "--screen=services-art" }) {
+            let center = CampusMapProjection.shared.coordinate(latitude: 41.65285, longitude: 123.41846)
+            let location = CLLocation(latitude: center.latitude, longitude: center.longitude)
             let item: MKMapItem
             if #available(iOS 26.0, *) { item = MKMapItem(location: location, address: nil) }
             else { item = MKMapItem(placemark: MKPlacemark(coordinate: location.coordinate)) }
             item.name = "合成校园地点"
-            places = [CampusMapPlace(item: item)]; loading = false; error = nil; return
+            places = [CampusMapPlace(item: item)]; loading = false; error = nil
+            let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            try? ("PASS: actual map loaded bundled WGS84 entrances through " + CampusMapProjection.shared.datum.rawValue + " projection; MapKit search coordinates are not converted twice; public map UI only, not field validation")
+                .write(to: folder.appendingPathComponent("map-datum-screenshot.txt"), atomically: true, encoding: .utf8)
+            return
         }
 ''')
 journey_view = destination / 'NEU-Lumen/Features/Services/CampusJourneyView.swift'
 journey_source = journey_view.read_text(encoding='utf-8')
-journey_hook = '.task { store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination) }'
+journey_hook = '            store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination)'
 if journey_source.count(journey_hook) != 1:
     raise RuntimeError('Campus journey preset fixture hook changed')
-journey_view.write_text(journey_source.replace(journey_hook, r'''.task {
-            store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination)
+journey_view.write_text(journey_source.replace(journey_hook, journey_hook + r'''
             if ProcessInfo.processInfo.arguments.contains("--screen=campus-journey") {
                 let output = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("campus-entrances-screenshot.txt")
@@ -1246,13 +1246,37 @@ journey_view.write_text(journey_source.replace(journey_hook, r'''.task {
                     guard store.originDoor != nil, store.destinationDoor != nil else {
                         throw NetworkError(message: "Mounted journey has no preset doors")
                     }
-                    try "PASS: actual journey store loaded all 57 entrance defaults; first-use planning, gate switching, swap, saved override priority and reset passed; no field or live MapKit routing validation"
+                    try "PASS: actual journey store loaded all 57 GCJ02 entrance defaults; saved datum, legacy preset migration, no double conversion, first-use planning, gate switching, swap and reset passed; no field or live MapKit routing validation"
                         .write(to: output, atomically: true, encoding: .utf8)
                 } catch {
                     try? ("FAIL: " + error.localizedDescription).write(to: output, atomically: true, encoding: .utf8)
                 }
             }
-        }'''), encoding='utf-8')
+'''), encoding='utf-8')
+host_view = destination / 'NEU-Lumen/Features/Services/NativeServicesCarousel.swift'
+host_source = host_view.read_text(encoding='utf-8')
+host_hook = '        .sheet(isPresented: $showSwitcher) {'
+if host_source.count(host_hook) != 1: raise RuntimeError('Service switcher fixture hook changed')
+host_view.write_text(host_source.replace(host_hook, '''        .task {
+            if ProcessInfo.processInfo.arguments.contains("--screen=services-art") {
+                try? await Task.sleep(for: .milliseconds(300))
+                showSwitcher = true
+            }
+        }
+''' + host_hook), encoding='utf-8')
+service_fixture('NEU-Lumen/Features/Services/NativeServiceSwitcherPanel.swift',
+                '.accessibilityIdentifier("services.switcher-panel")', r'''
+        .task {
+            if ProcessInfo.processInfo.arguments.contains("--screen=services-art") {
+                try? await Task.sleep(for: .milliseconds(250))
+                let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                let services = NativeCampusService.allCases
+                let passed = services.count == 12 && Set(services).count == 12 && services.contains(selected)
+                try? (passed ? "PASS: actual service sheet mounted with 12 service cards, per-service vector art and current selection " + selected.rawValue : "FAIL: service sheet catalog mismatch")
+                    .write(to: folder.appendingPathComponent("services-panel-state.txt"), atomically: true, encoding: .utf8)
+            }
+        }
+''')
 service_fixture('NEU-Lumen/Core/Models/NativeCampusService.swift',
                 'func owns(host: String) -> Bool {', r'''
         if host == "127.0.0.1", self == .telephone { return true }

@@ -19,3 +19,5 @@
 “走进东大”各处题材分别为南湖/浑南校门、南湖主楼与中心花园、浑南图书馆，不复用首页的楼群线稿。主楼参考[学校校园风景](https://www.neu.edu.cn/zjdd/xyfj.htm)，图书馆参考[浑南校区校区风采](https://hnxqgwh.neu.edu.cn/2019/0326/c2900a88675/page.htm)，均为代码绘制的简笔画，未复制原照片。
 
 室外入口配准记录在 `data/campus-entrance-alignment.json`，包含 Pathly 楼门图 URL、SHA-256、门口像素及建筑轮廓参考；运行 `python scripts/build_campus_entrances.py` 生成内置 WGS84 坐标。建筑轮廓来自 [OpenStreetMap 贡献者](https://www.openstreetmap.org/copyright)（ODbL），材料馆参考 [Esri World Imagery](https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer)。配准坐标作为衍生数据库按 ODbL 提供，未重新发布原图；坐标不是实地测绘结果。Pathly 自动化实验室楼门图及 G01→113 路线与理学院 A 门共用位置，保留原站映射并在界面提示核对。
+
+地图转换数学参考 [coordtransform 2.1.2](https://github.com/wandergis/coordtransform)（MIT，见 [许可证](third-party/coordtransform-LICENSE.txt)）及[高德坐标系说明](https://lbs.amap.com/api/javascript-api-v2/guide/transform/convertfrom)。原始楼门数据始终为 WGS84；显示/导航边界根据同名图书馆的 MapKit 返回位置识别 WGS84 或 GCJ-02，仅转换预置点及带明确坐标系的本机记录，不重新转换 MapKit 搜索/点击产生的同系坐标。

@@ -17,7 +17,7 @@ private struct CampusEntranceMapPlace: Identifiable {
     var id: String { entrance.id }
     var title: String { building.name + " · " + (building.room(entrance.gateID)?.title ?? "楼门") }
     var door: JourneyDoor {
-        JourneyDoor(name: title, coordinate: CLLocationCoordinate2D(latitude: entrance.latitude, longitude: entrance.longitude),
+        JourneyDoor(name: title, coordinate: CampusMapProjection.shared.coordinate(latitude: entrance.latitude, longitude: entrance.longitude),
                     approximateAccuracyMeters: entrance.approximateAccuracyMeters)
     }
 }
@@ -219,6 +219,7 @@ struct NativeCampusMapView: View {
                 query = ""
                 owner = environment.session.requestEpoch
             }
+            await CampusMapProjection.shared.resolve()
             if entrances.isEmpty {
                 do {
                     let catalog = try IndoorCatalog.bundled()
@@ -232,6 +233,7 @@ struct NativeCampusMapView: View {
             await store.search(campus: campus, keyword: query)
         }
         .onChange(of: campus) { _, _ in if active { search() } }
+        .onChange(of: CampusMapProjection.shared.datum) { _, _ in camera = .automatic; selected = nil }
         .onChange(of: store.places.map(\.id)) { _, _ in camera = .automatic; selected = nil }
         .onDisappear { searchTask?.cancel(); store.cancel() }
     }
@@ -240,6 +242,10 @@ struct NativeCampusMapView: View {
         searchFocused = false
         let target = campus, term = query
         searchTask?.cancel()
-        searchTask = Task { await store.search(campus: target, keyword: term) }
+        searchTask = Task {
+            await CampusMapProjection.shared.resolve()
+            guard !Task.isCancelled else { return }
+            await store.search(campus: target, keyword: term)
+        }
     }
 }

@@ -36,7 +36,11 @@ final class CampusJourneyStore {
     private var directions: MKDirections?
     private let defaults: UserDefaults
     private let client = PathlyClient()
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    private let projection: CampusMapProjection
+    init(defaults: UserDefaults = .standard, projection: CampusMapProjection? = nil) {
+        self.defaults = defaults
+        self.projection = projection ?? .shared
+    }
     var buildings: [IndoorBuilding] { catalog?.buildings ?? [] }
     func building(_ start: Bool) -> IndoorBuilding? {
         buildings.first { $0.id == (start ? origin.buildingID : destination.buildingID) }
@@ -87,7 +91,9 @@ final class CampusJourneyStore {
         clear()
         if start { originDoor = door } else { destinationDoor = door }
         let point = start ? origin : destination
-        defaults.set(["latitude": door.coordinate.latitude, "longitude": door.coordinate.longitude], forKey: doorKey(point))
+        let saved: [String: Any] = ["latitude": door.coordinate.latitude, "longitude": door.coordinate.longitude,
+                                    "coordinateSystem": projection.datum.rawValue]
+        defaults.set(saved, forKey: doorKey(point))
     }
     private func doorKey(_ point: CampusJourneyEndpoint) -> String { "lumen.pathly.confirmedDoor." + point.buildingID + "." + point.gateID }
     private func door(for point: CampusJourneyEndpoint) -> JourneyDoor? {
@@ -97,7 +103,7 @@ final class CampusJourneyStore {
         guard let entrance = entranceCatalog?.entrance(buildingID: point.buildingID, gateID: point.gateID),
               let building = buildings.first(where: { $0.id == point.buildingID }), let gate = building.room(point.gateID) else { return nil }
         return JourneyDoor(name: building.name + " · " + gate.title,
-                           coordinate: CLLocationCoordinate2D(latitude: entrance.latitude, longitude: entrance.longitude),
+                           coordinate: projection.coordinate(latitude: entrance.latitude, longitude: entrance.longitude),
                            approximateAccuracyMeters: entrance.approximateAccuracyMeters)
     }
     func presetDoors(in building: IndoorBuilding) -> [JourneyDoor] {
@@ -109,11 +115,28 @@ final class CampusJourneyStore {
         defaults.removeObject(forKey: doorKey(point))
         if start { originDoor = presetDoor(for: point) } else { destinationDoor = presetDoor(for: point) }
     }
+    func refreshDoorCoordinates() {
+        clear()
+        originDoor = door(for: origin)
+        destinationDoor = door(for: destination)
+    }
     private func savedDoor(for point: CampusJourneyEndpoint) -> JourneyDoor? {
         guard let saved = defaults.dictionary(forKey: doorKey(point)), let latitude = saved["latitude"] as? Double,
               let longitude = saved["longitude"] as? Double, let building = buildings.first(where: { $0.id == point.buildingID }),
               let gate = building.room(point.gateID) else { return nil }
-        let coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        // v174 could persist an untouched WGS84 preset without a datum tag.
+        // Recognize only that exact legacy value; preserve genuinely adjusted pins.
+        if saved["coordinateSystem"] == nil,
+           let preset = entranceCatalog?.entrance(buildingID: point.buildingID, gateID: point.gateID),
+           abs(latitude - preset.latitude) < 1e-8, abs(longitude - preset.longitude) < 1e-8 {
+            return presetDoor(for: point)
+        }
+        let coordinate: CLLocationCoordinate2D
+        if let rawDatum = saved["coordinateSystem"] as? String, let datum = CampusMapDatum(rawValue: rawDatum) {
+            coordinate = projection.coordinate(latitude: latitude, longitude: longitude, from: datum)
+        } else {
+            coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
         guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
         return JourneyDoor(name: building.name + " · " + gate.title, coordinate: coordinate)
     }
@@ -126,6 +149,9 @@ final class CampusJourneyStore {
     func cancel() { request = UUID(); directions?.cancel(); directions = nil; loading = false }
     func clear() { cancel(); departure = nil; arrival = nil; outdoor = nil; error = nil }
     func plan() async {
+        let previousDatum = projection.datum
+        await projection.resolve()
+        if projection.datum != previousDatum { refreshDoorCoordinates() }
         guard canPlan, let first = building(true), let last = building(false),
               let from = originDoor, let to = destinationDoor else { return }
         clear()
@@ -244,7 +270,11 @@ struct CampusJourneyView: View {
         }
         .navigationTitle("跨楼路线").navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
-        .task { store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination) }
+        .task {
+            await CampusMapProjection.shared.resolve()
+            store.prepare(campus: environment.repository.campus == .hunnan ? "south" : "main", target: destination)
+        }
+        .onChange(of: CampusMapProjection.shared.datum) { _, _ in store.refreshDoorCoordinates() }
         .task(id: store.selectionKey + "|\(refresh)") {
             store.clear()
             guard store.canPlan else { return }

@@ -61,6 +61,7 @@ struct NativeServiceHost: View {
     @State private var selected: NativeCampusService
     @State private var originalWeb: NativeServiceWebLink?
     @State private var preview: NativeCampusService?
+    @State private var showSwitcher = false
     init(initial: NativeCampusService) {
         self.initial = initial
         _selected = State(initialValue: initial)
@@ -103,17 +104,7 @@ struct NativeServiceHost: View {
                 serviceTitle
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Menu("切换服务", systemImage: "square.grid.2x2") {
-                    ForEach(NativeCampusService.groups, id: \.self) { group in
-                        Section(group) {
-                            ForEach(NativeCampusService.allCases.filter { $0.group == group }) { service in
-                                Button { selected = service } label: {
-                                    Label(service.title, systemImage: selected == service ? "checkmark" : service.symbol)
-                                }
-                            }
-                        }
-                    }
-                }
+                Button("切换服务", systemImage: "square.grid.2x2") { showSwitcher = true }
                 .labelStyle(.iconOnly)
                 .frame(minWidth: 44, minHeight: 44)
                 .accessibilityLabel("切换原生服务")
@@ -130,11 +121,18 @@ struct NativeServiceHost: View {
             } }
         }
         .sheet(item: $originalWeb) { link in NavigationStack { PortalWebViewScreen(url: link.url) } }
+        .sheet(isPresented: $showSwitcher) {
+            NativeServiceSwitcherPanel(selected: selected) { service in
+                selected = service
+                preview = nil
+                showSwitcher = false
+            }
+        }
     }
 
     private var serviceTitle: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            NativeServiceScrubber(selected: $selected, preview: $preview)
+            NativeServiceScrubber(selected: $selected, preview: $preview) { showSwitcher = true }
         }
     }
 }
@@ -142,43 +140,46 @@ struct NativeServiceHost: View {
 private struct NativeServiceScrubber: View {
     @Binding var selected: NativeCampusService
     @Binding var preview: NativeCampusService?
+    let openSwitcher: () -> Void
     @GestureState private var dragging = false
     private let services = NativeCampusService.allCases
     private var visible: NativeCampusService { preview ?? selected }
     var body: some View {
-        GeometryReader { geometry in
-            VStack(alignment: .leading, spacing: 4) {
-                ViewThatFits(in: .horizontal) {
-                    Text(visible.title).font(.headline).fixedSize()
-                    Image(systemName: visible.symbol).font(.headline)
-                }
-                HStack(spacing: 2) {
-                    ForEach(services) { service in
-                        Capsule().fill(Color.blue.opacity(service == visible ? 1 : 0.16))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: service == visible ? 4 : 3)
+        Button(action: openSwitcher) {
+            GeometryReader { geometry in
+                VStack(alignment: .leading, spacing: 4) {
+                    ViewThatFits(in: .horizontal) {
+                        Text(visible.title).font(.headline).fixedSize()
+                        Image(systemName: visible.symbol).font(.headline)
                     }
+                    HStack(spacing: 2) {
+                        ForEach(services) { service in
+                            Capsule().fill(Color.blue.opacity(service == visible ? 1 : 0.16))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: service == visible ? 4 : 3)
+                        }
+                    }
+                    .frame(height: 4)
                 }
-                .frame(height: 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
+                        .updating($dragging) { value, state, _ in
+                            if case .second(true, _) = value { state = true }
+                        }
+                        .onChanged { value in
+                            if case .second(true, let drag) = value {
+                                preview = drag.map { service(at: $0.location.x, width: geometry.size.width) } ?? selected
+                            }
+                        }
+                        .onEnded { value in
+                            if case .second(true, let drag?) = value {
+                                selected = service(at: drag.location.x, width: geometry.size.width)
+                            }
+                            preview = nil
+                        })
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-            .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
-                    .updating($dragging) { value, state, _ in
-                        if case .second(true, _) = value { state = true }
-                    }
-                    .onChanged { value in
-                        if case .second(true, let drag) = value {
-                            preview = drag.map { service(at: $0.location.x, width: geometry.size.width) } ?? selected
-                        }
-                    }
-                    .onEnded { value in
-                        if case .second(true, let drag?) = value {
-                            selected = service(at: drag.location.x, width: geometry.size.width)
-                        }
-                        preview = nil
-                    })
-        }
+        }.buttonStyle(.plain)
         .frame(width: 120, height: 44, alignment: .leading)
         .contentShape(Rectangle())
         .onChange(of: dragging) { _, active in if !active { preview = nil } }
@@ -186,7 +187,7 @@ private struct NativeServiceScrubber: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("原生服务切换")
         .accessibilityValue(visible.title + "，\((services.firstIndex(of: visible) ?? 0) + 1)/\(services.count)")
-        .accessibilityHint("左右滑动页面，或长按指示条并左右拖动，松手切换；也可使用导航栏服务目录")
+        .accessibilityHint("点按打开服务面板；也可左右滑动页面，或长按指示条并左右拖动切换")
         .accessibilityIdentifier("services.scrubber")
         .accessibilityAdjustableAction { direction in
             let index = services.firstIndex(of: selected) ?? 0

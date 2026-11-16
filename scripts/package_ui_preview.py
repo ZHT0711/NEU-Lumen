@@ -44,15 +44,17 @@ CHECKS = ('indoor-points-screenshot.txt', 'indoor-route-screenshot.txt', 'vpn-di
           'session-save.txt', 'session-restore.txt', 'learning-save.txt', 'learning-restore.txt',
           'live-activity-checks.txt', 'live-activity-data-checks.txt',
           LAYOUT_CHECK, ACADEMIC_WEB_CHECK, 'system-island-checks.txt', 'campus-entrances-screenshot.txt',
-          'service-title-academic-center.txt', 'service-title-native-analysis.txt', 'service-title-native-downloads.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
+          'service-title-academic-center.txt', 'service-title-native-analysis.txt', 'service-title-native-downloads.txt',
+          'map-datum-screenshot.txt', 'services-panel-light-checks.txt', 'services-panel-dark-checks.txt') + tuple(f'{screen}-screenshot.txt' for screen in NATIVE_SCREENS)
 MANIFEST = 'ui-preview.json'
 LEGACY_SCREENSHOTS = ('home-nanhu-light.png',)
 ARCHIVE = 'NEU-Lumen-ui-preview.zip'
 NIGHTLY_SCREENSHOTS = ('home-light.png', 'card-light.png', 'schedule-light.png', 'services-light.png',
-                       'academic-center-light.png', 'native-analysis-light.png', 'native-downloads-light.png',
-                       'profile-light.png', 'native-map-light.png', 'campus-journey-light.png')
+                       'academic-center-light.png', 'native-analysis-light.png', 'services-art-light.png',
+                       'services-art-dark.png', 'native-map-light.png', 'campus-journey-light.png')
 NIGHTLY_CHECKS = ('campus-entrances-screenshot.txt', 'service-title-academic-center.txt',
-                  'service-title-native-analysis.txt', 'service-title-native-downloads.txt')
+                  'service-title-native-analysis.txt', 'map-datum-screenshot.txt',
+                  'services-panel-light-checks.txt', 'services-panel-dark-checks.txt')
 
 
 def capture_profile(environment):

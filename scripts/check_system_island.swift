@@ -23,7 +23,7 @@ if kind.hasPrefix("screen:") {
     let screen = String(kind.dropFirst("screen:".count))
     let expected: [String: [String]] = [
         "services": ["服务大厅", "学习与生活", "成绩分析", "校园地图"],
-        "services-art": ["原生服务", "校园资讯", "下载中心"],
+        "services-art": ["切换服务", "当前", "学业查询", "缴费大厅", "学校邮箱", "校园地图"],
         "grades": ["学习", "成绩"],
         "mooc": ["学习", "作业"],
         "chaoxing": ["学习", "作业"],

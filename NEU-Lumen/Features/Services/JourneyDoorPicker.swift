@@ -90,6 +90,17 @@ struct JourneyDoorPicker: View {
                 } else { await search() }
             }
             .onDisappear { request = UUID(); task?.cancel(); operation?.cancel(); loading = false }
+            .onChange(of: CampusMapProjection.shared.datum) { oldDatum, newDatum in
+                if let current = door {
+                    let point = CampusGeoPoint(latitude: current.coordinate.latitude, longitude: current.coordinate.longitude)
+                        .converted(from: oldDatum, to: newDatum)
+                    door = JourneyDoor(name: current.name,
+                        coordinate: CLLocationCoordinate2D(latitude: point.latitude, longitude: point.longitude),
+                        approximateAccuracyMeters: current.approximateAccuracyMeters)
+                    if let door { camera = .region(MKCoordinateRegion(center: door.coordinate, latitudinalMeters: 450, longitudinalMeters: 450)) }
+                }
+                results = []; region = nil
+            }
         }
     }
     private func startSearch() { task?.cancel(); operation?.cancel(); task = Task { await search() } }

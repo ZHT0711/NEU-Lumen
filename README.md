@@ -33,8 +33,8 @@
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-analysis-light.png" width="245" alt="成绩分析与无背景标题（合成演示）" />
 </p>
 <p align="center">
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-downloads-light.png" width="245" alt="下载中心与单一标题（合成演示）" />
-  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/profile-light.png" width="245" alt="走进东大：南湖主楼与浑南图书馆线稿" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-light.png" width="245" alt="点击指示条打开服务切换面板（浅色）" />
+  <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/services-art-dark.png" width="245" alt="服务切换面板与各服务校园线稿（深色）" />
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/native-map-light.png" width="245" alt="校园地图与预置楼门" />
 </p>
 <p align="center">
@@ -49,13 +49,13 @@
 
 首页铃铛 → **提醒与通知**：课程、考试、日程、作业截止、账户阈值和校园动态提醒，可配置后台自动刷新。系统决定后台运行时机；时间已知的提醒提前交给系统安排，离线仍可触发。详见 [提醒与后台刷新](docs/reminders.md)。
 
-服务大厅 → **原生服务**：按学习与生活、校园资源分组，卡面保留校园主题简笔画。提供资讯频道搜索、每日校园日程和附件下载中心。服务标题保留蓝色切换指示条，去掉标题的玻璃背景与重复文字；iOS 26 操作按钮仍使用系统导航样式。
+服务大厅 → **原生服务**：按学习与生活、校园资源分组，卡面保留校园主题简笔画。提供资讯频道搜索、每日校园日程和附件下载中心。点按标题或蓝色指示条可打开服务切换面板，卡片使用各自校园线稿并标出当前服务；支持深浅色、大字体与长按拖动切换。
 
 个人培养方案详情支持多级思维导图与大纲、课组要求和课程查询；缴费支持项目与订单入口、月份流水检索和明细，办事支持目录、指南、进度和表单核对，邮箱支持组合搜索、批量操作、前后封阅读与普通附件下载。能力边界见 [原生服务说明](docs/native-services.md) 与 [教务说明](docs/academic-queries.md)。
 
 电费入口直达学校电费专页。教务增加按当前账号权限读取的完整功能目录和原生考试安排，业务页支持原生查询条件、表格、表单及操作核对。自定义灵动岛支持 SF Symbols 主图标、行内符号和更简洁的内容布局。
 
-校园地图内置 Pathly 原生楼内导航：19 栋楼与 57 个预置入口，原生选楼、选层和选教室，支持路线偏好、楼层图缩放以及楼门/电梯参考图。入口按 Pathly 楼门图与公开地图配准，尚未现场实测，可在跨楼路线中微调。WebVPN 提供学校资源分类、搜索、本机收藏和最近访问。
+校园地图内置 Pathly 原生楼内导航：19 栋楼与 57 个预置入口，原生选楼、选层和选教室，支持路线偏好、楼层图缩放以及楼门/电梯参考图。入口按 Pathly 楼门图与公开地图配准，并按当前地图坐标系转换，修复国内底图的整体偏移；尚未现场实测，可在跨楼路线中微调。WebVPN 提供学校资源分类、搜索、本机收藏和最近访问。
 
 网页登录可开启“本机自动登录”：认证并核对账号后将密码保存到钥匙串，会话过期时尝试续登；验证码和二次认证仍在学校页面完成。账号设置支持清除保存的密码。
 

@@ -13,7 +13,8 @@ func verifyCampusEntranceDefaults() throws {
     let suite = "NEULumen.Entrances.UIValidation." + UUID().uuidString
     guard let defaults = UserDefaults(suiteName: suite) else { throw NetworkError(message: "No isolated entrance test defaults") }
     defer { defaults.removePersistentDomain(forName: suite) }
-    let store = CampusJourneyStore(defaults: defaults)
+    let mainland = CampusMapProjection(datum: .gcj02)
+    let store = CampusJourneyStore(defaults: defaults, projection: mainland)
     store.prepare(campus: "south", target: "一号楼 A102")
     var checked = 0
     for building in catalog.buildings {
@@ -21,8 +22,10 @@ func verifyCampusEntranceDefaults() throws {
         for gate in building.gates {
             store.selectGate(gate.id, start: true)
             let preset = locations.entrance(buildingID: building.id, gateID: gate.id)
-            try expect(store.originDoor?.coordinate.latitude == preset?.latitude &&
-                       store.originDoor?.coordinate.longitude == preset?.longitude && preset != nil,
+            guard let preset else { throw NetworkError(message: "Missing gate") }
+            let expected = mainland.coordinate(latitude: preset.latitude, longitude: preset.longitude)
+            try expect(store.originDoor?.coordinate.latitude == expected.latitude &&
+                       store.originDoor?.coordinate.longitude == expected.longitude,
                        "Selected gate did not load its own bundled coordinate: " + building.id + gate.id)
             checked += 1
         }
@@ -41,11 +44,27 @@ func verifyCampusEntranceDefaults() throws {
     let adjusted = JourneyDoor(name: preset.name,
         coordinate: CLLocationCoordinate2D(latitude: preset.coordinate.latitude + 0.00001, longitude: preset.coordinate.longitude))
     store.setDoor(adjusted, start: true)
-    let restored = CampusJourneyStore(defaults: defaults)
+    let restored = CampusJourneyStore(defaults: defaults, projection: mainland)
     restored.prepare(campus: "main", target: last.name)
     restored.selectBuilding(first.id, start: true)
     try expect(restored.originDoor?.key == adjusted.key && restored.originDoor?.approximateAccuracyMeters == nil,
                "Saved adjustment did not take priority over bundled data")
+    let key = "lumen.pathly.confirmedDoor." + first.id + "." + first.gates[0].id
+    try expect(defaults.dictionary(forKey: key)?["coordinateSystem"] as? String == "GCJ02", "Saved map pin lost datum")
+    let overseas = CampusJourneyStore(defaults: defaults, projection: CampusMapProjection(datum: .wgs84))
+    overseas.prepare(campus: "main", target: last.name)
+    overseas.selectBuilding(first.id, start: true)
+    let converted = CampusGeoPoint(latitude: adjusted.coordinate.latitude, longitude: adjusted.coordinate.longitude)
+        .converted(from: .gcj02, to: .wgs84)
+    try expect(abs((overseas.originDoor?.coordinate.latitude ?? 0) - converted.latitude) < 1e-9,
+               "Saved map pin did not follow a provider datum change")
+    let rawPreset = locations.entrance(buildingID: first.id, gateID: first.gates[0].id)!
+    defaults.set(["latitude": rawPreset.latitude, "longitude": rawPreset.longitude], forKey: key)
+    restored.selectBuilding(first.id, start: true)
+    try expect(restored.originDoor?.key == preset.key, "v174 untouched saved preset remained shifted")
+    defaults.set(["latitude": adjusted.coordinate.latitude, "longitude": adjusted.coordinate.longitude], forKey: key)
+    restored.selectBuilding(first.id, start: true)
+    try expect(restored.originDoor?.key == adjusted.key, "Legacy manual pin was converted twice")
     restored.resetDoor(start: true)
     try expect(restored.originDoor?.key == preset.key && restored.originDoor?.approximateAccuracyMeters != nil,
                "Reset did not restore the preset entrance")
