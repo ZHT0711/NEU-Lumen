@@ -33,6 +33,19 @@ struct HomeView: View {
                         offlineBanner
                     }
                     todaySection
+                    if let digest = repo.intelligenceDigest(for: .assignments) {
+                        GlassCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                CampusIntelligenceDigestView(title: "临期作业提醒", digest: digest)
+                                Button("查看待完成作业", systemImage: "checklist") {
+                                    environment.pendingLearningPlatform = LearningPlatform.allCases.first {
+                                        $0.title == repo.intelligenceAssignments.first?.platform
+                                    }
+                                    environment.pendingLearningSection = "作业"; selection = .grades
+                                }.font(.subheadline).frame(minHeight: 44)
+                            }.padding(16)
+                        }
+                    }
                     quickAppsSection
                     cardEntrySection
                     if !repo.dataCards.isEmpty {
@@ -405,6 +418,10 @@ struct HomeView: View {
             }
             GlassCard {
                 VStack(spacing: 0) {
+                    if let digest = repo.intelligenceDigest(for: .news) {
+                        CampusIntelligenceDigestView(title: "要闻速览", digest: digest).padding(14)
+                        Divider()
+                    }
                     if repo.news.isEmpty {
                         HStack {
                             ProgressView()

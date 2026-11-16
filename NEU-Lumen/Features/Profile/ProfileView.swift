@@ -106,6 +106,11 @@ struct ProfileView: View {
                 }
 
                 Section("校园与提醒") {
+                    if environment.repository.intelligence.available {
+                        NavigationLink { CampusIntelligenceSettingsView() } label: {
+                            Label("Apple 智能", systemImage: "sparkles")
+                        }
+                    }
                     NavigationLink { CampusReminderView() } label: {
                         Label("提醒与通知", systemImage: "bell.badge")
                     }

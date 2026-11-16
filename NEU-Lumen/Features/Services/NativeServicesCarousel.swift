@@ -67,12 +67,6 @@ struct NativeServiceHost: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            // Reserve real layout height below navigation. A page-style TabView
-            // may ignore propagated safe-area insets, so the switcher is a sibling.
-            NativeServiceScrubber(selected: $selected, preview: $preview)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 4)
-                .background(Color(.systemGroupedBackground))
             TabView(selection: $selected) {
                 AcademicCenterView(active: selected == .academic).tag(NativeCampusService.academic)
                 NativePaymentView(active: selected == .payment).tag(NativeCampusService.payment)
@@ -88,13 +82,24 @@ struct NativeServiceHost: View {
                 NativeTelephoneView(active: selected == .telephone).tag(NativeCampusService.telephone)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            // A page-style TabView can draw beyond its content safe area. Keep each
-            // service below the separately reserved switcher, not under navigation.
+            // Keep paged content inside the navigation content bounds.
             .clipped()
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle(selected.title).navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .top) {
+            if let preview {
+                Label(preview.title, systemImage: preview.symbol)
+                    .font(.headline).padding(.horizontal, 20).padding(.vertical, 12)
+                    .background(.regularMaterial, in: Capsule()).padding(.top, 12)
+                    .allowsHitTesting(false).accessibilityAddTraits(.updatesFrequently)
+            }
+        }
+        .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+        .toolbarRole(.editor)
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                NativeServiceScrubber(selected: $selected, preview: $preview)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("切换服务", systemImage: "square.grid.2x2") {
                     ForEach(NativeCampusService.groups, id: \.self) { group in
@@ -133,22 +138,24 @@ private struct NativeServiceScrubber: View {
     private let services = NativeCampusService.allCases
     private var visible: NativeCampusService { preview ?? selected }
     var body: some View {
-        VStack(spacing: 0) {
-            Text(preview == nil ? "左右滑动或长按切换服务" : visible.title)
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-            GeometryReader { geometry in
-                HStack(spacing: 3) {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 4) {
+                ViewThatFits(in: .horizontal) {
+                    Text(visible.title).font(.headline).fixedSize()
+                    Image(systemName: visible.symbol).font(.headline)
+                }
+                HStack(spacing: 2) {
                     ForEach(services) { service in
                         Capsule().fill(Color.blue.opacity(service == visible ? 1 : 0.16))
                             .frame(maxWidth: .infinity)
                             .frame(height: service == visible ? 4 : 3)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
+                .frame(height: 4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(LongPressGesture(minimumDuration: 0.3).sequenced(before: DragGesture(minimumDistance: 0))
                     .updating($dragging) { value, state, _ in
                         if case .second(true, _) = value { state = true }
                     }
@@ -163,9 +170,9 @@ private struct NativeServiceScrubber: View {
                         }
                         preview = nil
                     })
-            }
-            .frame(height: 44)
         }
+        .frame(width: 120, height: 44, alignment: .leading)
+        .contentShape(Rectangle())
         .onChange(of: dragging) { _, active in if !active { preview = nil } }
         .sensoryFeedback(.selection, trigger: visible)
         .accessibilityElement(children: .ignore)

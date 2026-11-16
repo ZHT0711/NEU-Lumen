@@ -10,6 +10,7 @@ struct PlatformAssignmentsView: View {
 
     var body: some View {
         List {
+            AssignmentIntelligenceSection()
             Section {
                 HStack {
                     Button("同步全部作业", systemImage: "arrow.triangle.2.circlepath") {

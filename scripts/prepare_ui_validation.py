@@ -19,6 +19,16 @@ demo_source.write_text(demo_source.read_text(encoding="utf-8").replace(
     'department: "计算机科学与工程学院"', 'department: "未来技术学院"'
 ), encoding="utf-8")
 repository = destination / "NEU-Lumen/Core/Services/PortalRepository.swift"
+repository.write_text(repository.read_text(encoding="utf-8").replace(
+    'let intelligence = CampusIntelligenceStore()',
+    '''let intelligence = CampusIntelligenceStore(availability: {
+        ProcessInfo.processInfo.arguments.contains("--screen=home")
+    }, generate: { input in
+        input.feature == .news
+            ? "模拟器合成要闻摘要，用于检查摘要卡片与新闻列表的布局，不代表真实新闻内容。"
+            : "模拟器合成作业摘要：请在学习页查看待完成的演示作业；此摘要仅用于界面验证。"
+    })'''
+), encoding="utf-8")
 with repository.open("a", encoding="utf-8") as stream:
     stream.write(r'''
 
@@ -142,6 +152,15 @@ extension PortalRepository {
         gradesUpdatedAt = Date()
         netUpdatedAt = Date()
         electricUpdatedAt = Date()
+        if intelligence.available {
+            let source = LiveActivityAssignments(cg: cgReport, reports: assignmentReports)
+            let facts = source.pending.compactMap { item in
+                item.deadline.map { IntelligenceAssignmentFact(id: item.id, title: item.title, platform: item.platform, deadline: $0) }
+            }
+            intelligenceAssignments = CampusIntelligenceInput.dueSoon(facts, now: Date())
+            intelligence.request(.assignments(intelligenceAssignments, partial: false, now: Date()), for: .assignments)
+            intelligence.request(.news(news.prefix(3).map { IntelligenceNewsFact(title: $0.title, date: $0.date, text: "") }), for: .news)
+        }
     }
 
     func verifyLiveActivityPublication() throws {

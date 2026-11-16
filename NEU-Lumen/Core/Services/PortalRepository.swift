@@ -14,6 +14,14 @@ final class PortalRepository {
     let favorites = ServiceFavorites()
     let holidays = HolidayStore()
     let systemCalendar = SystemCalendarBridge()
+    let intelligence = CampusIntelligenceStore()
+    private(set) var intelligenceAssignments: [IntelligenceAssignmentFact] = []
+    @ObservationIgnored private var intelligenceAssignmentStamp: [Date?]?
+    @ObservationIgnored private var intelligenceAssignmentSource: [IntelligenceAssignmentFact] = []
+    @ObservationIgnored private var intelligenceAssignmentPartial = false
+    @ObservationIgnored private var intelligenceNewsSource: [NewsItem] = []
+    @ObservationIgnored private var intelligenceNewsFacts: [IntelligenceNewsFact] = []
+    @ObservationIgnored private var intelligenceNewsReadAt: Date?
     let cardWebBridge = CardWebBridge()
     private var cardUsesWebKit = false
     private var cardBalanceRevision = UUID()
@@ -199,6 +207,53 @@ final class PortalRepository {
 
     var ecodeEntryURL: URL { ServiceCatalog(apps: apps).ecodeURL }
 
+    private var intelligenceAssignmentDates: [Date?] {
+        [cgUpdatedAt, assignmentUpdatedAt[.mooc], assignmentUpdatedAt[.chaoxing]]
+    }
+    func intelligenceRefreshKey(now: Date, foreground: Bool) -> CampusIntelligenceRefreshKey {
+        .init(epoch: session.requestEpoch, loadedEpoch: loadedForEpoch,
+              stamps: intelligenceAssignmentDates + [newsUpdatedAt], preferences: intelligence.preferences,
+              available: intelligence.available, foreground: foreground, minute: Int(now.timeIntervalSince1970 / 60))
+    }
+    func intelligenceDigest(for feature: CampusIntelligenceFeature) -> CampusIntelligenceStore.Digest? {
+        guard hasCurrentLiveActivityAccount else { return nil }
+        return intelligence.digest(for: feature)
+    }
+    func refreshIntelligenceSummaries(now: Date) async {
+        guard intelligence.available, intelligence.preferences.enabled else { return }
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
+        if intelligence.canUse(.assignments) {
+            if intelligenceAssignmentStamp != intelligenceAssignmentDates {
+                let source = LiveActivityAssignments(cg: cgReport, reports: assignmentReports)
+                intelligenceAssignmentSource = source.pending.compactMap { item in
+                    item.deadline.map { IntelligenceAssignmentFact(id: item.id, title: item.title, platform: item.platform, deadline: $0) }
+                }
+                intelligenceAssignmentPartial = source.hasUnreadData || source.loadedPlatformCount < LearningPlatform.allCases.count
+                intelligenceAssignmentStamp = intelligenceAssignmentDates
+            }
+            let due = CampusIntelligenceInput.dueSoon(intelligenceAssignmentSource, now: now)
+            if intelligenceAssignments != due { intelligenceAssignments = due }
+            intelligence.request(.assignments(due, partial: intelligenceAssignmentPartial, now: now), for: .assignments)
+        } else { intelligence.clear(.assignments); intelligenceAssignments = [] }
+        guard intelligence.canUse(.news), newsUpdatedAt != nil, !news.isEmpty else { intelligence.clear(.news); return }
+        var seenNews = Set<String>()
+        let recent = news.enumerated().sorted {
+            $0.element.date == $1.element.date ? $0.offset < $1.offset : $0.element.date > $1.element.date
+        }.map(\.element).filter { seenNews.insert($0.id).inserted }.prefix(5).map { $0 }
+        if recent != intelligenceNewsSource || intelligenceNewsReadAt.map({ now.timeIntervalSince($0) >= 900 }) != false {
+            var facts: [IntelligenceNewsFact] = []
+            for (index, item) in recent.enumerated() {
+                let text = index < 3 ? await session.client.fetchNewsSummaryText(item) : ""
+                guard isCurrent(context), !Task.isCancelled, intelligence.canUse(.news) else { return }
+                facts.append(IntelligenceNewsFact(title: item.title, date: item.date, text: text))
+            }
+            intelligenceNewsSource = recent; intelligenceNewsFacts = facts; intelligenceNewsReadAt = now
+        }
+        guard isCurrent(context), !Task.isCancelled else { return }
+        intelligence.request(.news(intelligenceNewsFacts), for: .news)
+    }
+
     // MARK: - 会话恢复
 
     /// 登录用户变化时清空缓存，避免串号。
@@ -209,6 +264,9 @@ final class PortalRepository {
         let epoch = session.requestEpoch
         guard loadedForSID != sid || loadedForEpoch != epoch else { return }
         accountGeneration = UUID()
+        intelligence.reset()
+        intelligenceAssignments = []; intelligenceAssignmentStamp = nil; intelligenceAssignmentSource = []
+        intelligenceNewsSource = []; intelligenceNewsFacts = []; intelligenceNewsReadAt = nil
         homeRequestID = UUID()
         appsTask?.cancel()
         appsTask = nil
@@ -1854,6 +1912,7 @@ final class AppEnvironment {
     let reminders = CampusReminderStore.shared
     var pendingActivityURL: URL?
     var pendingLearningSection: String?
+    var pendingLearningPlatform: LearningPlatform?
 
     init() {
         let store = SessionStore()

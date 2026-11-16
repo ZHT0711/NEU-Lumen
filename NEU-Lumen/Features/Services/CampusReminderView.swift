@@ -68,6 +68,7 @@ struct CampusReminderView: View {
     var body: some View {
         @Bindable var store = store
         List {
+            AssignmentIntelligenceSection()
             Section {
                 LabeledContent("系统通知权限", value: permission)
                 Toggle("启用校园提醒", isOn: Binding(get: { store.preferences.enabled }, set: { enabled in Task { await store.setEnabled(enabled) } }))

@@ -32,14 +32,15 @@ class NativeMailToolbarTests(unittest.TestCase):
         cls.batch = cls.mail.split("if active {", 1)[1].split(
             '.accessibilityIdentifier("mail.batch-selection")', 1)[0]
 
-    def test_switcher_reserves_sibling_height_outside_navigation(self):
+    def test_switcher_is_in_leading_navigation_slot(self):
         body = self.host.split("var body: some View {", 1)[1]
-        self.assertLess(body.index("NativeServiceScrubber("), body.index("TabView(selection: $selected)"))
         self.assertIn("VStack(spacing: 0)", body)
+        self.assertIn("ToolbarItem(placement: .topBarLeading)", body)
+        toolbar = body.split(".toolbar {", 1)[1]
+        self.assertIn("NativeServiceScrubber(selected: $selected, preview: $preview)", toolbar)
         self.assertNotIn("placement: .principal", body)
-        self.assertNotIn(".overlay", body)
         self.assertNotIn(".safeAreaInset(edge: .top", body)
-        self.assertIn(".navigationTitle(selected.title)", body)
+        self.assertIn('.navigationTitle("")', body)
 
     def test_pages_are_clipped_and_all_routes_are_retained(self):
         self.assertIn(".tabViewStyle(.page(indexDisplayMode: .never))", self.host)
@@ -70,20 +71,22 @@ class NativeMailToolbarTests(unittest.TestCase):
         self.assertIn("service(at x: CGFloat, width: CGFloat)", self.scrubber)
         self.assertIn("NativeServicePosition.index(at: Double(x), width: Double(width)", self.scrubber)
         self.assertNotIn("144", self.scrubber)
-        self.assertNotRegex(self.scrubber, r"\.frame\(width:\s*\d")
+        self.assertIn(".frame(width: 120, height: 44", self.scrubber)
+        self.assertIn(".contentShape(Rectangle())", self.scrubber)
         self.assertIn("width > 0, count > 0", self.model)
 
     def test_preview_and_voiceover_switching_are_preserved(self):
         for token in ["LongPressGesture(minimumDuration: 0.3)", "DragGesture(minimumDistance: 0)",
                       "preview = nil", "onChange(of: dragging)", "sensoryFeedback(.selection",
-                      "preview == nil", "visible.title", "accessibilityAdjustableAction",
+                      "visible.title", "accessibilityAdjustableAction",
                       "case .increment:", "case .decrement:", 'accessibilityIdentifier("services.scrubber")']:
             self.assertIn(token, self.scrubber)
         self.assertIn("services.count", self.scrubber)
 
-    def test_dynamic_text_wraps_without_compressed_fixed_title(self):
-        self.assertIn(".fixedSize(horizontal: false, vertical: true)", self.scrubber)
-        self.assertIn(".frame(height: 44)", self.scrubber)
+    def test_dynamic_title_falls_back_to_symbol_in_bounded_toolbar(self):
+        self.assertIn("ViewThatFits(in: .horizontal)", self.scrubber)
+        self.assertIn("Image(systemName: visible.symbol)", self.scrubber)
+        self.assertIn("height: 44", self.scrubber)
         self.assertIn(".frame(maxWidth: .infinity)", self.scrubber)
         self.assertNotIn("minimumScaleFactor", self.scrubber)
         self.assertNotIn("lineLimit(1)", self.scrubber)
@@ -92,11 +95,10 @@ class NativeMailToolbarTests(unittest.TestCase):
 
     def test_indicator_width_arithmetic_on_narrow_screens(self):
         # This is a layout arithmetic model, not executed Swift or pixel evidence.
-        gutter = int(re.search(r"\.padding\(\.horizontal, (\d+)\)", self.host).group(1))
         gap = int(re.search(r"HStack\(spacing: (\d+)\)", self.scrubber).group(1))
         for width in (240, 320, 375, 402, 430, 744):
             with self.subTest(width=width):
-                available = width - 2 * gutter
+                available = 120
                 pill = (available - gap * (len(self.services) - 1)) / len(self.services)
                 self.assertGreater(pill, 0)
                 self.assertAlmostEqual(pill * len(self.services) + gap * (len(self.services) - 1), available)

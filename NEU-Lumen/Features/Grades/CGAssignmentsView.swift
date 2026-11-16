@@ -7,6 +7,7 @@ struct CGAssignmentsView: View {
 
     var body: some View {
         List {
+            AssignmentIntelligenceSection()
             if repo.cgState == .loading { LoadingView(text: "正在读取 CG 作业与完成情况…") }
             if case .failed(let message) = repo.cgState {
                 ErrorStateView(message: message) { Task { await repo.loadCGAssignments(force: true) } }

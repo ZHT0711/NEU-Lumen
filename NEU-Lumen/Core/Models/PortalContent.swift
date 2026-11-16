@@ -41,6 +41,33 @@ enum NewsArticle {
     private static let tagName = try! NSRegularExpression(pattern: #"^</?([a-zA-Z][a-zA-Z0-9]*)"#)
     private static let contentNames: Set<String> = ["vsb_content", "vsb_content_2", "wp_articlecontent", "article_content", "article-content", "rich_media_content", "article-body", "v_news_content"]
 
+    /// Extract only declared article containers, never navigation or a login page.
+    static func plainText(in html: String, limit: Int = 500) -> String {
+        guard limit > 0 else { return "" }
+        let source = ignored.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "")
+        var stack: [(name: String, content: Bool)] = []
+        var pieces: [String] = []
+        var cursor = source.startIndex
+        let voids: Set<String> = ["img", "input", "br", "hr", "meta", "link", "source", "base", "area", "embed", "wbr", "col", "param", "track"]
+        for match in tags.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
+            guard let range = Range(match.range, in: source) else { continue }
+            if stack.contains(where: { $0.content }) { pieces.append(String(source[cursor..<range.lowerBound])) }
+            cursor = range.upperBound
+            let tag = String(source[range])
+            guard let match = tagName.firstMatch(in: tag, range: NSRange(tag.startIndex..., in: tag)),
+                  let nameRange = Range(match.range(at: 1), in: tag) else { continue }
+            let name = tag[nameRange].lowercased()
+            if tag.hasPrefix("</") {
+                if let index = stack.lastIndex(where: { $0.name == name }) { stack.removeSubrange(index...) }
+            } else if !voids.contains(name), !tag.hasSuffix("/>") {
+                let attrs = HTMLInputFields.attributes(in: tag)
+                let names = ((attrs["id"] ?? "") + " " + (attrs["class"] ?? "")).lowercased().split(whereSeparator: \.isWhitespace)
+                stack.append((name, name == "article" || names.contains { contentNames.contains(String($0)) }))
+            }
+        }
+        return String(HTMLInputFields.decode(pieces.joined(separator: " ")).split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(limit))
+    }
+
     static func firstImage(in html: String, base: URL) -> URL? {
         let source = ignored.stringByReplacingMatches(in: html, range: NSRange(html.startIndex..., in: html), withTemplate: "")
         var stack: [(name: String, content: Bool)] = []

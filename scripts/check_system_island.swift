@@ -63,13 +63,12 @@ if kind.hasPrefix("screen:") {
             return (candidate.string.replacingOccurrences(of: " ", with: ""), observation.boundingBox)
         }
         guard let title = boxes.first(where: { $0.text.contains("学校邮") })?.rect,
-              let switcher = boxes.first(where: { $0.text.contains("左右滑动或长按切换服务") })?.rect,
               let batch = boxes.first(where: { $0.text.contains("批量操作") })?.rect,
-              switcher.maxY + 0.005 < title.minY,
-              batch.maxY + 0.005 < switcher.minY else {
+              title.midX < 0.55,
+              batch.maxY + 0.005 < title.minY else {
             fatalError("Mail navigation, switcher and batch rows overlap or are missing; OCR: " + text)
         }
-        print("PASS: actual mailbox title, switcher and batch text bounds are vertically separated")
+        print("PASS: actual mailbox leading title/switcher and batch text bounds are separated")
     }
     print("PASS: rendered screenshot content " + screen)
 } else {

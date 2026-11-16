@@ -610,6 +610,19 @@ final class PortalClient {
         return result
     }
 
+    func fetchNewsSummaryText(_ item: NewsItem) async -> String {
+        guard let url = PortalLink.resolve(item.url), let host = url.host?.lowercased(),
+              host == "neu.edu.cn" || host.hasSuffix(".neu.edu.cn"), url.user == nil, url.password == nil else { return "" }
+        let epoch = sessionEpoch
+        await prepareAccess()
+        guard !Task.isCancelled, epoch == sessionEpoch,
+              let response = try? await http.get(browserDestination(for: url), extraHeaders: ["Accept": "text/html,application/xhtml+xml"]),
+              !Task.isCancelled, epoch == sessionEpoch, response.status == 200, response.body.count <= 4_000_000 else { return "" }
+        let landed = WebVPN.unwrap(response.finalURL) ?? response.finalURL
+        guard landed.host == url.host, landed.path == url.path else { return "" }
+        return NewsArticle.plainText(in: response.text)
+    }
+
     private func readNewsThumbnail(_ item: NewsItem) async -> Data? {
         guard !Task.isCancelled else { return nil }
         var image: URL?

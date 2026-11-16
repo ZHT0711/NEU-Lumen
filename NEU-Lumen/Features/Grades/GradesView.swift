@@ -70,6 +70,10 @@ struct GradesView: View {
             section = target == "成绩" ? "成绩" : "作业"
             environment.pendingLearningSection = nil
         }
+        .onChange(of: environment.pendingLearningPlatform, initial: true) { _, target in
+            guard let target else { return }
+            section = "作业"; platform = target; environment.pendingLearningPlatform = nil
+        }
         .sheet(isPresented: $showAcademicWeb) {
             NavigationStack {
                 PortalWebViewScreen(url: URL(string: PortalClient.jwxtBase + "/jwapp/sys/homeapp/index.do")!, academicMode: true)

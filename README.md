@@ -20,7 +20,7 @@
 
 ## 运行截图
 
-最近一次通过快速检查的 Nightly：App 实际运行于 iPhone 模拟器，使用演示数据；非实体真机截图。每次出包同步更新以下 10 张关键页面截图。
+最近一次通过快速检查的 Nightly：App 实际运行于 iPhone 模拟器，使用演示数据；首页智能摘要使用明确标注的合成输出，不代表实际模型推理。每次出包同步更新以下 10 张关键页面截图，非实体真机截图。
 
 <p align="center">
   <img src="https://github.com/ZHT0711/NEU-Lumen/releases/download/nightly/home-light.png" width="245" alt="首页" />

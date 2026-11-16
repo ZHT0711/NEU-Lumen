@@ -195,6 +195,7 @@ def package(directory, environment=None):
             'services': 'actual native services including analysis / map / library / telephone and twelve vector card illustrations; disposable Debug synthetic fixtures only; no real account',
             'indoor_navigation': 'actual SwiftUI selectors, bundled public Pathly catalog, native response decoder and UIKit route drawing with synthetic endpoints and floor image; no on-site accuracy validation',
             'campus_journey': 'actual cross-building endpoint and entrance/exit selection form; door coordinates require user confirmation; this screenshot does not validate live MapKit directions or on-site access',
+            'intelligence': 'actual summary views with an explicitly synthetic injected generator on Home only; does not exercise Apple Intelligence inference or a real account; unavailable model UI is hidden on other fixture pages',
         },
         'screenshots': images,
     }
