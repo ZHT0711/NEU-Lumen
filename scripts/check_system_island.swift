@@ -42,7 +42,7 @@ if kind.hasPrefix("screen:") {
         "native-payment": ["缴费大厅", "校园卡余额", "充值网费"],
         "native-vpn": ["WebVPN", "访问状态", "资源目录"],
         "native-affairs": ["办事大厅", "我的在办事项"],
-        "native-mail": ["学校邮箱", "收件箱"],
+        "native-mail": ["学校邮", "收件箱"],
         "native-news": ["校园资讯", "资讯频道"],
         "native-agenda": ["校园日程", "查看日期"],
         "native-downloads": ["下载中心", "已完成"],
@@ -55,12 +55,14 @@ if kind.hasPrefix("screen:") {
     }
     if screen == "native-mail" {
         // Measured Vision text bounds from THIS simulator image, not source arithmetic.
+        // Vision can confuse the bold final 箱 glyph; the exact title is executed in
+        // ServiceCatalog tests, while OCR uses its stable prefix for geometry only.
         // In the old layout, the batch label occupied the navigation title's row.
         let boxes = (request.results ?? []).compactMap { observation -> (text: String, rect: CGRect)? in
             guard let candidate = observation.topCandidates(1).first else { return nil }
             return (candidate.string.replacingOccurrences(of: " ", with: ""), observation.boundingBox)
         }
-        guard let title = boxes.first(where: { $0.text.contains("学校邮箱") })?.rect,
+        guard let title = boxes.first(where: { $0.text.contains("学校邮") })?.rect,
               let switcher = boxes.first(where: { $0.text.contains("左右滑动或长按切换服务") })?.rect,
               let batch = boxes.first(where: { $0.text.contains("批量操作") })?.rect,
               switcher.maxY + 0.005 < title.minY,

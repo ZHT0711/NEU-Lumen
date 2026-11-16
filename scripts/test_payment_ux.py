@@ -34,6 +34,7 @@ class PaymentUXTests(unittest.TestCase):
         network = view.split('Section("校园网络")', 1)[1].split('Section("缴费服务")', 1)[0]
         self.assertIn('Button("充值网费", systemImage: "wifi") { openPaymentURL(CampusPaymentEntry.netRecharge) }', network)
         self.assertIn('.accessibilityIdentifier("payment.netRecharge")', network)
+        self.assertLess(network.index('Button("充值网费"'), network.index('ForEach(net.usageFacts'))
         self.assertNotIn('openPayment()', network)
         for field in ('electricRoomCode', 'elecroomno', 'roomDraft', 'hasUnsavedRoom', '.electricity'):
             self.assertNotIn(field, network)
