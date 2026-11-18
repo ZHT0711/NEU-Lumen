@@ -9,31 +9,42 @@ final class TabBarScrollActivity {
 
     private(set) var direction: Direction?
     @ObservationIgnored private var restoreTask: Task<Void, Never>?
+    @ObservationIgnored private var restoreDeadline: ContinuousClock.Instant?
 
     func moved(by distance: CGFloat) {
         guard abs(distance) > 0.5 else { return }
-        direction = distance > 0 ? .down : .up
+        let next: Direction = distance > 0 ? .down : .up
+        if direction != next { direction = next }
         scheduleRestore(after: .milliseconds(650))
     }
 
     func ended() {
+        guard direction != nil else { return }
+        restoreTask?.cancel()
+        restoreTask = nil
         scheduleRestore(after: .milliseconds(350))
     }
 
     func restore() {
         restoreTask?.cancel()
         restoreTask = nil
-        direction = nil
+        restoreDeadline = nil
+        if direction != nil { direction = nil }
     }
 
     private func scheduleRestore(after delay: Duration) {
-        restoreTask?.cancel()
-        let deadline = ContinuousClock.now.advanced(by: delay)
+        restoreDeadline = ContinuousClock.now.advanced(by: delay)
+        guard restoreTask == nil else { return }
         restoreTask = Task { @MainActor [weak self] in
-            do { try await Task.sleep(until: deadline, clock: .continuous) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            self?.restore()
+            while let deadline = self?.restoreDeadline {
+                do { try await Task.sleep(until: deadline, clock: .continuous) }
+                catch { return }
+                guard let self, !Task.isCancelled else { return }
+                if self.restoreDeadline == deadline {
+                    self.restore()
+                    return
+                }
+            }
         }
     }
 }

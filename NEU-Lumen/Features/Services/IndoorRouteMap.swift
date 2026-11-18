@@ -11,7 +11,6 @@ struct IndoorReferenceMapView: View {
     @State private var image: UIImage?
     @State private var failed = false
     @State private var attempt = 0
-    private let client = PathlyClient()
     var body: some View {
         Group {
             if let image { IndoorZoomableMap(image: image).ignoresSafeArea(edges: .bottom) }
@@ -28,11 +27,11 @@ struct IndoorReferenceMapView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: reference.id.absoluteString + String(attempt)) {
             failed = false
-            do {
-                let data = try await client.image(reference.url)
-                guard !Task.isCancelled else { return }
-                image = UIImage(data: data); failed = image == nil
-            } catch { if !Task.isCancelled { failed = true } }
+            image = nil
+            let loaded = await CampusImageCache.floorMaps.image(at: reference.url) { try await PathlyClient.shared.image($0) }
+            guard !Task.isCancelled else { return }
+            image = loaded
+            failed = loaded == nil
         }
     }
 }
@@ -53,7 +52,6 @@ struct IndoorRouteMapCard: View {
     @State private var failed = false
     @State private var enlarged = false
     @State private var attempt = 0
-    private let client = PathlyClient()
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(step.title).font(.headline)
@@ -82,14 +80,17 @@ struct IndoorRouteMapCard: View {
     private func load() async {
         guard let url = step.imageURL else { failed = true; return }
         failed = false; image = nil
-        do {
-            let data = try await client.image(url)
-            guard !Task.isCancelled else { return }
-            guard let source = UIImage(data: data) else { failed = true; return }
-            image = Self.draw(source: source, points: step.points, first: first, last: last)
-        } catch { if !Task.isCancelled { failed = true } }
+        let source = await CampusImageCache.floorMaps.image(at: url) { try await PathlyClient.shared.image($0) }
+        guard !Task.isCancelled else { return }
+        guard let source else { failed = true; return }
+        let points = step.points, first = first, last = last
+        let rendered = await Task.detached(priority: .userInitiated) {
+            Self.draw(source: source, points: points, first: first, last: last)
+        }.value
+        guard !Task.isCancelled else { return }
+        image = rendered
     }
-    static func draw(source: UIImage, points: [IndoorCoordinate], first: Bool, last: Bool) -> UIImage {
+    nonisolated static func draw(source: UIImage, points: [IndoorCoordinate], first: Bool, last: Bool) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1; format.opaque = true
         return UIGraphicsImageRenderer(size: source.size, format: format).image { _ in

@@ -79,6 +79,7 @@ extension PortalRepository {
         dataCards = DemoData.dataCards
         apps = DemoData.apps
         appsLoaded = true
+        appsUpdatedAt = Date()
         favorites.activate(account: loadedForSID ?? "", apps: apps)
         cardBalance = CardBalance(balance: 66.50, subsidy: 7.50, status: "正常卡")
         cardState = .loaded
@@ -101,7 +102,9 @@ extension PortalRepository {
                 url: "http://127.0.0.1:8787/article.html?id=\(index)", picUrl: "")
         }
         hotSearch = DemoData.hotSearch
+        hotSearchReadAt = Date()
         homeState = .loaded
+        homeUpdatedAt = Date()
         gradesCache = [GradeSemester(name: "2026–2027 秋季学期", termCode: "fixture", current: true,
             courses: [GradeCourse(name: "高等数学", credit: 5, category: "必修", score: 92, scoreRaw: ""),
                       GradeCourse(name: "大学英语", credit: 3, category: "必修", score: 88, scoreRaw: "")])]
@@ -372,12 +375,16 @@ struct UIValidationRoot: View {
                 BrowserDownloadCoordinator()
                 Color.clear.task {
                     guard ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--screen=") }) else { return }
+                    let marker = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("screen-ready.txt")
                     do {
+                        if screen == "home" { try await verifyCampusImageCache() }
                         try await Task.sleep(for: .milliseconds(750))
-                        let marker = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                            .appendingPathComponent("screen-ready.txt")
                         try ("PASS: screenshot page mounted " + screen).write(to: marker, atomically: true, encoding: .utf8)
-                    } catch { }
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        try? ("FAIL: " + error.localizedDescription).write(to: marker, atomically: true, encoding: .utf8)
+                    }
                 }
             }
         }
@@ -1210,7 +1217,7 @@ service_fixture('NEU-Lumen/Core/Networking/PathlyClient.swift',
         }
 ''')
 service_fixture('NEU-Lumen/Features/Services/IndoorRouteMap.swift',
-                'image = Self.draw(source: source, points: step.points, first: first, last: last)', r'''
+                'image = rendered', r'''
             if ProcessInfo.processInfo.arguments.contains("--screen=indoor-route"), image != nil, step.points.count == 4 {
                 let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 try? "PASS: actual native route decoder and UIKit line rendering on a synthetic floor image".write(to: folder.appendingPathComponent("indoor-route-screenshot.txt"), atomically: true, encoding: .utf8)

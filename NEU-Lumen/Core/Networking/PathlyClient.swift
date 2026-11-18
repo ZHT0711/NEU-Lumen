@@ -1,7 +1,9 @@
 import Foundation
 
 /// A separate public-data transport: campus authentication cookies never enter Pathly requests.
-final class PathlyClient {
+final class PathlyClient: Sendable {
+    static let shared = PathlyClient()
+
     private let session: URLSession
     init() {
         let configuration = URLSessionConfiguration.ephemeral

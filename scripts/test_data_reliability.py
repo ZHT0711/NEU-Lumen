@@ -17,14 +17,19 @@ def section(text, start, end):
 
 
 class DataReliabilityContracts(unittest.TestCase):
-    def test_home_aggregate_validates_before_write(self):
-        home = section(REPO, 'func refreshHome(', 'func dataCardURL(')
-        guard = home.index('guard isCurrent(context), request == homeRequestID')
-        self.assertLess(home.index('await (cards, appList, newsList, todoList, hot)'), guard)
-        self.assertLess(guard, home.index('dataCards = value'))
+    def test_home_joins_pending_reads_and_validates_each_result_before_write(self):
+        home = section(REPO, 'func refreshHome(', 'private enum HomeSection')
+        self.assertLess(home.index('if let homeTask'), home.index('let task = Task'))
+        self.assertIn('self.isCurrent(context), self.homeRequestID == request', home)
         self.assertIn('guard !Task.isCancelled', home)
-        self.assertNotIn('fetchApps()', home)
-        self.assertIn('loadAppsIfNeeded(force: force)', home)
+        sections = section(REPO, 'private func readHomeSections(', 'func dataCardURL(')
+        guard = sections.index('guard isCurrent(context), homeRequestID == request, !Task.isCancelled')
+        self.assertLess(sections.index('for await section in group'), guard)
+        for write in ['dataCards = value', 'news = value', 'todos = value']:
+            self.assertLess(guard, sections.index(write))
+        self.assertNotIn('fetchApps()', sections)
+        self.assertNotIn('fetchHotSearch()', sections)
+        self.assertIn('loadAppsIfNeeded(force: force)', sections)
 
     def test_first_recovery_success_is_checked(self):
         recovery = section(REPO, 'private func withRecovery', 'private func run')

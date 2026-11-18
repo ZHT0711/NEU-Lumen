@@ -33,7 +33,10 @@ final class PortalRepository {
 
     private(set) var user: PortalUser?
     private(set) var dataCards: [DataCard] = []
-    private(set) var apps: [PortalApp] = []
+    private(set) var apps: [PortalApp] = [] {
+        didSet { serviceCategories = ServiceCatalog(apps: apps).categories }
+    }
+    private(set) var serviceCategories: [ServiceCategory] = []
     private(set) var news: [NewsItem] = []
     private(set) var todos: [TodoItem] = []
     private(set) var hotSearch: [String] = []
@@ -51,7 +54,11 @@ final class PortalRepository {
     private var weekRequests: [Date: UUID] = [:]
     // Compatibility for fixture callers; views use displayWeekState(starting:).
     private(set) var weekState: LoadState = .idle
+    @ObservationIgnored private var homeTask: Task<Void, Never>?
     private var homeRequestID = UUID()
+    private var homeUpdatedAt: Date?
+    @ObservationIgnored private var hotSearchTask: Task<Void, Never>?
+    private var hotSearchReadAt: Date?
 
     private var gradesCache: [GradeSemester]?
     private(set) var gradesUpdatedAt: Date?
@@ -267,7 +274,10 @@ final class PortalRepository {
         intelligence.reset()
         intelligenceAssignments = []; intelligenceAssignmentStamp = nil; intelligenceAssignmentSource = []
         intelligenceNewsSource = []; intelligenceNewsFacts = []; intelligenceNewsReadAt = nil
-        homeRequestID = UUID()
+        homeTask?.cancel(); homeTask = nil
+        homeRequestID = UUID(); homeUpdatedAt = nil
+        hotSearchTask?.cancel(); hotSearchTask = nil
+        hotSearchReadAt = nil
         appsTask?.cancel()
         appsTask = nil
         appsRequestID = UUID()
@@ -441,7 +451,10 @@ final class PortalRepository {
             return state == .loading
         }
         var work: [Task<Void, Never>] = []
-        if interrupted(homeState) { work.append(Task { await self.refreshHome(force: true) }) }
+        if interrupted(homeState) {
+            homeRequestID = UUID(); homeTask?.cancel(); homeTask = nil
+            work.append(Task { await self.refreshHome(force: true) })
+        }
         if !appsLoaded || appsLoading {
             appsRequestID = UUID(); appsTask?.cancel(); appsTask = nil; appsLoading = false
             work.append(Task { _ = await self.loadAppsIfNeeded(force: true) })
@@ -455,6 +468,8 @@ final class PortalRepository {
         }
         walletAccessID = UUID(); walletAccessTask?.cancel(); walletAccessTask = nil
         for (week, state) in weekStates where interrupted(state) {
+            weekRequests[week] = UUID()
+            weekTasks.removeValue(forKey: week)?.cancel()
             work.append(Task { await self.loadWeek(containing: week, force: true) })
         }
         if interrupted(gradesState) || gradesWarning != nil {
@@ -484,42 +499,70 @@ final class PortalRepository {
     func refreshHome(force: Bool = false) async {
         await ensureLoadedForCurrentUser()
         guard let context = requestContext, !Task.isCancelled else { return }
-        if !force, homeState == .loading { return }
+        if let homeTask { await homeTask.value; return }
+        if !force, DataFreshness.isFresh(homeUpdatedAt, for: DataFreshness.home) { return }
         let request = UUID()
         homeRequestID = request
         let previousState = homeState == .loading ? LoadState.idle : homeState
         homeState = .loading
-        let client = session.client
+        let task = Task { @MainActor in
+            defer {
+                if self.isCurrent(context), self.homeRequestID == request { self.homeTask = nil }
+            }
+            let anySuccess = await self.readHomeSections(context: context, request: request, force: force)
+            guard self.isCurrent(context), self.homeRequestID == request else { return }
+            guard !Task.isCancelled else { self.homeState = previousState; return }
+            if anySuccess { self.homeUpdatedAt = Date() }
+            self.user = self.session.user
+            self.usedOfflineFallback = !anySuccess
+            self.homeState = anySuccess ? .loaded : .failed("门户接口不可用，正在展示离线演示数据")
+        }
+        homeTask = task
+        await task.value
+    }
 
-        async let cards = run { try await client.fetchDataCards() }
-        async let appList = loadAppsIfNeeded(force: force)
-        async let newsList = run { try await client.fetchNews() }
-        async let todoList = run { try await client.fetchTodos() }
-        async let hot = run { try await client.fetchHotSearch() }
+    private enum HomeSection: Sendable {
+        case cards([DataCard]?), apps(Bool), news([NewsItem]?), todos([TodoItem]?)
+    }
 
-        let (cardsValue, appsValue, newsValue, todoValue, hotValue) =
-            await (cards, appList, newsList, todoList, hot)
-        // A child may have completed BEFORE an account switch. Recheck the
-        // aggregate before touching any visible state or account-owned cache.
-        guard isCurrent(context), request == homeRequestID else { return }
-        guard !Task.isCancelled else { homeState = previousState; return }
+    private func readHomeSections(context: RepositoryRequestContext, request: UUID, force: Bool) async -> Bool {
+        await withTaskGroup(of: HomeSection.self) { group in
+            group.addTask { @MainActor in .cards(await self.run { try await self.session.client.fetchDataCards() }) }
+            group.addTask { @MainActor in .apps(await self.loadAppsIfNeeded(force: force)) }
+            group.addTask { @MainActor in .news(await self.run { try await self.session.client.fetchNews() }) }
+            group.addTask { @MainActor in .todos(await self.run { try await self.session.client.fetchTodos() }) }
 
-        var anySuccess = cardsValue != nil || todoValue != nil || hotValue != nil || appsValue
-        if let value = cardsValue { dataCards = value }
-        if let value = newsValue {
-            news = value
-            newsUpdatedAt = Date()
-            newsRevision += 1
-            newsThumbnails = newsThumbnails.filter { !$0.value.isEmpty }
-            anySuccess = true
-        } else if news.isEmpty { news = DemoData.news }
-        if let value = todoValue { todos = value; todosUpdatedAt = Date() }
-        if let value = hotValue { hotSearch = value }
-        else if hotSearch.isEmpty { hotSearch = DemoData.hotSearch }
-
-        user = session.user
-        usedOfflineFallback = !anySuccess
-        homeState = anySuccess ? .loaded : .failed("门户接口不可用，正在展示离线演示数据")
+            var anySuccess = false
+            for await section in group {
+                guard isCurrent(context), homeRequestID == request, !Task.isCancelled else {
+                    group.cancelAll()
+                    return false
+                }
+                switch section {
+                case .cards(let value?):
+                    if dataCards != value { dataCards = value }
+                    anySuccess = true
+                case .apps(let loaded):
+                    anySuccess = anySuccess || loaded
+                case .news(let value?):
+                    if news != value { news = value }
+                    newsUpdatedAt = Date()
+                    let visibleIDs = Set(value.prefix(3).map(\.id))
+                    newsThumbnails = newsThumbnails.filter { visibleIDs.contains($0.key) && !$0.value.isEmpty }
+                    newsRevision &+= 1
+                    anySuccess = true
+                case .news(nil):
+                    if news.isEmpty { news = DemoData.news }
+                case .todos(let value?):
+                    if todos != value { todos = value }
+                    todosUpdatedAt = Date()
+                    anySuccess = true
+                case .cards(nil), .todos(nil):
+                    break
+                }
+            }
+            return anySuccess
+        }
     }
 
     func dataCardURL(_ card: DataCard) -> URL {
@@ -594,8 +637,11 @@ final class PortalRepository {
             let value = await self.run { try await self.session.client.fetchApps() }
             guard self.isCurrent(context), request == self.appsRequestID, !Task.isCancelled else { return false }
             guard let value else { return false }
-            self.apps = ServiceCatalog.merging([DemoData.apps, self.cachedApps(account: context.account), self.apps, value])
-            self.saveAppsCache(account: context.account)
+            let merged = ServiceCatalog.merging([self.apps, value])
+            if self.apps != merged {
+                self.apps = merged
+                self.saveAppsCache(account: context.account)
+            }
             self.appsLoaded = true
             self.appsUpdatedAt = Date()
             return true
@@ -615,13 +661,21 @@ final class PortalRepository {
         UserDefaults.standard.set(data, forKey: "lumen.apps." + account)
     }
 
-    func loadHotSearchIfNeeded() async {
+    func loadHotSearchIfNeeded(force: Bool = false) async {
         await ensureLoadedForCurrentUser()
-        guard let context = requestContext, hotSearch.isEmpty, !Task.isCancelled else { return }
-        let value = await run { try await self.session.client.fetchHotSearch() }
-        guard isCurrent(context), !Task.isCancelled else { return }
-        if let value { hotSearch = value }
-        else if hotSearch.isEmpty { hotSearch = DemoData.hotSearch }
+        guard let context = requestContext, !Task.isCancelled else { return }
+        if let hotSearchTask { await hotSearchTask.value; return }
+        if !force, DataFreshness.isFresh(hotSearchReadAt, for: DataFreshness.home) { return }
+        let task = Task { @MainActor in
+            defer { if self.isCurrent(context) { self.hotSearchTask = nil } }
+            let value = await self.run { try await self.session.client.fetchHotSearch() }
+            guard self.isCurrent(context), !Task.isCancelled else { return }
+            self.hotSearchReadAt = Date()
+            if let value { self.hotSearch = value }
+            else if self.hotSearch.isEmpty { self.hotSearch = DemoData.hotSearch }
+        }
+        hotSearchTask = task
+        await task.value
     }
 
     // MARK: - 课表
@@ -632,9 +686,8 @@ final class PortalRepository {
         await ensureLoadedForCurrentUser()
         guard let context = requestContext, !Task.isCancelled else { return }
         let weekStart = LiveActivityDataPolicy.portalWeekStart(for: date)
-        if !force, let task = weekTasks[weekStart] { await task.value; return }
+        if let task = weekTasks[weekStart] { await task.value; return }
         if !force, weekCache[weekStart] != nil { return }
-        weekTasks[weekStart]?.cancel()
         let request = UUID()
         weekRequests[weekStart] = request
         let previousState = weekStates[weekStart] ?? .idle
@@ -673,20 +726,33 @@ final class PortalRepository {
     }
 
     func loadDisplayWeek(starting sunday: Date, force: Bool = false) async {
-        await ensureLoadedForCurrentUser()
-        guard let context = requestContext, !Task.isCancelled else { return }
         let first = Calendar.current.date(byAdding: .day, value: 1, to: sunday)!
         let end = Calendar.current.date(byAdding: .day, value: 8, to: sunday)!
-        for week in requiredPortalWeeks(from: first, to: end).sorted() {
-            await loadWeek(containing: week, force: force)
-            guard isCurrent(context), !Task.isCancelled else { return }
-        }
-        let nextSunday = Calendar.current.date(byAdding: .day, value: 7, to: sunday)!
-        for year in Set([sunday, nextSunday].map { Calendar.current.component(.year, from: $0) }) {
-            await holidays.refresh(year: year)
-            guard isCurrent(context), !Task.isCancelled else { return }
-        }
+        guard await loadSchedule(from: first, to: end, force: force) else { return }
         weekState = displayWeekState(starting: sunday)
+    }
+
+    func loadTodaySchedule(now: Date = Date(), force: Bool = false) async {
+        let range = activityRange(now: now, dayOnly: true)
+        let first = Calendar.current.date(byAdding: .day, value: -1, to: range.first)!
+        _ = await loadSchedule(from: first, to: range.end, force: force)
+    }
+
+    private func loadSchedule(from first: Date, to end: Date, force: Bool) async -> Bool {
+        await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return false }
+        let weeks = requiredPortalWeeks(from: first, to: end)
+        await withTaskGroup(of: Void.self) { group in
+            for week in weeks {
+                group.addTask { await self.loadWeek(containing: week, force: force) }
+            }
+        }
+        let last = Calendar.current.date(byAdding: .day, value: -1, to: end)!
+        for year in Set([first, last].map { Calendar.current.component(.year, from: $0) }) {
+            guard isCurrent(context), !Task.isCancelled else { return false }
+            await holidays.refresh(year: year)
+        }
+        return isCurrent(context) && !Task.isCancelled
     }
 
     private func requiredPortalWeeks(from first: Date, to end: Date) -> Set<Date> {
@@ -703,14 +769,15 @@ final class PortalRepository {
         return ScheduleReadStatus.loadState(states(for: requiredPortalWeeks(from: first, to: end)))
     }
 
-    func todayScheduleStatus(now: Date = Date()) -> ScheduleReadStatus {
-        guard hasCurrentLiveActivityAccount else { return .unread }
+    func todaySchedule(now: Date = Date()) -> (timeline: [CourseOccurrence], status: ScheduleReadStatus) {
+        guard hasCurrentLiveActivityAccount else { return ([], .unread) }
         let range = activityRange(now: now, dayOnly: true)
         let first = Calendar.current.date(byAdding: .day, value: -1, to: range.first)!
         let weeks = requiredPortalWeeks(from: first, to: range.end)
         let snapshot = activitySchedule(now: now, dayOnly: true)
-        return ScheduleReadStatus.summarize(states(for: weeks),
+        let status = ScheduleReadStatus.summarize(states(for: weeks),
             hasData: weeks.contains { weekCache[$0] != nil } || !snapshot.items.isEmpty)
+        return (snapshot.items.map(\.occurrence), status)
     }
 
     func displayWeekOccurrences(starting sunday: Date) -> [CourseOccurrence] {
@@ -756,12 +823,6 @@ final class PortalRepository {
         let relevant = requiredPortalWeeks(from: first, to: end).flatMap { weekCache[$0] ?? [] }
         return holidays.apply(HolidayRules.project(relevant, from: first, to: end,
             replacements: holidays.replacementDates))
-    }
-
-    /// 今日时间轴包含跨午夜仍进行中的事项，和课表页使用同一调休/本机数据。
-    func todayTimeline(now: Date = Date()) -> [CourseOccurrence] {
-        guard hasCurrentLiveActivityAccount else { return [] }
-        return activitySchedule(now: now, dayOnly: true).items.map(\.occurrence)
     }
 
     /// 不再只看今天：从当前时刻选未来七个自然日内最早未结束的事项。

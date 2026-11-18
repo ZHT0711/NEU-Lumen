@@ -52,8 +52,9 @@ struct ServiceCatalog {
     }
 
     var categories: [ServiceCategory] {
-        Dictionary(grouping: apps, by: \.serviceCategory)
-            .map { ServiceCategory(name: $0.key, count: $0.value.count) }
+        var counts: [String: Int] = [:]
+        for app in apps { counts[app.serviceCategory, default: 0] += 1 }
+        return counts.map { ServiceCategory(name: $0.key, count: $0.value) }
             .sorted {
                 $0.count == $1.count ? $0.name < $1.name : $0.count > $1.count
             }

@@ -15,7 +15,7 @@ final class IndoorNavigationStore {
     private var destination = ""
     private var request = UUID()
     private var prepared = false
-    private let client = PathlyClient()
+    private let client = PathlyClient.shared
     private let defaults = UserDefaults.standard
     var buildings: [IndoorBuilding] { catalog?.buildings.filter { $0.campus == campus } ?? [] }
     var building: IndoorBuilding? { buildings.first { $0.id == buildingID } }

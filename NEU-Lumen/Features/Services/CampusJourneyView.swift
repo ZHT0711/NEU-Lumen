@@ -35,7 +35,7 @@ final class CampusJourneyStore {
     private var request = UUID()
     private var directions: MKDirections?
     private let defaults: UserDefaults
-    private let client = PathlyClient()
+    private let client = PathlyClient.shared
     private let projection: CampusMapProjection
     init(defaults: UserDefaults = .standard, projection: CampusMapProjection? = nil) {
         self.defaults = defaults

@@ -111,8 +111,8 @@ struct HomeView: View {
     private func refreshHomeData(force: Bool) async {
         async let home: Void = refreshPortalHome(force: force)
         async let wallet: Void = repo.loadCardOverview(force: force)
-        async let week: Void = repo.loadDisplayWeek(starting: Semester.weekStart(forDay: Date()), force: force)
-        _ = await (home, wallet, week)
+        async let schedule: Void = repo.loadTodaySchedule(force: force)
+        _ = await (home, wallet, schedule)
     }
 
     private func refreshPortalHome(force: Bool) async {
@@ -274,8 +274,7 @@ struct HomeView: View {
 
     private var todaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            let timeline = repo.todayTimeline()
-            let status = repo.todayScheduleStatus()
+            let (timeline, status) = repo.todaySchedule()
             HStack {
                 sectionHeader("今日课程", icon: "clock")
                 Spacer()

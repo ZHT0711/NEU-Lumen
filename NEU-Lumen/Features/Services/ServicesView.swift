@@ -20,8 +20,6 @@ struct ServicesView: View {
         environment.repository
     }
 
-    private var catalog: ServiceCatalog { ServiceCatalog(apps: repo.apps) }
-
     private var keyword: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -73,11 +71,15 @@ struct ServicesView: View {
             .navigationTitle("服务大厅")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await loadCatalog(force: true) }
+            .refreshable {
+                async let catalog: Void = loadCatalog(force: true)
+                if showDirectory { await repo.loadHotSearchIfNeeded(force: true) }
+                await catalog
+            }
             .onChange(of: showDirectory) { _, directory in
                 if !directory { selectedCategory = nil; favoritesOnly = false }
             }
-            .onChange(of: catalog.categories) { _, categories in
+            .onChange(of: repo.serviceCategories) { _, categories in
                 if let selectedCategory, !categories.contains(where: { $0.name == selectedCategory }) {
                     self.selectedCategory = nil
                 }
@@ -91,7 +93,9 @@ struct ServicesView: View {
                 }
                 await repo.ensureLoadedForCurrentUser()
                 await loadCatalog(force: false)
-                await repo.loadHotSearchIfNeeded()
+            }
+            .task(id: showDirectory) {
+                if showDirectory { await repo.loadHotSearchIfNeeded() }
             }
             .navigationDestination(for: AppDestination.self) { dest in
                 switch dest {
@@ -145,6 +149,7 @@ struct ServicesView: View {
 
     @ViewBuilder
     private var nativeStudyServices: some View {
+        let keyword = self.keyword
         let services = NativeCampusService.allCases.filter {
             keyword.isEmpty || ($0.title + $0.subtitle).localizedCaseInsensitiveContains(keyword)
         }
@@ -162,7 +167,7 @@ struct ServicesView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     categoryChip(name: "全部", count: repo.apps.count, category: nil)
-                    ForEach(catalog.categories) { category in
+                    ForEach(repo.serviceCategories) { category in
                         categoryChip(name: category.name, count: category.count, category: category.name)
                     }
                 }

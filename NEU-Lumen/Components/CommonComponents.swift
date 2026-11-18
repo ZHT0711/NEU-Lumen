@@ -18,43 +18,6 @@ struct GlassCard<Content: View>: View {
     }
 }
 
-/// 远程图片：AsyncImage + URLCache，占位与失败同形，避免布局跳动。
-struct RemoteImageView: View {
-    let path: String
-
-    var body: some View {
-        if let url = Self.resolve(path) {
-            AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFit()
-                default:
-                    placeholder
-                }
-            }
-        } else {
-            placeholder
-        }
-    }
-
-    private var placeholder: some View {
-        Image(systemName: "square.grid.2x2")
-            .resizable()
-            .scaledToFit()
-            .foregroundStyle(.tertiary)
-    }
-
-    /// 相对路径拼门户域名；其余走 withScheme 补协议。
-    static func resolve(_ raw: String) -> URL? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return nil }
-        if trimmed.hasPrefix("/") {
-            return URL(string: PortalClient.portalBase + trimmed)
-        }
-        return URL(string: withScheme(trimmed))
-    }
-}
-
 /// 错误态 + 重试。
 struct ErrorStateView: View {
     let message: String

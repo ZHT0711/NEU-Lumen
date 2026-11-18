@@ -79,8 +79,7 @@ struct ScheduleView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task {
-                            await repo.loadDisplayWeek(starting: weekStartSunday, force: true)
-                            await refreshSystemAgenda(force: true)
+                            await loadWeek(force: true)
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -96,9 +95,7 @@ struct ScheduleView: View {
             }
             .task(id: LoadKey(active: active, sunday: weekStartSunday, account: environment.session.requestEpoch)) {
                 guard active else { return }
-                await repo.loadDisplayWeek(starting: weekStartSunday)
-                guard !Task.isCancelled else { return }
-                await refreshSystemAgenda()
+                await loadWeek()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -138,6 +135,15 @@ struct ScheduleView: View {
                 repo.planner.add(event)
             }
         }
+    }
+
+    private func loadWeek(force: Bool = false) async {
+        let sunday = weekStartSunday
+        await repo.ensureLoadedForCurrentUser()
+        guard !Task.isCancelled else { return }
+        async let portal: Void = repo.loadDisplayWeek(starting: sunday, force: force)
+        if sunday == weekStartSunday { await refreshSystemAgenda(force: force) }
+        await portal
     }
 
     private func refreshSystemAgenda(force: Bool = false) async {

@@ -49,6 +49,7 @@ struct RepositoryRequestContext: Equatable {
 }
 
 enum DataFreshness {
+    static let home: TimeInterval = 300
     static let wallet: TimeInterval = 60
     static let electric: TimeInterval = 120
     static let apps: TimeInterval = 600

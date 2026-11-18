@@ -1,5 +1,57 @@
 // App-only regression extension, appended to the disposable repository source by
 // prepare_ui_validation.py. This file is never compiled into the downloadable IPA.
+import UIKit
+
+private actor ImageFixtureSource {
+    private(set) var reads = 0
+
+    func fetch(data: Data) async throws -> Data {
+        reads += 1
+        try await Task.sleep(for: .milliseconds(40))
+        return data
+    }
+}
+
+@MainActor
+func verifyCampusImageCache() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    func makeCache() -> CampusImageCache {
+        CampusImageCache(folder: "Images", maxPixels: 128, maxDownloadBytes: 100_000,
+                         memoryBudget: 1_000_000, diskBudget: 1_000_000, cacheRoot: root)
+    }
+    let url = URL(string: "https://example.invalid/campus-icon.png")!
+    let cache = makeCache()
+    let source = ImageFixtureSource()
+    let size = CGSize(width: 200, height: 150)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    let icon = UIGraphicsImageRenderer(size: size, format: format).image { context in
+        UIColor.blue.setFill()
+        context.fill(CGRect(origin: .zero, size: size))
+    }
+    guard let data = icon.pngData() else { throw NetworkError(message: "Could not generate fixture image") }
+
+    async let first = cache.image(at: url) { _ in try await source.fetch(data: data) }
+    async let second = cache.image(at: url) { _ in try await source.fetch(data: data) }
+    let (a, b) = await (first, second)
+    guard let a, a === b, a.cgImage?.width == 128, a.cgImage?.height == 96,
+          await source.reads == 1 else {
+        throw NetworkError(message: "Service icon was not downsampled or fetched once")
+    }
+    let memory = await cache.image(at: url) { _ in throw URLError(.notConnectedToInternet) }
+    let disk = await makeCache().image(at: url) { _ in throw URLError(.notConnectedToInternet) }
+    guard memory === a, disk?.cgImage?.width == 128 else {
+        throw NetworkError(message: "Service icon cache missed in memory or after reopening disk cache")
+    }
+    let otherURL = URL(string: "https://example.invalid/campus-icon.png?v=2")!
+    let invalid = await cache.image(at: otherURL) { _ in Data("not an image".utf8) }
+    let retry = await cache.image(at: otherURL) { _ in try await source.fetch(data: data) }
+    guard invalid == nil, retry != nil, await source.reads == 2 else {
+        throw NetworkError(message: "Invalid image was cached or the updated URL reused stale content")
+    }
+}
+
 extension PortalRepository {
     func verifyDataReliability() async throws {
         func require(_ condition: Bool, _ message: String) throws {
