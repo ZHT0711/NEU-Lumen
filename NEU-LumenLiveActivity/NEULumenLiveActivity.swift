@@ -150,5 +150,11 @@ private func activityAccent(_ token: String?) -> Color {
 
 @main
 struct NEULumenLiveActivityBundle: WidgetBundle {
-    var body: some Widget { NEULumenLiveActivity() }
+    var body: some Widget {
+        NEULumenLiveActivity()
+        NEULumenNextCourseWidget()
+        NEULumenTodayScheduleWidget()
+        NEULumenAssignmentsWidget()
+        NEULumenCampusLauncherWidget()
+    }
 }

@@ -234,6 +234,32 @@ jobs:
           exec > >(tee "${RUNNER_TEMP}/reminder-tests.log") 2>&1
           python3 scripts/test_campus_reminders.py --require-swift
 
+      - name: Test campus widgets and WebDAV backup
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec > >(tee "${RUNNER_TEMP}/widgets-and-backup-tests.log") 2>&1
+          swiftc -swift-version 5 -warnings-as-errors \
+            NEU-Lumen/Core/Models/CampusWidgetSnapshot.swift \
+            Tests/CampusWidgets/main.swift \
+            -o "${RUNNER_TEMP}/campus-widget-tests"
+          "${RUNNER_TEMP}/campus-widget-tests"
+          swiftc -swift-version 5 -warnings-as-errors -parse-as-library \
+            NEU-Lumen/Core/Networking/WebDAVBackupClient.swift \
+            Tests/WebDAVBackupTransport/main.swift \
+            -o "${RUNNER_TEMP}/webdav-transport-tests"
+          "${RUNNER_TEMP}/webdav-transport-tests"
+          swiftc -swift-version 5 -warnings-as-errors \
+            NEU-Lumen/Core/Support/JSONHelpers.swift \
+            NEU-Lumen/Core/Models/Campus.swift \
+            NEU-Lumen/Core/Models/CourseModels.swift \
+            NEU-Lumen/Core/Models/HolidayRules.swift \
+            NEU-Lumen/Core/Models/PersonalBackup.swift \
+            NEU-Lumen/Core/Services/Semester.swift \
+            Tests/PersonalBackup/main.swift \
+            -o "${RUNNER_TEMP}/personal-backup-tests"
+          "${RUNNER_TEMP}/personal-backup-tests"
+
       - name: Build unsigned IPA
         shell: bash
         run: |
@@ -249,7 +275,7 @@ jobs:
       - name: Require warning-free compiler logs
         # Add each new native test log here and increment --required-count together.
         run: >-
-          python3 scripts/check_build_diagnostics.py --required-count 11
+          python3 scripts/check_build_diagnostics.py --required-count 12
           "${RUNNER_TEMP}/catalog-tests.log"
           "${RUNNER_TEMP}/planner-tests.log"
           "${RUNNER_TEMP}/login-tests.log"
@@ -258,6 +284,7 @@ jobs:
           "${RUNNER_TEMP}/data-reliability-tests.log"
           "${RUNNER_TEMP}/academic-query-tests.log"
           "${RUNNER_TEMP}/reminder-tests.log"
+          "${RUNNER_TEMP}/widgets-and-backup-tests.log"
           "${RUNNER_TEMP}/system-island-tests.log"
           build/ios-build.log build/ui-preview/simulator-build.log
 

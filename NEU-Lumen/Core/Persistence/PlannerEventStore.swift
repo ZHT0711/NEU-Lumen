@@ -31,6 +31,12 @@ final class PlannerEventStore {
         persist()
     }
 
+    func restore(_ updated: [PlannerEvent]) throws {
+        guard events != updated else { return }
+        try write(updated)
+        events = updated
+    }
+
     /// 展开某一周（周日起 7 天）内的日程。
     func occurrences(inWeekStarting weekStart: Date) -> [CourseOccurrence] {
         let end = weekStart.addingTimeInterval(7 * 86400)
@@ -58,16 +64,17 @@ final class PlannerEventStore {
     }
 
     private func persist() {
-        guard let url = fileURL else { return }
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let data = try JSONEncoder().encode(events)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            // 本机缓存写入失败不打断交互
-        }
+        // Preserve the existing best-effort write used by the in-app editor.
+        try? write(events)
+    }
+
+    private func write(_ events: [PlannerEvent]) throws {
+        guard let url = fileURL else { throw CocoaError(.fileNoSuchFile) }
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let data = try JSONEncoder().encode(events)
+        try data.write(to: url, options: .atomic)
     }
 }

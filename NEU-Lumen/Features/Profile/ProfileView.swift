@@ -119,6 +119,9 @@ struct ProfileView: View {
                     } label: {
                         Label("锁屏与灵动岛", systemImage: "circle.dotted.and.circle")
                     }
+                    NavigationLink { CampusWidgetSettingsView() } label: {
+                        Label("小组件", systemImage: "rectangle.grid.1x2")
+                    }
                 }
 
                 Section("设置与支持") {
@@ -127,6 +130,9 @@ struct ProfileView: View {
                     }
                     NavigationLink { accountSettings } label: {
                         Label("账号与登录", systemImage: "person.crop.circle.badge.checkmark")
+                    }
+                    NavigationLink { WebDAVBackupView() } label: {
+                        Label("WebDAV 备份", systemImage: "externaldrive.badge.icloud")
                     }
                     NavigationLink {
                         ScrollView { campusExploreSection.padding(20) }

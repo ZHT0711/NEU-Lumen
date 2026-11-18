@@ -31,6 +31,8 @@ node Tests/OffCampusLogin/document.mjs
 
 原生 Swift 回归由工作流中的 `swiftc` 命令运行。修改对应代码时，可在 macOS 上运行相关步骤。面向 `main` 的 PR 由 Actions 检查原生测试、设备和模拟器编译以及关键页面。设备和模拟器编译需要零警告。详见 [构建工作流](.github/workflows/build-unsigned.yml)。
 
+真机验证个人小组件时，在 Xcode 中为应用和 WidgetKit 扩展选择同一个开发团队，并让两个签名配置都授权同一个已注册的 App Group。用自有标识签名时，将项目构建设置 `NEU_LUMEN_WIDGET_GROUP` 改为你注册的组，应用和扩展会读取同一个值。Unsigned Nightly 的最终共享权限由安装签名决定。参见 [Apple App Groups 文档](https://developer.apple.com/documentation/xcode/configuring-app-groups)。
+
 ## 提交 Pull Request
 
 - 将 PR 发往 `main`，说明改动原因、关联 Issue、验证命令和实际结果。界面变更附脱敏截图，注明真机或模拟器、iOS 版本和数据来源。

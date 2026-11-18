@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WidgetKit
 
 /// 业务仓储：视图只读这里。网络集中在 PortalClient，状态集中在这里。
 /// 性能策略：
@@ -183,6 +184,20 @@ final class PortalRepository {
     private var accountGeneration = UUID()
     private var loadedForSID: String?
     private var loadedForEpoch: UUID?
+    private static let widgetPreferenceKey = "lumen.widgets.sharing-account"
+    private var widgetSharingOwner = UserDefaults.standard.string(forKey: PortalRepository.widgetPreferenceKey)
+    @ObservationIgnored private var widgetPublishTask: Task<Void, Never>?
+    private(set) var widgetSharingError: String?
+
+    private var widgetAccount: String? {
+        guard session.phase == .loggedIn, let account = currentAccountKey else { return nil }
+        return CampusReminderStore.key(account)
+    }
+
+    var widgetSharingEnabled: Bool {
+        guard let widgetSharingOwner, let widgetAccount else { return false }
+        return widgetSharingOwner == widgetAccount
+    }
     private var requestContext: RepositoryRequestContext? {
         guard hasCurrentLiveActivityAccount, let account = loadedForSID,
               loadedForEpoch == session.requestEpoch else { return nil }
@@ -197,7 +212,7 @@ final class PortalRepository {
         let key = user.sid.isEmpty ? user.uid : user.sid
         return key.isEmpty ? nil : key
     }
-    private var hasCurrentLiveActivityAccount: Bool {
+    var hasCurrentLiveActivityAccount: Bool {
         loadedForEpoch == session.requestEpoch
             && LiveActivityDataPolicy.accountMatches(current: currentAccountKey, loaded: loadedForSID,
                                                       authenticated: session.phase == .loggedIn)
@@ -210,6 +225,7 @@ final class PortalRepository {
 
     init(session: SessionStore) {
         self.session = session
+        session.onSessionScopeInvalidated = { [weak self] in self?.withdrawWidgetSnapshot() }
     }
 
     var ecodeEntryURL: URL { ServiceCatalog(apps: apps).ecodeURL }
@@ -384,6 +400,7 @@ final class PortalRepository {
                 assignmentStates[platform] = .loaded
             }
         }
+        enqueueWidgetSnapshotPublication()
     }
 
     /// 会话过期 → 静默重登 → 重试一次。
@@ -706,6 +723,7 @@ final class PortalRepository {
                 }
                 self.weekUpdatedAt[weekStart] = Date()
                 self.weekStates[weekStart] = .loaded
+                self.enqueueWidgetSnapshotPublication()
             } catch {
                 guard self.isCurrent(context), self.weekRequests[weekStart] == request else { return }
                 if NetworkError.isCancellation(error) || Task.isCancelled {
@@ -738,13 +756,14 @@ final class PortalRepository {
         _ = await loadSchedule(from: first, to: range.end, force: force)
     }
 
-    private func loadSchedule(from first: Date, to end: Date, force: Bool) async -> Bool {
+    private func loadSchedule(from first: Date, to end: Date, force: Bool, refreshSince: Date? = nil) async -> Bool {
         await ensureLoadedForCurrentUser()
         guard let context = requestContext, !Task.isCancelled else { return false }
         let weeks = requiredPortalWeeks(from: first, to: end)
         await withTaskGroup(of: Void.self) { group in
             for week in weeks {
-                group.addTask { await self.loadWeek(containing: week, force: force) }
+                let shouldRefresh = force || refreshSince.map { (weekUpdatedAt[week] ?? .distantPast) < $0 } == true
+                group.addTask { await self.loadWeek(containing: week, force: shouldRefresh) }
             }
         }
         let last = Calendar.current.date(byAdding: .day, value: -1, to: end)!
@@ -752,6 +771,7 @@ final class PortalRepository {
             guard isCurrent(context), !Task.isCancelled else { return false }
             await holidays.refresh(year: year)
         }
+        enqueueWidgetSnapshotPublication()
         return isCurrent(context) && !Task.isCancelled
     }
 
@@ -865,6 +885,141 @@ final class PortalRepository {
         return LiveActivitySchedule.snapshot(portal + localOccurrences(from: sourceFirst, to: range.end),
             from: range.first, to: range.end, at: now,
             portalLoaded: localOnly || portalRangeIsLoaded(from: sourceFirst, to: range.end))
+    }
+
+    // MARK: - 小组件摘要
+
+    func setWidgetSharingEnabled(_ enabled: Bool) {
+        if enabled {
+            guard CampusWidgetSnapshot.isSharingAvailable, let widgetAccount else { return }
+            withdrawWidgetSnapshot()
+            guard widgetSharingError == nil else { return }
+            widgetSharingOwner = widgetAccount
+        } else {
+            widgetSharingOwner = nil
+            withdrawWidgetSnapshot()
+        }
+        UserDefaults.standard.set(widgetSharingOwner, forKey: Self.widgetPreferenceKey)
+    }
+
+    func refreshWidgetSnapshot(foreground: Bool) async {
+        guard session.phase != .booting else { return }
+        guard widgetSharingEnabled else { withdrawWidgetSnapshot(); return }
+        guard foreground, CampusWidgetSnapshot.isSharingAvailable else { return }
+        await ensureLoadedForCurrentUser()
+        guard hasCurrentLiveActivityAccount, widgetSharingEnabled, !Task.isCancelled else { return }
+        enqueueWidgetSnapshotPublication()
+        let now = Date()
+        let (first, end) = widgetScheduleRange(at: now)
+        // Reuse and coalesce the timetable's normal reads; only opted-in widgets
+        // can refresh the horizon while the app is in the foreground.
+        _ = await loadSchedule(from: first, to: end, force: false, refreshSince: now.addingTimeInterval(-24 * 3600))
+    }
+
+    private func withdrawWidgetSnapshot() {
+        widgetPublishTask?.cancel()
+        widgetPublishTask = nil
+        updateWidgetSnapshot(nil)
+    }
+
+    func enqueueWidgetSnapshotPublication() {
+        guard widgetPublishTask == nil, widgetSharingEnabled, CampusWidgetSnapshot.isSharingAvailable else { return }
+        widgetPublishTask = Task { @MainActor [weak self] in
+            guard !Task.isCancelled, let self else { return }
+            self.widgetPublishTask = nil
+            self.publishWidgetSnapshot()
+        }
+    }
+
+    private func publishWidgetSnapshot() {
+        guard widgetSharingEnabled, let snapshot = campusWidgetSnapshot() else { return }
+        // The same opted-in account can keep a still-valid timetable if the
+        // in-memory schedule has not yet loaded after a cold launch.
+        let previous = CampusWidgetSnapshot.load()?.schedule
+        let schedule = snapshot.schedule ?? previous.flatMap { $0.expiresAt > snapshot.capturedAt ? $0 : nil }
+        updateWidgetSnapshot(.init(capturedAt: snapshot.capturedAt, schedule: schedule, assignments: snapshot.assignments))
+    }
+
+    func campusWidgetSnapshot(now: Date = Date()) -> CampusWidgetSnapshot? {
+        guard requestContext != nil else { return nil }
+        return .init(capturedAt: now, schedule: widgetSchedule(at: now), assignments: widgetAssignments(at: now))
+    }
+
+    private func updateWidgetSnapshot(_ snapshot: CampusWidgetSnapshot?) {
+        do {
+            let changed = try CampusWidgetSnapshot.replace(snapshot)
+            widgetSharingError = nil
+            if changed {
+                for kind in ["NEULumenNextCourseWidget", "NEULumenTodayScheduleWidget", "NEULumenAssignmentsWidget"] {
+                    WidgetCenter.shared.reloadTimelines(ofKind: kind)
+                }
+            }
+        } catch {
+            widgetSharingError = snapshot == nil ? "清除小组件摘要失败，请重新打开应用。" : "小组件摘要暂时无法保存。"
+        }
+    }
+
+    private func widgetScheduleRange(at now: Date) -> (first: Date, end: Date) {
+        // Portal cache keys use civil dates in Calendar.current; widget times
+        // are interpreted in the university's time zone even while travelling.
+        let day = PortalDate.day(AcademicQueryPolicy.schoolDay(now)) ?? Calendar.current.startOfDay(for: now)
+        return (Calendar.current.date(byAdding: .day, value: -1, to: day)!,
+                Calendar.current.date(byAdding: .day, value: 7, to: day)!)
+    }
+
+    private func widgetSchedule(at now: Date) -> CampusWidgetSnapshot.Schedule? {
+        let (first, end) = widgetScheduleRange(at: now)
+        let school = CampusWidgetSnapshot.schoolCalendar
+        let today = school.startOfDay(for: now)
+        let calendar = Calendar.current
+        var loadedDays = Set<Date>()
+        var expiries: [Date] = []
+        for offset in 0..<8 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: first),
+                  let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { continue }
+            let weeks = requiredPortalWeeks(from: day, to: nextDay)
+            let stamps = weeks.compactMap { weekUpdatedAt[$0] }
+            guard stamps.count == weeks.count, let oldest = stamps.min(),
+                  DataFreshness.isFresh(oldest, for: CampusWidgetSnapshot.freshness, now: now) else { continue }
+            loadedDays.insert(day)
+            expiries.append(oldest.addingTimeInterval(CampusWidgetSnapshot.freshness))
+        }
+        guard let expiry = expiries.min() else { return nil }
+        let occurrences = effectivePortalOccurrences(from: first, to: end)
+            .filter { loadedDays.contains(calendar.startOfDay(for: $0.date)) }.mergeConsecutive()
+        let courses = occurrences.enumerated().compactMap { index, occurrence -> CampusWidgetSnapshot.Course? in
+            let slot = occurrence.slot
+            guard let day = CampusReminderPolicy.clock(day: occurrence.date, minutes: 0),
+                  let interval = LiveActivitySchedule.interval(for: .init(date: day, slot: slot), calendar: school),
+                  interval.end > today else { return nil }
+            return .init(id: "course-\(index)", title: String(slot.name.prefix(96)), room: String(slot.room.prefix(64)),
+                         start: interval.start, end: interval.end)
+        }
+        let days = loadedDays.compactMap { CampusReminderPolicy.clock(day: $0, minutes: 0) }.sorted()
+        return .init(courses: Array(courses.prefix(96)), loadedDays: days, expiresAt: expiry)
+    }
+
+    private func widgetAssignments(at now: Date) -> CampusWidgetSnapshot.Assignments? {
+        func fresh(_ date: Date?) -> Bool { DataFreshness.isFresh(date, for: CampusWidgetSnapshot.freshness, now: now) }
+        let cg = fresh(cgUpdatedAt) ? cgReport : nil
+        let reports = assignmentReports.filter { fresh(assignmentUpdatedAt[$0.key]) }
+        let source = LiveActivityAssignments(cg: cg, reports: reports)
+        let dates = [cg == nil ? nil : cgUpdatedAt] + reports.keys.map { assignmentUpdatedAt[$0] }
+        guard source.hasLoadedData, let oldest = dates.compactMap({ $0 }).min() else { return nil }
+        let pending = source.pending.sorted {
+            if ($0.deadline == nil) != ($1.deadline == nil) { return $0.deadline != nil }
+            let first = $0.deadline ?? .distantPast
+            let second = $1.deadline ?? .distantPast
+            if (first > now) != (second > now) { return first > now }
+            return first == second ? $0.id < $1.id : first < second
+        }
+        let items = pending.prefix(12).enumerated().map { index, item in
+            CampusWidgetSnapshot.Assignment(id: "assignment-\(index)", title: String(item.title.prefix(96)),
+                platform: item.platform, deadline: item.deadline)
+        }
+        return .init(pendingCount: pending.count,
+                     isPartial: source.hasUnreadData || source.loadedPlatformCount < LearningPlatform.allCases.count,
+                     items: items, expiresAt: oldest.addingTimeInterval(CampusWidgetSnapshot.freshness))
     }
 
     /// 全局协调器只在登录/前台/类别切换/跨日准备所选来源；分钟 tick 只渲染缓存。
@@ -989,6 +1144,7 @@ final class PortalRepository {
                 reports: assignmentReports, updatedAt: assignmentUpdatedAt))
             assignmentCacheWarning = nil
         } catch { assignmentCacheWarning = "本机作业缓存未能保存，重启后请重新同步。" }
+        enqueueWidgetSnapshotPublication()
     }
 
     var grades: [GradeSemester] {

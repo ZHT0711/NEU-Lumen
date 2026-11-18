@@ -41,5 +41,9 @@ final class ServiceFavorites {
     func remove(id: String) { ids.removeAll { $0 == id }; persist() }
 
     func reset(apps: [PortalApp]) { ids = Array(apps.prefix(8)).map(\.id); persist() }
+    func restore(ids: [String]) {
+        self.ids = ids
+        persist()
+    }
     private func persist() { if let key { defaults.set(ids, forKey: key) } }
 }

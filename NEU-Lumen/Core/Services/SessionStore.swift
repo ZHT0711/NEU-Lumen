@@ -24,7 +24,10 @@ final class SessionStore {
     /// 统一认证要求新设备短信二次认证（图形码已就绪）。
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
-    private var sessionEpoch = UUID()
+    @ObservationIgnored var onSessionScopeInvalidated: (@MainActor () -> Void)?
+    private var sessionEpoch = UUID() {
+        didSet { onSessionScopeInvalidated?() }
+    }
     var requestEpoch: UUID { sessionEpoch }
     private var keepSession = false
     private var learningSessionGeneration: UUID?
@@ -607,6 +610,7 @@ final class SessionStore {
         // Persist the user's intent first: deletion can fail or the app can stop
         // between Keychain operations. Nothing may resurrect this session on launch.
         defaults.set(true, forKey: Self.suppressRestoreKey)
+        sessionEpoch = UUID()
         sessionSaveError = nil
         credentialSaveError = nil
         if let learning = learningSessions { clearWebSession(learning) }
@@ -619,7 +623,6 @@ final class SessionStore {
             Task { await cleanRetiredLearningBrowsers() }
         }
         lastSavedLearningSession = nil
-        sessionEpoch = UUID()
         stopNetworkRecovery()
         recoveryTask?.cancel()
         recoveryTask = nil

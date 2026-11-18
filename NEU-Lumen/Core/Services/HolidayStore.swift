@@ -38,6 +38,16 @@ final class HolidayStore {
         if let overrideKey, let data = try? JSONEncoder().encode(overrides) { defaults.set(data, forKey: overrideKey) }
     }
 
+    func restore(enabled: Bool, overrides: [String: SchoolDayOverride], replacementDates: [String: String]) {
+        self.enabled = enabled
+        self.overrides = overrides
+        self.replacementDates = replacementDates
+        if let overrideKey, let data = try? JSONEncoder().encode(overrides) {
+            defaults.set(data, forKey: overrideKey)
+            defaults.set(replacementDates, forKey: overrideKey + ".replacements")
+        }
+    }
+
     func label(on date: Date) -> String? {
         let key = PortalDate.isoDay(date)
         if let source = replacementDates[key] { return "补 \(source) 的课" }

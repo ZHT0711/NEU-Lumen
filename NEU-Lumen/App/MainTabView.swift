@@ -9,12 +9,14 @@ enum AppTab: Hashable {
 }
 
 private enum ActivitySheet: Identifiable {
-    case settings, card, reminders, service(NativeCampusService)
+    case settings, card, reminders, widgetSettings, exams, service(NativeCampusService)
     var id: String {
         switch self {
         case .settings: "settings"
         case .card: "card"
         case .reminders: "reminders"
+        case .widgetSettings: "widget-settings"
+        case .exams: "exams"
         case .service(let value): "service:" + value.rawValue
         }
     }
@@ -36,6 +38,8 @@ struct MainTabView: View {
                 if url.host == "dynamic-island" || url.path == "/settings" { activitySheet = .settings }
                 if url.host == "activity", url.path == "/card" { activitySheet = .card }
                 if url.host == "activity", url.path == "/reminders" { activitySheet = .reminders }
+                if url.host == "activity", url.path == "/widget-settings" { activitySheet = .widgetSettings }
+                if url.host == "activity", url.path == "/exams" { activitySheet = .exams }
                 if url.host == "activity", url.path == "/services" {
                     let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "native" }?.value
                     if let service = name.flatMap(NativeCampusService.init(rawValue:)) { activitySheet = .service(service) }
@@ -57,6 +61,8 @@ struct MainTabView: View {
                         case .settings: LiveActivitySettingsView()
                         case .card: CardView()
                         case .reminders: CampusReminderView()
+                        case .widgetSettings: CampusWidgetSettingsView()
+                        case .exams: AcademicExamsView()
                         case .service(let service): NativeServiceHost(initial: service)
                         }
                     }.toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { activitySheet = nil } } }
