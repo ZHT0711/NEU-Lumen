@@ -7,12 +7,17 @@ struct NativeAgendaView: View {
     @Environment(AppEnvironment.self) private var environment
     @Environment(\.scenePhase) private var scenePhase
     @State private var day = Date()
-    @State private var source = "全部"
+    @State private var source: String
     @State private var adding = false
     @State private var managing = false
     @State private var selected: CourseOccurrence?
     @State private var systemItem: SystemAgendaItem?
     @State private var completing: SystemAgendaItem?
+
+    init(active: Bool = true, showCoursesFirst: Bool = false) {
+        self.active = active
+        _source = State(initialValue: showCoursesFirst ? "课程" : "全部")
+    }
 
     private var repo: PortalRepository { environment.repository }
     private var sunday: Date { Semester.weekStart(forDay: day) }

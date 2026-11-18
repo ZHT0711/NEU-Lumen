@@ -112,7 +112,7 @@ class BuildProvenanceTests(unittest.TestCase):
         self.assertLess(text.index('Require warning-free'), text.index('Upload unsigned IPA'))
         self.assertLess(text.index('publish_nightly.py --recover-only'), text.index('Check current main commit'))
         self.assertIn('--required-count', text)
-        self.assertIn('runs-on: macos-26', text)
+        self.assertIn('runs-on: xcode-27', text)
         self.assertNotIn('id-token: write', text)
         nightly = text.split('  nightly:', 1)[1]
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", nightly)

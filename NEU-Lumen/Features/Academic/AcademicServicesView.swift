@@ -116,6 +116,10 @@ struct AcademicExamsView: View {
                         Text(date > Date() ? "可在“提醒与通知”中开启考试提醒" : "此考试时间已过")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                    if #available(iOS 26.0, *) {
+                        AcademicExamAlarmRow(exam: exam, term: term)
+                        ScheduledLiveActivityButton(exam: exam, term: term)
+                    }
                 }.textSelection(.enabled)
             }
         }

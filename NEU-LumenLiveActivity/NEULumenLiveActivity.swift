@@ -11,7 +11,7 @@ struct NEULumenLiveActivity: Widget {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    if context.isStale {
+                    if context.isStale && !context.state.isScheduledCountdown {
                         Text("打开应用更新").font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -36,7 +36,7 @@ struct NEULumenLiveActivity: Widget {
                         .accessibilityHidden(true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(context.isStale ? "待更新" : context.state.sourceTitle)
+                    Text(context.isStale && !context.state.isScheduledCountdown ? "待更新" : context.state.sourceTitle)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -48,36 +48,79 @@ struct NEULumenLiveActivity: Widget {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
-                Image(systemName: context.state.symbol).foregroundStyle(activityAccent(context.state.accent))
+                Image(systemName: context.state.symbol)
+                    .foregroundStyle(activityAccent(context.state.accent))
+                    .accessibilityLabel(context.state.sourceTitle)
             } compactTrailing: {
-                if context.isStale {
-                    Image(systemName: "arrow.clockwise").accessibilityLabel("内容待更新")
-                } else if let target = context.state.countdownDate {
-                    if target > Date() {
-                        Text(timerInterval: Date()...target, countsDown: true)
-                            .font(.caption2.monospacedDigit())
-                            .lineLimit(1)
-                            .multilineTextAlignment(.trailing)
-                            .minimumScaleFactor(0.65)
-                            .frame(width: 64)
-                    } else {
-                        Text("待更新").font(.caption2)
-                    }
-                } else {
-                    Text(context.state.value.isEmpty ? String(context.state.title.prefix(2)) : context.state.value)
-                        .font(.caption2.monospacedDigit())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .frame(maxWidth: 64)
-                }
+                ActivityCompactValue(state: context.state, isStale: context.isStale)
+                    .whenDynamicIslandFits()
             } minimal: {
-                Image(systemName: context.state.symbol).foregroundStyle(activityAccent(context.state.accent))
+                Image(systemName: context.state.symbol)
+                    .foregroundStyle(activityAccent(context.state.accent))
+                    .accessibilityLabel(context.state.sourceTitle)
             }
             .widgetURL(context.state.destination)
             .keylineTint(activityAccent(context.state.accent))
         }
     }
 }
+
+private struct ActivityCompactValue: View {
+    let state: NEULumenActivityAttributes.ContentState
+    let isStale: Bool
+
+    var body: some View {
+        let now = Date()
+        if state.isScheduledCountdown, isStale || (state.countdownDate ?? .distantPast) <= now {
+            Image(systemName: "checkmark").accessibilityLabel("已到\(state.sourceTitle)时间")
+        } else if isStale {
+            Image(systemName: "arrow.clockwise").accessibilityLabel("内容待更新")
+        } else if let target = state.countdownDate {
+            if target > now {
+                Text(timerInterval: now...target, countsDown: true)
+                    .font(.caption2.monospacedDigit())
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
+                    .minimumScaleFactor(0.65)
+                    .frame(width: 64)
+            } else {
+                Text("待更新").font(.caption2)
+            }
+        } else {
+            Text(state.value.isEmpty ? String(state.title.prefix(2)) : state.value)
+                .font(.caption2.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: 64)
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func whenDynamicIslandFits() -> some View {
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+            modifier(CompactActivityWidth())
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+#if compiler(>=6.4)
+@available(iOS 27.0, *)
+private struct CompactActivityWidth: ViewModifier {
+    @Environment(\.isDynamicIslandLimitedInWidth) private var limitedWidth
+
+    func body(content: Content) -> some View {
+        if !limitedWidth { content }
+    }
+}
+#endif
 
 private struct ActivityDetails: View {
     let state: NEULumenActivityAttributes.ContentState
@@ -112,18 +155,19 @@ private struct ActivityValue: View {
     private var target: Date? { state.countdownDate }
 
     var body: some View {
-        if let target, !isStale, target > Date() {
+        let now = Date()
+        if let target, !isStale, target > now {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(state.countdownTitle ?? "倒计时").font(.caption2).foregroundStyle(.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8)
-                Text(timerInterval: Date()...target, countsDown: true)
+                Text(timerInterval: now...target, countsDown: true)
                     .font(.headline.monospacedDigit())
                     .lineLimit(1)
                     .multilineTextAlignment(.trailing)
                     .minimumScaleFactor(0.7)
                     .frame(width: 96)
             }
-        } else if target != nil {
+        } else if target != nil, !state.isScheduledCountdown {
             Text(isStale ? "待更新" : "已到时间")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -156,5 +200,11 @@ struct NEULumenLiveActivityBundle: WidgetBundle {
         NEULumenTodayScheduleWidget()
         NEULumenAssignmentsWidget()
         NEULumenCampusLauncherWidget()
+        if #available(iOS 18.0, *) {
+            NEULumenScheduleControl()
+        }
+        if #available(iOS 18.0, *) {
+            NEULumenCampusMapControl()
+        }
     }
 }

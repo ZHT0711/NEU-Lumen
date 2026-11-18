@@ -10,6 +10,48 @@ struct LiveActivityDetail: Codable, Hashable {
     var isTimeSensitive: Bool? = nil
 }
 
+/// A local, one-off countdown. Shared metadata contains an opaque lookup key
+/// and the start times, without course names, room numbers or exam seats.
+struct ScheduledLiveActivityPlan: Codable, Hashable {
+    struct Event: Codable, Hashable {
+        enum Source: Codable, Hashable {
+            case course(day: String)
+            case exam(term: String)
+        }
+
+        let source: Source
+        let key: String
+        let startsAt: Date
+
+        var isExam: Bool {
+            if case .exam = source { return true }
+            return false
+        }
+
+        var title: String { isExam ? "考试倒计时" : "上课倒计时" }
+    }
+
+    static let leadTimes = [5, 15, 30]
+    let event: Event
+    let activatesAt: Date
+
+    init?(event: Event, leadMinutes: Int, now: Date) {
+        guard Self.leadTimes.contains(leadMinutes) else { return nil }
+        let activatesAt = event.startsAt.addingTimeInterval(-TimeInterval(leadMinutes * 60))
+        guard activatesAt > now, activatesAt.timeIntervalSinceReferenceDate.isFinite else { return nil }
+        self.event = event
+        self.activatesAt = activatesAt
+    }
+
+    func content(at now: Date) -> LiveActivityContentState {
+        .init(title: event.title, subtitle: "", value: "",
+              kind: event.isExam ? "scheduledExam" : "scheduledCourse",
+              updatedAt: now, startDate: event.startsAt, endDate: nil,
+              symbolName: event.isExam ? "pencil" : "book.closed.fill",
+              countdownTitle: event.isExam ? "距考试" : "距上课", countdownTarget: "start")
+    }
+}
+
 enum LiveActivityText {
     static func prefix(_ text: String, bytes: Int) -> String {
         var result = ""
@@ -147,7 +189,8 @@ struct LiveActivityContentState: Codable, Hashable {
     }
     var sourceTitle: String {
         switch kind {
-        case "nextCourse": return "课程"
+        case "nextCourse", "scheduledCourse": return "课程"
+        case "scheduledExam": return "考试"
         case "cardBalance": return "校园卡"
         case "netBalance": return "校园网"
         case "electricBalance": return "宿舍电量"
@@ -159,25 +202,29 @@ struct LiveActivityContentState: Codable, Hashable {
         }
     }
     var destination: URL {
-        let allowed = ["course", "card", "settings", "learning", "profile"]
+        let allowed = ["course", "card", "settings", "learning", "profile", "exams"]
         let path: String
         if let destinationPath, allowed.contains(destinationPath) { path = destinationPath }
         else {
             switch kind {
-            case "nextCourse", "planner", "dayOverview": path = "course"
+            case "nextCourse", "planner", "dayOverview", "scheduledCourse": path = "course"
+            case "scheduledExam": path = "exams"
             case "cardBalance", "netBalance", "electricBalance": path = "card"
             case "assignments", "academicOverview": path = "learning"
             default: path = "settings"
             }
         }
-        let query = kind == "academicOverview" && path == "learning" ? "?section=grades" : ""
+        var query = ""
+        if kind == "academicOverview" && path == "learning" { query = "?section=grades" }
+        if kind == "scheduledCourse" && path == "course" { query = "?today=1" }
         return URL(string: "neulumen://activity/\(path)\(query)")!
     }
 
     /// The system, not an app-background poll, owns the boundary notification.
     var freshnessDeadline: Date? {
         let boundary: Date?
-        if ["nextCourse", "planner"].contains(kind), let startDate, startDate > updatedAt { boundary = startDate }
+        if isScheduledCountdown { boundary = startDate }
+        else if ["nextCourse", "planner"].contains(kind), let startDate, startDate > updatedAt { boundary = startDate }
         else if let endDate { boundary = endDate }
         else if kind == "custom" { boundary = nil }
         else { boundary = updatedAt.addingTimeInterval(1800) }
@@ -186,6 +233,7 @@ struct LiveActivityContentState: Codable, Hashable {
 
     func displayTitle(isStale: Bool) -> String {
         guard isStale else { return title }
+        if isScheduledCountdown { return kind == "scheduledExam" ? "已到考试时间" : "已到上课时间" }
         if ["nextCourse", "planner", "dayOverview", "assignments"].contains(kind),
            phase == "finished" || phase == "empty" || title.contains("已结束") || title.contains("已完成") {
             return kind == "nextCourse" ? "课程与日程" : kind == "planner" ? "个人日程" : kind == "assignments" ? "学习作业" : "今日总览"
@@ -208,6 +256,8 @@ struct LiveActivityContentState: Codable, Hashable {
         if isStale && (countdownDate != nil || phase != nil || kind == "dayOverview" || kind == "assignments") { return "待更新" }
         return value
     }
+
+    var isScheduledCountdown: Bool { kind == "scheduledCourse" || kind == "scheduledExam" }
 }
 
 /// Optional inline SF Symbols, independent of data-variable substitution.

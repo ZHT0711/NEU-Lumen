@@ -14,4 +14,12 @@
 
 原生回归验证调度策略、去重、容量、上海时区、静默时段、离线保留、来源更新后的取消和安全导航。模拟器页面使用合成状态，不代表已获得实体设备授权、后台任务实际运行或通知实际到达；这些仍需在安装后的 iPhone 上验证。
 
+## 定时灵动岛与考试闹钟
+
+在 iOS 26 或更新系统上，打开未来课程或考试的详情，选择「预约实时活动」并确认提前时间。系统会在预约时间开始实时活动并提示。锁屏显示通用事项名称和剩余时间。可在对应详情或「我的 → 锁屏与灵动岛」取消预约。每次保留一个预约，已同步的改期和退出校园账号会清理受影响的预约。
+
+「考试闹钟」在考试安排中按单场设置。确认响铃时间后才会申请闹钟权限。它可以在静音和专注模式下响铃。可在同一场考试下查看或取消闹钟。同步到改期后会取消原闹钟，再由你决定是否按新时间设置。
+
+实时活动与闹钟的系统权限及实际系统呈现需在支持的 iPhone 上验证。参见 [Apple 实时活动设计规范](https://developer.apple.com/design/human-interface-guidelines/live-activities) 和 [AlarmKit](https://developer.apple.com/documentation/alarmkit/scheduling-an-alarm-with-alarmkit)。
+
 实现依据：[Apple 本地通知](https://developer.apple.com/documentation/usernotifications/scheduling-a-notification-locally-from-your-app)、[Apple 后台刷新](https://developer.apple.com/documentation/uikit/using-background-tasks-to-update-your-app)。

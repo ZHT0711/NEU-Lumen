@@ -887,6 +887,36 @@ final class PortalRepository {
             portalLoaded: localOnly || portalRangeIsLoaded(from: sourceFirst, to: range.end))
     }
 
+    // MARK: - 定时实时活动
+
+    /// Only successful, current-account reads can invalidate a reservation.
+    func scheduledLiveActivityIsCurrent(_ event: ScheduledLiveActivityPlan.Event) -> Bool? {
+        guard hasCurrentLiveActivityAccount else { return nil }
+        switch event.source {
+        case let .course(day):
+            guard let first = PortalDate.day(day),
+                  let end = Calendar.current.date(byAdding: .day, value: 1, to: first),
+                  portalRangeIsLoaded(from: first, to: end) else { return nil }
+            return effectivePortalOccurrences(from: first, to: end).mergeConsecutive().contains {
+                ScheduledLiveActivitySelection.course($0)?.event == event
+            }
+        case let .exam(term):
+            guard academicExamsDate(term: term) != nil else { return nil }
+            return academicExams(term: term).contains { ScheduledLiveActivitySelection.exam($0, term: term)?.event == event }
+        }
+    }
+
+    func loadScheduledLiveActivitySource(_ event: ScheduledLiveActivityPlan.Event) async {
+        switch event.source {
+        case let .course(day):
+            guard let first = PortalDate.day(day),
+                  let end = Calendar.current.date(byAdding: .day, value: 1, to: first) else { return }
+            _ = await loadSchedule(from: first, to: end, force: false, refreshSince: Date().addingTimeInterval(-300))
+        case let .exam(term):
+            await loadAcademicExams(term: term)
+        }
+    }
+
     // MARK: - 小组件摘要
 
     func setWidgetSharingEnabled(_ enabled: Bool) {
@@ -1967,6 +1997,9 @@ extension PortalRepository {
             let result = try await withRecovery { try await self.session.client.fetchAcademicExams(termCode: term, expectedAccount: account) }
             guard isCurrent(context), academicExamRequests[term] == token, !Task.isCancelled else { return }
             academicExamCache[term] = result; academicExamStates[term] = .loaded; academicExamDates[term] = Date()
+            if #available(iOS 26.0, *) {
+                AcademicExamAlarmStore.shared.reconcile(exams: result, term: term, owner: CampusReminderStore.key(context.account))
+            }
         } catch {
             guard isCurrent(context), academicExamRequests[term] == token else { return }
             if NetworkError.isCancellation(error) { academicExamStates[term] = academicExamCache[term] == nil ? .idle : .loaded; return }
@@ -2136,6 +2169,10 @@ final class AppEnvironment {
         self.session = store
         self.repository = PortalRepository(session: store)
         self.dynamicIslandStore = DynamicIslandStore()
+        store.onAccountWillLogout = { [weak manager = self.liveActivityManager] in
+            manager?.cancelScheduledCountdown()
+            if #available(iOS 26.0, *) { AcademicExamAlarmStore.shared.activate(owner: nil) }
+        }
         CampusBackgroundRefresh.shared.configure(session: store, repository: self.repository)
     }
 }

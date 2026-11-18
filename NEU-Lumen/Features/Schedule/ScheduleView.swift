@@ -419,6 +419,7 @@ struct CourseDetailSheet: View {
                 LabeledContent("日期", value: PortalDate.isoDay(occurrence.date))
                 LabeledContent("时间", value: "\(Semester.hm(occurrence.slot.startMinutes)) – \(Semester.hm(occurrence.slot.endMinutes))")
                 LabeledContent("地点", value: occurrence.slot.room)
+                ScheduledLiveActivityButton(course: occurrence)
                 if !occurrence.slot.room.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     NavigationLink {
                         IndoorNavigationView(destination: occurrence.slot.room)

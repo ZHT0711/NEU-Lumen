@@ -43,13 +43,18 @@ class LiveActivityDataContracts(unittest.TestCase):
         self.assertIn('countdownTitle == "距上课"', attributes)
         self.assertIn('state.countdownDate', widget)
         compact = widget.split('} compactTrailing: {', 1)[1].split('} minimal:', 1)[0]
-        self.assertIn('Text(timerInterval:', compact)
+        self.assertIn('ActivityCompactValue(state: context.state, isStale: context.isStale)', compact)
+        self.assertIn('.whenDynamicIslandFits()', compact)
+        compact_value = widget.split('private struct ActivityCompactValue: View', 1)[1].split('private extension View', 1)[0]
+        self.assertIn('Text(timerInterval:', compact_value)
+        self.assertIn('isDynamicIslandLimitedInWidth', widget)
         self.assertIn('func boundedText()', attributes)
         self.assertIn('encoder.encode(copy).count', attributes)
         self.assertIn('var staleAfter: Date? = nil', attributes)
         self.assertIn('activityAccent(context.state.accent)', widget)
         self.assertNotIn('Text("距下课")', widget)
-        self.assertIn('let query = kind == "academicOverview"', attributes)
+        self.assertIn('kind == "academicOverview" && path == "learning"', attributes)
+        self.assertIn('kind == "scheduledCourse" && path == "course"', attributes)
         self.assertIn('pendingLearningSection', (ROOT / 'NEU-Lumen/App/MainTabView.swift').read_text())
         self.assertIn('pendingLearningSection', (ROOT / 'NEU-Lumen/Features/Grades/GradesView.swift').read_text())
 

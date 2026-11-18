@@ -59,7 +59,7 @@ jobs:
     name: Build unsigned iOS IPA
     needs: select_run
     if: needs.select_run.outputs.should_build == 'true'
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     outputs:
       # needs.build outputs retain the successful BUILD attempt on release-only retries.
@@ -94,17 +94,19 @@ jobs:
           printf 'Runner image: %s %s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
           sw_vers
 
-          XCODE_APP="$(
-            ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1
-          )"
-
-          if [[ -z "${XCODE_APP}" ]]; then
-            echo "::error::找不到可用的 Xcode"
+          # Match the newest stable bundle and ignore symlinks to beta builds.
+          XCODE_APP="$(find /Applications -maxdepth 1 -type d -name 'Xcode_27*.app' |
+            awk '/\/Xcode_27(\.[0-9]+)*\.app$/' | sort -V | tail -1)"
+          if [[ -n "$XCODE_APP" ]]; then
+            sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          fi
+          printf 'Developer directory: %s\n' "$(xcode-select -p)"
+          SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
+          if [[ "${SDK_VERSION%%.*}" -lt 27 ]]; then
+            echo "::error::需要 iOS 27 SDK 来编译新版小组件和灵动岛"
             exit 1
           fi
 
-          echo "使用 ${XCODE_APP}"
-          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
           xcodebuild -version
           xcodebuild -showsdks
           swift --version
@@ -233,6 +235,11 @@ jobs:
           set -euo pipefail
           exec > >(tee "${RUNNER_TEMP}/reminder-tests.log") 2>&1
           python3 scripts/test_campus_reminders.py --require-swift
+          swiftc -swift-version 5 -warnings-as-errors \
+            NEU-Lumen/Core/Models/AcademicExamAlarmPolicy.swift \
+            Tests/ExamAlarms/main.swift \
+            -o "${RUNNER_TEMP}/exam-alarm-tests"
+          "${RUNNER_TEMP}/exam-alarm-tests"
 
       - name: Test campus widgets and WebDAV backup
         shell: bash

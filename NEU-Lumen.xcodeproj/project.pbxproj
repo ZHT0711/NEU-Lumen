@@ -16,6 +16,8 @@
 		A10000000000000000000007 /* LiveActivityExpandedContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Services/LiveActivityExpandedContent.swift"; sourceTree = "<group>"; };
 		A10000000000000000000030 /* CampusWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusWidgets.swift; sourceTree = "<group>"; };
 		A10000000000000000000031 /* CampusWidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Models/CampusWidgetSnapshot.swift"; sourceTree = "<group>"; };
+		A10000000000000000000034 /* CampusControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampusControls.swift; sourceTree = "<group>"; };
+		A10000000000000000000035 /* OpenCampusPageIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/App/OpenCampusPageIntent.swift"; sourceTree = "<group>"; };
 		5AFE00000000000000000004 /* NEU-Lumen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "NEU-Lumen.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -48,6 +50,8 @@
 		A10000000000000000000025 /* LiveActivityExpandedContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* LiveActivityExpandedContent.swift */; };
 		A10000000000000000000032 /* CampusWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* CampusWidgets.swift */; };
 		A10000000000000000000033 /* CampusWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000031 /* CampusWidgetSnapshot.swift */; };
+		A10000000000000000000036 /* CampusControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* CampusControls.swift */; };
+		A10000000000000000000037 /* OpenCampusPageIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* OpenCampusPageIntent.swift */; };
 		A10000000000000000000013 /* Embed Live Activity */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* NEU-LumenLiveActivity.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -99,6 +103,8 @@
 				A10000000000000000000007 /* LiveActivityExpandedContent.swift */,
 				A10000000000000000000030 /* CampusWidgets.swift */,
 				A10000000000000000000031 /* CampusWidgetSnapshot.swift */,
+				A10000000000000000000034 /* CampusControls.swift */,
+				A10000000000000000000035 /* OpenCampusPageIntent.swift */,
 				A10000000000000000000004 /* Info.plist */,
 			);
 			path = NEU-LumenLiveActivity;
@@ -210,6 +216,8 @@
 				A10000000000000000000025 /* LiveActivityExpandedContent.swift in Sources */,
 				A10000000000000000000032 /* CampusWidgets.swift in Sources */,
 				A10000000000000000000033 /* CampusWidgetSnapshot.swift in Sources */,
+				A10000000000000000000036 /* CampusControls.swift in Sources */,
+				A10000000000000000000037 /* OpenCampusPageIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

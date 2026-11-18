@@ -44,6 +44,7 @@ struct AppRootView: View {
         .background { CampusReminderCoordinator() }
         .background { CampusIntelligenceCoordinator() }
         .background { CampusWidgetCoordinator() }
+        .background { if #available(iOS 26.0, *) { AcademicExamAlarmCoordinator() } }
         .onOpenURL { url in
             guard url.scheme == "neulumen", let host = url.host,
                   ["activity", "dynamic-island"].contains(host) else { return }

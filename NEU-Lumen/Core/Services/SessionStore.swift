@@ -25,6 +25,7 @@ final class SessionStore {
     private(set) var needsSecondAuth = false
     /// 二次认证发起时使用的凭据（登录页字段可能为空，完成时兜底）。
     @ObservationIgnored var onSessionScopeInvalidated: (@MainActor () -> Void)?
+    @ObservationIgnored var onAccountWillLogout: (@MainActor () -> Void)?
     private var sessionEpoch = UUID() {
         didSet { onSessionScopeInvalidated?() }
     }
@@ -611,6 +612,7 @@ final class SessionStore {
         // between Keychain operations. Nothing may resurrect this session on launch.
         defaults.set(true, forKey: Self.suppressRestoreKey)
         sessionEpoch = UUID()
+        onAccountWillLogout?()
         sessionSaveError = nil
         credentialSaveError = nil
         if let learning = learningSessions { clearWebSession(learning) }

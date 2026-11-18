@@ -30,7 +30,8 @@ struct LiveActivityExpandedContent: View {
 
     private func content(detailLimit: Int, titleLines: Int, compact: Bool, footer: Bool) -> some View {
         let details = Array(state.visibleDetails(isStale: isStale).prefix(detailLimit))
-        let hasFooterContent = isStale || state.updatedAt != .distantPast || state.progress?.isFinite == true
+        let hasFooterContent = !state.isScheduledCountdown
+            && (isStale || state.updatedAt != .distantPast || state.progress?.isFinite == true)
         return VStack(alignment: .leading, spacing: compact ? 4 : 5) {
             HStack(alignment: .center, spacing: 9) {
                 if state.kind == "custom" {
@@ -49,7 +50,7 @@ struct LiveActivityExpandedContent: View {
                !compact && (state.kind == "custom" || details.isEmpty) {
                 LiveActivitySymbolText(text: subtitle, accent: state.accent).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            if state.countdownDate != nil || !state.value.isEmpty || isStale {
+            if !(state.isScheduledCountdown && isStale), state.countdownDate != nil || !state.value.isEmpty || isStale {
                 LiveActivityMetricRow(state: state, isStale: isStale, compact: compact)
             }
             if !details.isEmpty {

@@ -9,10 +9,17 @@ private func activityRequest(environment: AppEnvironment, foreground: Bool, now:
     let identity = user?.sid.isEmpty == false ? user?.sid : user?.uid
     let account = session.phase == .loggedIn && identity?.isEmpty == false ? identity : nil
     let state = account != nil && store.enabled ? environment.repository.liveActivityState(store: store, now: now) : nil
+    let scheduledValidation: DynamicIslandActivityManager.ScheduledValidation?
+    if let event = environment.liveActivityManager.scheduledCountdown?.event,
+       let isCurrent = environment.repository.scheduledLiveActivityIsCurrent(event) {
+        scheduledValidation = .init(event: event, isCurrent: isCurrent)
+    } else {
+        scheduledValidation = nil
+    }
     return .init(enabled: store.enabled, accountID: account, campus: environment.repository.campus.title,
         state: state, isForeground: foreground, refreshDate: now,
         contentReady: !store.enabled || state != nil || environment.repository.liveActivityDataIsReady(for: store.kind, now: now),
-        contentKind: store.kind.rawValue)
+        contentKind: store.kind.rawValue, scheduledValidation: scheduledValidation)
 }
 
 private struct ActivityLoadKey: Hashable {
@@ -22,6 +29,12 @@ private struct ActivityLoadKey: Hashable {
     let enabled: Bool
     let foreground: Bool
     let day: String
+}
+
+private struct ScheduledActivityLoadKey: Equatable {
+    let event: ScheduledLiveActivityPlan.Event?
+    let epoch: UUID
+    let foreground: Bool
 }
 
 struct LiveActivityCoordinator: View {
@@ -35,10 +48,16 @@ struct LiveActivityCoordinator: View {
             let request = activityRequest(environment: environment, foreground: scenePhase == .active, now: context.date)
             let loadKey = ActivityLoadKey(epoch: session.requestEpoch, account: request.accountID, source: store.kind.rawValue,
                 enabled: store.enabled, foreground: scenePhase == .active, day: PortalDate.isoDay(context.date))
+            let scheduledKey = ScheduledActivityLoadKey(event: environment.liveActivityManager.scheduledCountdown?.event,
+                epoch: session.requestEpoch, foreground: scenePhase == .active)
             Color.clear
                 .task(id: loadKey) {
                     guard loadKey.foreground, loadKey.enabled, loadKey.account != nil else { return }
                     await environment.repository.prepareLiveActivityData(for: store)
+                }
+                .task(id: scheduledKey) {
+                    guard scheduledKey.foreground, request.accountID != nil, let event = scheduledKey.event else { return }
+                    await environment.repository.loadScheduledLiveActivitySource(event)
                 }
                 .onChange(of: request, initial: true) { _, value in
                     guard session.phase != .booting else { return }
@@ -64,7 +83,7 @@ struct LiveActivitySettingsView: View {
         let manager = environment.liveActivityManager
         Form {
             Section {
-                Toggle("启用实时活动", isOn: $store.enabled)
+                Toggle("持续显示实时活动", isOn: $store.enabled)
                 Picker("展示内容", selection: $store.kind) {
                     ForEach(DynamicIslandStore.ContentKind.allCases) { kind in
                         Label(kind.title, systemImage: kind.icon).tag(kind)
@@ -115,12 +134,29 @@ struct LiveActivitySettingsView: View {
             } footer: {
                 Text("系统或你结束活动后可在这里重新开启。课程边界、目标到期或缓存变旧时，活动可能提示打开应用更新。作业和自定义变量不暗中建立平台登录，请先在数据来源页同步；系统决定展示时长。")
             }
+            if #available(iOS 26.0, *) { scheduledCountdownSection(manager) }
             Section {
                 Button("恢复默认配置", role: .destructive) { store.reset() }
             }
         }
         .navigationTitle("实时活动")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func scheduledCountdownSection(_ manager: DynamicIslandActivityManager) -> some View {
+        Section("定时实时活动") {
+            if let plan = manager.scheduledCountdown {
+                LabeledContent("已预约", value: plan.event.title)
+                LabeledContent("开启时间（北京时间）", value: LiveActivityDataPolicy.dateText(
+                    plan.activatesAt, format: "M月d日 HH:mm", calendar: CampusReminderPolicy.calendar))
+                Button("取消预约") { manager.cancelScheduledCountdown() }
+                    .disabled(manager.isChangingScheduledCountdown)
+            } else if let message = manager.scheduledCountdownMessage {
+                Text(message).foregroundStyle(.secondary)
+            } else {
+                Text("可在课表或考试安排中预约一个倒计时。").foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func openSource(_ path: String) {

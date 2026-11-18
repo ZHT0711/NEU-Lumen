@@ -9,8 +9,10 @@ struct NEULumenApp: App {
     @MainActor
     init() {
         let environment = AppEnvironment()
+        let pageRouter = CampusPageRouter { environment.pendingActivityURL = $0 }
         _environment = State(initialValue: environment)
         AppDependencyManager.shared.add(dependency: environment)
+        AppDependencyManager.shared.add(dependency: pageRouter)
         CampusAppShortcuts.updateAppShortcutParameters()
     }
 

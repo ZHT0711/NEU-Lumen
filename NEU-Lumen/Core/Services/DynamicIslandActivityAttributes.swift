@@ -8,4 +8,5 @@ struct NEULumenActivityAttributes: ActivityAttributes {
     var campus: String
     // Optional so an upgrade can decode and retire activities from earlier builds.
     var accountID: String?
+    var scheduledCountdown: ScheduledLiveActivityPlan? = nil
 }

@@ -7,9 +7,29 @@ OUTPUT="$ROOT/build/ui-preview"
 rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 python3 "$ROOT/scripts/prepare_ui_validation.py" "$PREVIEW"
-SIM_ID="$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin)["devices"]; print(next((v["udid"] for k in sorted(d,reverse=True) for v in d[k] if "iOS" in k and v["name"].startswith("iPhone")), ""))')"
+SDK_VERSION="$(xcrun --sdk iphonesimulator --show-sdk-version)"
+SIM_ID="$(xcrun simctl list devices available -j | python3 -c '
+import json, re, sys
+
+sdk = tuple(map(int, sys.argv[1].split("."))) + (0, 0)
+devices = json.load(sys.stdin)["devices"]
+candidates = []
+for runtime, models in devices.items():
+    version = re.search(r"\.iOS-(\d+(?:-\d+)*)$", runtime)
+    if version is None:
+        continue
+    version = (tuple(map(int, version[1].split("-"))) + (0, 0))[:3]
+    if version[0] != sdk[0] or version > sdk[:3]:
+        continue
+    for model in models:
+        name = model["name"]
+        iphone = re.fullmatch(r"iPhone (\d+)(?: (Pro(?: Max)?|Plus))?", name)
+        if iphone and (int(iphone[1]) >= 15 or (iphone[1] == "14" and "Pro" in (iphone[2] or ""))):
+            candidates.append((version, name == "iPhone 17", name, model["udid"]))
+print(max(candidates)[-1] if candidates else "")
+' "$SDK_VERSION")"
 if [[ -z "$SIM_ID" ]]; then
-  echo "No available iPhone simulator" >&2
+  echo "No available iPhone simulator with Dynamic Island for SDK $SDK_VERSION" >&2
   exit 1
 fi
 xcrun simctl list devices available -j | python3 -c '

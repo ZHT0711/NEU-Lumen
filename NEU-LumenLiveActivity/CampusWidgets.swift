@@ -15,13 +15,22 @@ struct NEULumenNextCourseWidget: Widget {
 }
 
 struct NEULumenTodayScheduleWidget: Widget {
+    private var families: [WidgetFamily] {
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) {
+            return [.systemMedium, .systemLarge, .systemExtraLargePortrait]
+        }
+        #endif
+        return [.systemMedium, .systemLarge]
+    }
+
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NEULumenTodayScheduleWidget", provider: CampusWidgetProvider(content: .today)) { entry in
             TodayScheduleWidgetView(entry: entry)
         }
         .configurationDisplayName("今日课表")
         .description("查看今天的课程安排和上课位置。")
-        .supportedFamilies([.systemMedium, .systemLarge])
+        .supportedFamilies(families)
     }
 }
 
@@ -183,6 +192,7 @@ private struct CampusWidgetProvider: TimelineProvider {
 
 private enum CampusWidgetLink {
     static let course = URL(string: "neulumen://activity/course")!
+    static let todaySchedule = CampusShortcutPage.todaySchedule.url
     static let assignments = URL(string: "neulumen://activity/learning?section=assignments")!
     static let services = URL(string: "neulumen://activity/services")!
     static let settings = URL(string: "neulumen://activity/widget-settings")!
@@ -261,10 +271,22 @@ private struct TodayScheduleWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: CampusWidgetEntry
 
-    private var visibleCount: Int { family == .systemLarge ? 7 : 3 }
+    private var isExtraLarge: Bool {
+        #if compiler(>=6.4)
+        if #available(iOS 27.0, *) { return family == .systemExtraLargePortrait }
+        #endif
+        return false
+    }
+
+    private var visibleCount: Int {
+        if isExtraLarge { return 10 }
+        return family == .systemLarge ? 7 : 3
+    }
+
+    private var rowSpacing: CGFloat { family == .systemMedium ? 5 : 8 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: family == .systemLarge ? 9 : 5) {
+        VStack(alignment: .leading, spacing: rowSpacing) {
             HStack {
                 CampusWidgetHeader(title: "今日课表", symbol: "calendar")
                 Spacer(minLength: 4)
@@ -274,15 +296,10 @@ private struct TodayScheduleWidgetView: View {
                     .lineLimit(1)
             }
             if let courses = entry.todayCourses, !courses.isEmpty {
-                ForEach(courses.prefix(visibleCount)) { course in
-                    courseRow(course)
-                }
-                if courses.count > visibleCount {
-                    Text("另有 \(courses.count - visibleCount) 节 · 打开完整课表")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .privacySensitive()
+                ViewThatFits(in: .vertical) {
+                    courseList(courses, limit: visibleCount)
+                    courseList(courses, limit: max(1, visibleCount - 2))
+                    courseList(courses, limit: 1)
                 }
                 Spacer(minLength: 0)
             } else {
@@ -297,15 +314,34 @@ private struct TodayScheduleWidgetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(for: .widget) { CampusWidgetBackground() }
-        .widgetURL(entry.todayCourses == nil ? CampusWidgetLink.settings : CampusWidgetLink.course)
+        .widgetURL(entry.todayCourses == nil ? CampusWidgetLink.settings : CampusWidgetLink.todaySchedule)
+    }
+
+    private func courseList(_ courses: [CampusWidgetSnapshot.Course], limit: Int) -> some View {
+        VStack(alignment: .leading, spacing: rowSpacing) {
+            ForEach(courses.prefix(limit)) { course in
+                courseRow(course)
+            }
+            if courses.count > limit {
+                Text("另有 \(courses.count - limit) 节 · 打开完整课表")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .privacySensitive()
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func courseRow(_ course: CampusWidgetSnapshot.Course) -> some View {
         let ongoing = course.start <= entry.date && entry.date < course.end
         return HStack(spacing: 8) {
-            Text(WidgetDateText.clock(course.start))
+            Text(isExtraLarge
+                 ? "\(WidgetDateText.clock(course.start))–\(WidgetDateText.clock(course.end))"
+                 : WidgetDateText.clock(course.start))
                 .font(.caption.monospacedDigit().weight(ongoing ? .semibold : .regular))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             Text(course.title)
                 .font(.subheadline.weight(ongoing ? .semibold : .regular))
                 .lineLimit(1)
