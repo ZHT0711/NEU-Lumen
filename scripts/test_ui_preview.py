@@ -108,14 +108,16 @@ class UIPreviewTests(unittest.TestCase):
         nightly = runner.split('if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]', 1)[1].split('exit 0', 1)[0]
         captured = re.search(r'for SCREEN in ([^;]+); do', nightly).group(1).split()
         self.assertEqual({name + '-light.png' for name in captured} | {'services-art-dark.png'}, set(preview.NIGHTLY_SCREENSHOTS))
-        self.assertIn('for SCREEN in card services native-map campus-journey;', nightly)
+        verifier = (root / 'scripts/verify_ui_screenshots.sh').read_text()
+        nightly_verifier = verifier.split('  nightly)', 1)[1].split('    ;;', 1)[0]
+        self.assertIn('SCREENS=(card services native-map campus-journey)', nightly_verifier)
         ocr = (root / 'scripts/check_system_island.swift').read_text()
         self.assertIn('if screen == "native-mail"', ocr)
         self.assertIn('title.midX < 0.55', ocr)
         self.assertIn('batch.maxY + 0.005 < title.minY', ocr)
         workflow = (root / '.github/workflows/build-unsigned.yml').read_text()
         self.assertIn("startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly'", workflow)
-        self.assertEqual(workflow.count("UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}"), 3)
+        self.assertEqual(workflow.count("UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}"), 4)
 
     def test_missing_and_invalid_screenshot_block_package(self):
         image = self.path / preview.SCREENSHOTS[0]
@@ -302,14 +304,14 @@ wait_ui_marker() { cp "$CONTAINER/Documents/$1" "$OUTPUT/$1"; }
 
     def test_every_checked_screen_has_content_expectations(self):
         root = Path(__file__).resolve().parents[1]
-        shell = (root / 'scripts/validate_ui.sh').read_text()
+        shell = (root / 'scripts/verify_ui_screenshots.sh').read_text()
         checker = (root / 'scripts/check_system_island.swift').read_text()
-        loop = re.search(r'for SCREEN in ([^;\n]+); do\n\s*"\$PREVIEW/system-island-check"', shell)
-        self.assertIsNotNone(loop)
-        screens = loop.group(1).split()
+        lists = re.findall(r'(?:HEADERS|SCREENS)=\(([^)]+)\)', shell)
+        self.assertEqual(len(lists), 4)
+        screens = {screen for names in lists for screen in names.split()}
         expectations = set(re.findall(r'^\s*"([^"\n]+)": \[', checker, re.M))
-        self.assertFalse(set(screens) - expectations)
-        self.assertTrue(set(screens).issubset({name.removesuffix('-light.png') for name in preview.SCREENSHOTS}))
+        self.assertFalse(screens - expectations)
+        self.assertTrue(screens.issubset({name.removesuffix('-light.png') for name in preview.SCREENSHOTS}))
 
     def test_exact_new_snapshots_and_required_checks(self):
         self.assertEqual(len(preview.SCREENSHOTS), 59)

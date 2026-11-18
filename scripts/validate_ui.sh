@@ -108,18 +108,6 @@ launch_screenshot_page() {
 }
 xcrun simctl status_bar "$SIM_ID" override --time "9:41" --batteryState charged --batteryLevel 100
 xcrun simctl ui "$SIM_ID" appearance light
-check_service_headers() {
-  if [[ "$#" == 0 ]]; then set -- academic-center native-analysis native-downloads; fi
-  for HEADER_SCREEN in "$@"; do
-    "$PREVIEW/system-island-check" "$OUTPUT/$HEADER_SCREEN-light.png" "screen:$HEADER_SCREEN" 2>&1 | tee "$OUTPUT/service-title-$HEADER_SCREEN.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
-  done
-}
-check_service_panels() {
-  for MODE in light dark; do
-    cat "$OUTPUT/services-panel-$MODE-state.txt" > "$OUTPUT/services-panel-$MODE-checks.txt"
-    "$PREVIEW/system-island-check" "$OUTPUT/services-art-$MODE.png" screen:services-art 2>&1 | tee -a "$OUTPUT/services-panel-$MODE-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
-  done
-}
 if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
   # Nightly captures the current app and changed native services, without the
   # full browser/persistence/ActivityKit matrix used by formal releases.
@@ -143,13 +131,6 @@ if [[ "${UI_PREVIEW_PROFILE:-full}" == nightly ]]; then
   sleep 1
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/services-art-dark.png"
   xcrun simctl ui "$SIM_ID" appearance light
-  swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-  check_service_headers academic-center native-analysis
-  check_service_panels
-  for SCREEN in card services native-map campus-journey; do
-    "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
-  done
-  python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"
   exit 0
 fi
 for SCREEN in native-ecode home home-nanhu campus-journey schedule services services-directory services-art grades mooc chaoxing card profile favorites holidays calendar live-activity live-activity-custom native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications; do
@@ -307,12 +288,6 @@ xcrun simctl launch "$SIM_ID" com.apple.Preferences
 sleep 3
 xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/native-live-activity.png"
 # Capture the actual SpringBoard-expanded island, not the app-hosted preview.
-swiftc -warnings-as-errors "$ROOT/scripts/check_system_island.swift" -o "$PREVIEW/system-island-check" 2>&1 | tee "${RUNNER_TEMP}/system-island-tests.log"
-check_service_headers
-check_service_panels
-for SCREEN in services services-directory services-art grades mooc chaoxing native-payment native-electricity native-bills native-analysis native-map indoor-navigation indoor-route indoor-points native-library native-telephone native-vpn native-affairs native-mail native-news native-agenda native-downloads notifications academic-services academic-exams; do
-  "$PREVIEW/system-island-check" "$OUTPUT/$SCREEN-light.png" "screen:$SCREEN" 2>&1 | tee -a "$OUTPUT/screen-content-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
-done
 for KIND in nextCourse custom electricBalance; do
   rm -f "$CONTAINER/Documents/system-island-ready.txt" "$CONTAINER/Documents/system-island-sent.txt"
   xcrun simctl launch --terminate-running-process "$SIM_ID" edu.neu.lumen "--system-island=$KIND"
@@ -330,8 +305,5 @@ for KIND in nextCourse custom electricBalance; do
   grep -q "^PASS:" "$CONTAINER/Documents/system-island-sent.txt"
   sleep 2
   xcrun simctl io "$SIM_ID" screenshot "$OUTPUT/system-island-$KIND.png"
-  "$PREVIEW/system-island-check" "$OUTPUT/system-island-$KIND.png" "$KIND" 2>&1 | tee -a "$OUTPUT/system-island-checks.txt" | tee -a "${RUNNER_TEMP}/system-island-tests.log"
   xcrun simctl terminate "$SIM_ID" edu.neu.lumen || true
 done
-
-python3 "$ROOT/scripts/package_ui_preview.py" "$OUTPUT"

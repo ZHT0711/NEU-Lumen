@@ -19,10 +19,10 @@ def digest(path):
 
 
 def artifact_name(kind, run_number, attempt):
-    if kind not in ('ipa', 'ui') or not str(run_number).isdigit() or not str(attempt).isdigit():
+    prefixes = {'ipa': 'NEU-Lumen-iOS-unsigned', 'ui': 'NEU-Lumen-ui-preview', 'capture': 'NEU-Lumen-capture'}
+    if kind not in prefixes or not str(run_number).isdigit() or not str(attempt).isdigit():
         raise ValueError('Invalid artifact identity')
-    prefix = 'NEU-Lumen-iOS-unsigned' if kind == 'ipa' else 'NEU-Lumen-ui-preview'
-    return f'{prefix}-{run_number}-attempt-{attempt}'
+    return f'{prefixes[kind]}-{run_number}-attempt-{attempt}'
 
 
 def record(root=Path('build')):
@@ -39,6 +39,13 @@ def record(root=Path('build')):
             'toolchain': (root / 'toolchain-provenance.txt').read_text(encoding='utf-8')}
     if not data['toolchain'].strip():
         raise ValueError('Missing toolchain provenance')
+    if 'CAPTURE_ATTEMPT' in env:
+        capture = env['CAPTURE_ATTEMPT']
+        name = artifact_name('capture', env['GITHUB_RUN_NUMBER'], capture)
+        identity = env['CAPTURE_ARTIFACT_ID']
+        if not identity.isdigit() or name != env['CAPTURE_ARTIFACT_NAME']:
+            raise ValueError('Invalid simulator capture artifact outputs')
+        data['capture'] = {'attempt': capture, 'id': identity, 'name': name}
     text = json.dumps(data, ensure_ascii=False, indent=2) + '\n'
     (root / NAME).write_text(text, encoding='utf-8')
     (root / 'ui-preview' / NAME).write_text(text, encoding='utf-8')
@@ -73,7 +80,8 @@ def download(kind, destination=None):
     env = os.environ
     identity = env[kind.upper() + '_ARTIFACT_ID']
     name = env[kind.upper() + '_ARTIFACT_NAME']
-    if not identity.isdigit() or name != artifact_name(kind, env['GITHUB_RUN_NUMBER'], env['BUILD_ATTEMPT']):
+    attempt = env['CAPTURE_ATTEMPT'] if kind == 'capture' else env['BUILD_ATTEMPT']
+    if not identity.isdigit() or name != artifact_name(kind, env['GITHUB_RUN_NUMBER'], attempt):
         raise ValueError('Missing or mismatched successful-build artifact outputs')
     result = subprocess.run(['gh', 'api', f'repos/{env["GITHUB_REPOSITORY"]}/actions/artifacts/{identity}'],
                             check=True, capture_output=True, text=True)
@@ -89,7 +97,7 @@ def download(kind, destination=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=('record', 'validate', 'download'))
-    parser.add_argument('kind', nargs='?', choices=('ipa', 'ui'))
+    parser.add_argument('kind', nargs='?', choices=('ipa', 'ui', 'capture'))
     parser.add_argument('--ipa-only', action='store_true')
     parser.add_argument('--dir', dest='destination')
     args = parser.parse_args(argv)
@@ -100,7 +108,7 @@ def main(argv=None):
     elif args.kind:
         download(args.kind, args.destination)
     else:
-        parser.error('download requires ipa or ui')
+        parser.error('download requires ipa, ui or capture')
 
 
 if __name__ == '__main__':

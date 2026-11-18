@@ -9,7 +9,8 @@ enum AppTab: Hashable {
 }
 
 private enum ActivitySheet: Identifiable {
-    case settings, card, reminders, widgetSettings, exams, todaySchedule, service(NativeCampusService)
+    case settings, card, reminders, widgetSettings, exams
+    case todaySchedule(UUID), service(NativeCampusService)
     var id: String {
         switch self {
         case .settings: "settings"
@@ -17,7 +18,7 @@ private enum ActivitySheet: Identifiable {
         case .reminders: "reminders"
         case .widgetSettings: "widget-settings"
         case .exams: "exams"
-        case .todaySchedule: "today-schedule"
+        case .todaySchedule(let request): "today-schedule:" + request.uuidString
         case .service(let value): "service:" + value.rawValue
         }
     }
@@ -50,7 +51,7 @@ struct MainTabView: View {
                     selection = .schedule
                     let today = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
                         .contains { $0.name == "today" && $0.value == "1" } ?? false
-                    if today { activitySheet = .todaySchedule }
+                    if today { activitySheet = .todaySchedule(UUID()) }
                 }
                 if url.host == "activity", url.path == "/profile" { selection = .profile }
                 if url.host == "activity", url.path == "/learning" {

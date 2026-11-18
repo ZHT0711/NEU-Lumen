@@ -55,19 +55,16 @@ jobs:
 
           echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
 
-  build:
-    name: Build unsigned iOS IPA
+  capture:
+    name: Build iOS IPA and capture simulator evidence
     needs: select_run
     if: needs.select_run.outputs.should_build == 'true'
     runs-on: xcode-27
     timeout-minutes: 60
     outputs:
-      # needs.build outputs retain the successful BUILD attempt on release-only retries.
       attempt: ${{ steps.identity.outputs.attempt }}
-      ipa_name: ${{ steps.identity.outputs.ipa_name }}
-      ui_name: ${{ steps.identity.outputs.ui_name }}
-      ipa_id: ${{ steps.ipa.outputs.artifact-id }}
-      ui_id: ${{ steps.ui.outputs.artifact-id }}
+      name: ${{ steps.identity.outputs.capture_name }}
+      id: ${{ steps.capture.outputs.artifact-id }}
 
     steps:
       - name: Identify immutable build artifacts
@@ -76,8 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-          echo "ipa_name=NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
-          echo "ui_name=NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+          echo "capture_name=NEU-Lumen-capture-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -282,7 +278,7 @@ jobs:
       - name: Require warning-free compiler logs
         # Add each new native test log here and increment --required-count together.
         run: >-
-          python3 scripts/check_build_diagnostics.py --required-count 12
+          python3 scripts/check_build_diagnostics.py --required-count 11
           "${RUNNER_TEMP}/catalog-tests.log"
           "${RUNNER_TEMP}/planner-tests.log"
           "${RUNNER_TEMP}/login-tests.log"
@@ -292,8 +288,76 @@ jobs:
           "${RUNNER_TEMP}/academic-query-tests.log"
           "${RUNNER_TEMP}/reminder-tests.log"
           "${RUNNER_TEMP}/widgets-and-backup-tests.log"
-          "${RUNNER_TEMP}/system-island-tests.log"
           build/ios-build.log build/ui-preview/simulator-build.log
+
+      - name: Upload matching IPA and simulator capture
+        id: capture
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.identity.outputs.capture_name }}
+          path: |
+            build/NEU-Lumen-iOS-unsigned.ipa
+            build/toolchain-provenance.txt
+            build/ui-preview/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failed simulator diagnostics
+        if: failure() && hashFiles('build/ui-preview/**') != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.identity.outputs.capture_name }}-failed-ui
+          path: build/ui-preview/
+          if-no-files-found: error
+          retention-days: 14
+
+  build:
+    # macOS 27 hosted VMs return a Vision OCR error for these screenshots.
+    # Check the exact captures on macOS 26 before creating the publishable artifacts.
+    name: Verify screenshot content and bind release artifacts
+    needs: capture
+    runs-on: macos-26
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      CAPTURE_ATTEMPT: ${{ needs.capture.outputs.attempt }}
+      CAPTURE_ARTIFACT_ID: ${{ needs.capture.outputs.id }}
+      CAPTURE_ARTIFACT_NAME: ${{ needs.capture.outputs.name }}
+      UI_PREVIEW_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'full' || 'nightly' }}
+    outputs:
+      # Keep successful validation outputs on release-only retries.
+      attempt: ${{ steps.identity.outputs.attempt }}
+      ipa_name: ${{ steps.identity.outputs.ipa_name }}
+      ui_name: ${{ steps.identity.outputs.ui_name }}
+      ipa_id: ${{ steps.ipa.outputs.artifact-id }}
+      ui_id: ${{ steps.ui.outputs.artifact-id }}
+    steps:
+      - name: Identify immutable build artifacts
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "attempt=${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+          echo "ipa_name=NEU-Lumen-iOS-unsigned-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+          echo "ui_name=NEU-Lumen-ui-preview-${GITHUB_RUN_NUMBER}-attempt-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Retrieve the matching IPA and simulator capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/build_provenance.py download capture --dir build
+
+      - name: Verify rendered screenshot content
+        run: bash scripts/verify_ui_screenshots.sh
+
+      - name: Require warning-free screenshot verifier log
+        run: python3 scripts/check_build_diagnostics.py --required-count 1 "${RUNNER_TEMP}/system-island-tests.log"
 
       - name: Bind IPA and UI provenance to this successful build attempt
         run: python3 scripts/build_provenance.py record

@@ -100,6 +100,21 @@ class BuildProvenanceTests(unittest.TestCase):
             self.assertIn(source, policy_step)
         self.assertIn('"${RUNNER_TEMP}/data-reliability-tests"', policy_step)
 
+    def test_validation_retry_uses_one_original_capture(self):
+        env = dict(self.env, GITHUB_RUN_ATTEMPT='2', BUILD_ATTEMPT='2', CAPTURE_ATTEMPT='1',
+                   CAPTURE_ARTIFACT_ID='456', CAPTURE_ARTIFACT_NAME='NEU-Lumen-capture-61-attempt-1')
+        meta = {'id': 456, 'name': env['CAPTURE_ARTIFACT_NAME'], 'expired': False,
+                'workflow_run': {'id': 123, 'head_sha': env['GITHUB_SHA']}}
+        with patch.dict(os.environ, env), \
+             patch.object(provenance.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, json.dumps(meta))) as run:
+            provenance.download('capture', self.root)
+            self.assertIn('/actions/artifacts/456', run.call_args_list[0].args[0][-1])
+            self.assertIn(env['CAPTURE_ARTIFACT_NAME'], run.call_args_list[1].args[0])
+            data = provenance.record(self.root)
+            self.assertEqual(data['capture'], {'attempt': '1', 'id': '456', 'name': env['CAPTURE_ARTIFACT_NAME']})
+            self.assertEqual(data['build_attempt'], '2')
+            self.assertEqual(provenance.validate(self.root), self.root / provenance.NAME)
+
     def test_workflow_contract_pins_gates_and_recovery_order(self):
         text = (Path(__file__).resolve().parents[1] / '.github/workflows/build-unsigned.yml').read_text()
         actions = re.findall(r'uses:\s+([^\s#]+)', text)
@@ -113,6 +128,8 @@ class BuildProvenanceTests(unittest.TestCase):
         self.assertLess(text.index('publish_nightly.py --recover-only'), text.index('Check current main commit'))
         self.assertIn('--required-count', text)
         self.assertIn('runs-on: xcode-27', text)
+        self.assertIn('needs: capture\n    runs-on: macos-26', text)
+        self.assertLess(text.index('bash scripts/verify_ui_screenshots.sh'), text.index('scripts/build_provenance.py record'))
         self.assertNotIn('id-token: write', text)
         nightly = text.split('  nightly:', 1)[1]
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", nightly)
