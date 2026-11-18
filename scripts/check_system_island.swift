@@ -30,7 +30,7 @@ if kind.hasPrefix("screen:") {
         "services-directory": ["服务大厅", "应用目录", "服务分类"],
         "native-electricity": ["缴费大厅", "宿舍电费", "查询并记住房间"],
         "native-bills": ["缴费大厅", "校园卡月流水", "刷新所选月份"],
-        "native-analysis": ["成绩分析", "成绩概览", "分数分布"],
+        "native-analysis": ["成绩概览", "分数分布"],
         "academic-center": ["学业查询", "成绩与绩点", "教学安排"],
         "profile": ["走进东大", "南湖校区", "浑南校区"],
         "native-map": ["校园地图", "楼内导航", "教学楼"],
@@ -57,8 +57,16 @@ if kind.hasPrefix("screen:") {
     }
     let serviceTitles = ["academic-center": "学业查询", "native-analysis": "成绩分析", "native-downloads": "下载中心"]
     if let expectedTitle = serviceTitles[screen] {
-        let titles = (request.results ?? []).filter {
-            $0.boundingBox.midY > 0.86 && $0.topCandidates(1).first?.string.replacingOccurrences(of: " ", with: "").contains(expectedTitle) == true
+        let titles = (request.results ?? []).filter { observation in
+            guard observation.boundingBox.midY > 0.86 else { return false }
+            let candidates = observation.topCandidates(3).map { $0.string.replacingOccurrences(of: " ", with: "") }
+            // Vision on the macOS 26 runner read 成 as 咸 in the iOS 27 navigation
+            // font. Match this observed variant only in the analysis header.
+            // ServiceCatalog checks the exact label used by the production view.
+            return candidates.contains { candidate in
+                candidate.contains(expectedTitle) ||
+                    (screen == "native-analysis" && candidate.contains("咸绩分析"))
+            }
         }
         guard titles.count == 1, let title = titles.first, title.boundingBox.midX < 0.55 else {
             fatalError("Service header title is duplicated, missing or not in the leading switcher: " + screen + "; OCR: " + text)
