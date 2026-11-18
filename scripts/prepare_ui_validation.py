@@ -13,6 +13,7 @@ if destination == root or root in destination.parents or destination in root.par
 destination.mkdir(parents=True, exist_ok=True)
 for name in ["NEU-Lumen", "NEU-LumenLiveActivity", "NEU-Lumen.xcodeproj"]:
     shutil.copytree(root / name, destination / name, dirs_exist_ok=True)
+shutil.copyfile(root / "LICENSE", destination / "LICENSE")
 inject_measured_ui(root, destination)
 demo_source = destination / "NEU-Lumen/Core/Services/DemoData.swift"
 demo_source.write_text(demo_source.read_text(encoding="utf-8").replace(

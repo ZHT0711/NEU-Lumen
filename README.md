@@ -11,6 +11,7 @@
   <a href="https://github.com/ZHT0711/NEU-Lumen/releases/tag/nightly"><img src="https://img.shields.io/badge/nightly-unsigned%20IPA-1769aa" alt="Nightly IPA" /></a>
   <img src="https://img.shields.io/badge/iOS-17%2B-111111" alt="iOS 17+" />
   <img src="https://img.shields.io/badge/SwiftUI-native-0d7c66" alt="SwiftUI" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
 </p>
 
 <p align="center">
@@ -68,6 +69,12 @@
 定时计划：北京时间每天 **03:17** 一次，Actions 可能延迟或跳过；`main` 更新及手动触发也会构建。Nightly 使用原生测试、设备/模拟器零警告编译和关键页面快速检查；正式版另跑完整交互回归与全量截图。检查通过才更新对应安装包、截图 ZIP 和来源清单。
 
 本地构建：macOS + Xcode，运行 `bash build_ios_unsigned.sh`。
+
+## 贡献与许可
+
+欢迎报告问题或提交改进。参见 [贡献指南](CONTRIBUTING.md)。
+
+原创代码与配套文档采用 [MIT 许可](LICENSE)，第三方代码、数据和学校标识遵循各自的许可及权利声明。参见 [素材来源](docs/asset-sources.md) 和 [随应用分发的第三方许可](NEU-Lumen/Resources)。
 
 ---
 

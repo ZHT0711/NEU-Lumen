@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
+		5AFE00000000000000000011 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 		A10000000000000000000001 /* NEU-LumenLiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = NEU-LumenLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000002 /* NEULumenLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NEULumenLiveActivity.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../NEU-Lumen/Core/Services/DynamicIslandActivityAttributes.swift"; sourceTree = "<group>"; };
@@ -38,6 +39,7 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXBuildFile section */
+		5AFE00000000000000000012 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 5AFE00000000000000000011 /* LICENSE */; };
 		A10000000000000000000011 /* NEULumenLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* NEULumenLiveActivity.swift */; };
 		A10000000000000000000012 /* DynamicIslandActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* DynamicIslandActivityAttributes.swift */; };
 		A10000000000000000000024 /* LiveActivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* LiveActivityPresentation.swift */; };
@@ -77,6 +79,7 @@
 		5AFE00000000000000000002 = {
 			isa = PBXGroup;
 			children = (
+				5AFE00000000000000000011 /* LICENSE */,
 				5AFE00000000000000000009 /* NEU-Lumen */,
 				A10000000000000000000005 /* NEU-LumenLiveActivity */,
 				5AFE00000000000000000003 /* Products */,
@@ -184,6 +187,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5AFE00000000000000000012 /* LICENSE in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
