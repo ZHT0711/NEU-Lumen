@@ -13,6 +13,14 @@ enum WebVPN {
     static let key = Array("b0A58a69394ce73@".utf8)
     /// WebVPN 的 CAS 登录 service：用公网一号通的 CASTGC 直接换网关票据。
     static let casService = "https://webvpn.neu.edu.cn/login?cas_login=true"
+    private static let casPath = URL(string: wrap("https://pass.neu.edu.cn/tpass"))!.path
+
+    static func isProxiedCASCookie(_ cookie: HTTPCookie) -> Bool {
+        let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+        return domain == "webvpn.neu.edu.cn" && cookie.name == "CASTGC" && !cookie.value.isEmpty
+            && (cookie.expiresDate.map { $0 > Date() } ?? true)
+            && [casPath, casPath + "/", casPath + "/login"].contains(cookie.path)
+    }
 
     static func isWrapped(_ raw: String) -> Bool {
         guard let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return false }

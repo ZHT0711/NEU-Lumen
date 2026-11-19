@@ -5,6 +5,7 @@ struct NetworkError: LocalizedError {
     let message: String
     /// 统一认证要求新设备短信二次认证。
     var needsSecondAuth = false
+    var rejectsCredentials = false
 
     static func needSecondAuth() -> NetworkError {
         var error = NetworkError(message: "需要完成短信二次认证")

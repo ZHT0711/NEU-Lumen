@@ -436,7 +436,7 @@ final class PortalRepository {
             let authenticationRequired = (error as? PortalAPIError)?.requiresAuthentication == true
                 || (error as? NetworkError)?.isSessionExpired == true
             if authenticationRequired {
-                guard await session.silentRelogin() else { throw error }
+                guard await session.silentRelogin(authenticationRequired: true) else { throw error }
                 try checkRequest()
                 user = session.user
                 let value = try await operation()

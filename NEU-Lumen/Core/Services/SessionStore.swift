@@ -352,25 +352,36 @@ final class SessionStore {
     /// 优先恢复网页登录；网络/风控暂时失败时仍保留会话，只有明确过期才清除。
     private func restoreWebSession() async -> Bool {
         guard let saved = webSessions.load() else { return false }
+        let epoch = sessionEpoch
         client.clearSession()
         client.setUserAgent(saved.userAgent)
         client.absorbCookies(saved.restoredCookies())
         client.adoptGatewayTicket()
-        guard client.hasLoginSession else {
+        let hasCookies = client.hasLoginSession
+        let canRestoreWithPassword = !saved.user.sid.isEmpty && !defaults.bool(forKey: Self.passwordLoginDisabledKey)
+            && !defaults.bool(forKey: "lumen.passwordLoginPaused." + saved.user.sid)
+            && credentials.load()?.username == saved.user.sid
+        guard hasCookies || canRestoreWithPassword else {
             webSessions.clear()
             return false
         }
         var restoredUser = saved.user
-        var authenticationExpired = false
-        do {
-            if let fresh = try await client.validateSavedSession() { restoredUser = restoredUser.merging(fresh) }
-        } catch {
-            authenticationExpired = NetworkError.from(error).isSessionExpired
-            // Route-specific login pages / campus gateway restrictions do not revoke the other realm.
-            profileSyncError = NetworkError.from(error).isSessionExpired
-                ? "当前网络需要更新认证，可在下方更新网页登录；已保留其它网络的会话"
-                : "暂时无法同步个人资料，已保留登录会话"
+        var authenticationExpired = !hasCookies
+        if hasCookies {
+            do {
+                if let fresh = try await client.validateSavedSession(),
+                   !saved.user.hasProfile || saved.user.isSameAccount(as: fresh) {
+                    restoredUser = restoredUser.merging(fresh)
+                }
+            } catch {
+                guard epoch == sessionEpoch, !Task.isCancelled else { return true }
+                authenticationExpired = NetworkError.from(error).isSessionExpired
+                profileSyncError = authenticationExpired
+                    ? "当前网络需要更新认证，可更新网页登录"
+                    : "暂时无法同步个人资料，已保留登录会话"
+            }
         }
+        guard epoch == sessionEpoch, !Task.isCancelled else { return true }
         user = restoredUser
         usesWebSession = true
         keepSession = true
@@ -379,7 +390,7 @@ final class SessionStore {
         lastIdentityAttempt = .distantPast
         phase = .loggedIn
         persistWebSession()
-        if authenticationExpired, hasSavedCredentials { _ = await silentRelogin(authenticationRequired: true) }
+        if authenticationExpired, canRestoreWithPassword { _ = await silentRelogin(authenticationRequired: true) }
         return true
     }
 
@@ -496,57 +507,45 @@ final class SessionStore {
         let request = UUID()
         recoveryRequest = request
         let task = Task { @MainActor [weak self] () -> Bool in
-            guard let self, self.phase == .loggedIn else { return false }
-            let retained = self.client.browserCookies()
+            guard let self, self.phase == .loggedIn, self.networkAvailable else { return false }
             defer {
-                if epoch == self.sessionEpoch, self.phase == .loggedIn {
-                    self.client.retainMissingCookies(retained)
+                if epoch == self.sessionEpoch, self.phase == .loggedIn, !Task.isCancelled {
                     self.persistWebSession()
                 }
             }
-            self.client.invalidateAccessRoute()
-            await self.client.prepareAccess()
+            if !authenticationRequired { self.client.invalidateAccessRoute() }
+            await self.client.prepareAccess(authenticateGateway: false)
+            guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             var authenticationExpired = authenticationRequired
             do {
-                let fresh = try await self.client.fetchUserInfo()
+                let fresh = try await self.client.fetchUserInfo(repairAuthentication: authenticationRequired)
                 guard epoch == self.sessionEpoch, !Task.isCancelled, self.canBind(fresh) else { return false }
                 self.user = self.user?.merging(fresh) ?? fresh
                 self.saveVerifiedBrowserCredentials()
                 self.profileSyncError = nil
-                if !authenticationRequired { return true }
+                return true
             } catch { authenticationExpired = authenticationExpired || NetworkError.from(error).isSessionExpired }
             guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
             // Native credentials are a last resort, without changing the app's root navigation.
             if authenticationExpired, self.canAutomaticallySignIn,
                Date().timeIntervalSince(self.lastPasswordAttempt) >= 60,
-               let cred = self.credentials.load(), self.user?.sid.isEmpty == false, self.user?.sid == cred.username {
+               let cred = self.credentials.load(), let expectedUser = self.user, expectedUser.sid == cred.username {
                 self.lastPasswordAttempt = Date()
                 do {
-                    let previousAgent = self.client.browserUserAgent
-                    let fresh = try await self.client.login(username: cred.username, password: cred.password)
+                    let fresh = try await self.client.renewLogin(cred, expectedUser: expectedUser)
                     guard epoch == self.sessionEpoch, !Task.isCancelled else { return false }
-                    guard self.user?.isSameAccount(as: fresh) == true else {
-                        self.client.clearSession()
-                        self.client.setUserAgent(previousAgent ?? HTTPClient.userAgent)
-                        self.client.absorbCookies(retained)
-                        self.client.adoptGatewayTicket()
-                        self.passwordLoginBlocked = true
-                        self.defaults.set(true, forKey: "lumen.passwordLoginPaused." + cred.username)
-                        self.profileSyncError = "续登返回的账号不匹配，请更新网页登录"
-                        return false
-                    }
                     self.user = self.user?.merging(fresh) ?? fresh
-                    self.lastPasswordAttempt = .distantPast
                     self.profileSyncError = nil
                     return true
                 } catch {
+                    guard epoch == self.sessionEpoch, !Task.isCancelled, !NetworkError.isCancellation(error) else { return false }
                     let failure = NetworkError.from(error)
-                    if failure.needsSecondAuth || failure.message.contains("【密码校验】") && !failure.message.contains("账号不存在") {
+                    if failure.needsSecondAuth || failure.rejectsCredentials {
                         self.passwordLoginBlocked = true
                         if !failure.needsSecondAuth { self.defaults.set(true, forKey: "lumen.passwordLoginPaused." + cred.username) }
                         self.profileSyncError = failure.needsSecondAuth
                             ? "学校要求验证码或二次认证，请更新网页登录后继续"
-                            : "保存的密码未通过验证，请更新网页登录；已停止自动重试"
+                            : failure.message
                         return false
                     }
                 }

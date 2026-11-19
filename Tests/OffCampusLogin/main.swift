@@ -800,13 +800,19 @@ func verifyBrowserCredentialRecovery() async throws {
     var posts = 0
     MockPortalProtocol.handle = { request in
         if request.url?.host == "pass.neu.edu.cn" {
-            if request.httpMethod == "POST" { posts += 1; return (200, [:], "<span id=\"errormsg\">密码错误</span>") }
+            if request.httpMethod == "POST" {
+                posts += 1
+                return (200, ["Set-Cookie": "CASTGC=failed-attempt; Path=/tpass; Secure"], "<span id=\"errormsg\">密码错误</span>")
+            }
             return (200, [:], "<input name=\"lt\" value=\"SYNTHETIC-LT\"><input name=\"execution\" value=\"e1s1\">")
         }
-        return (200, [:], "<script>const userInfoDSL = \(raw);</script>")
+        return (401, [:], "")
     }
+    let generation = pending.client.sessionGeneration
     require(!(await pending.silentRelogin(authenticationRequired: true)))
     precondition(posts == 1 && passwords.value == pair && !pending.canAutomaticallySignIn)
+    precondition(pending.client.sessionGeneration == generation && pending.client.browserCookies().contains { $0.value == casCookie.value })
+    precondition(!pending.client.browserCookies().contains { $0.value == "failed-attempt" })
     precondition(pending.beginBrowserPasswordLogin() == nil)
     require(!(await pending.silentRelogin(authenticationRequired: true)))
     precondition(posts == 1)
@@ -938,6 +944,80 @@ func verifyNetworkRoaming() async throws {
     print("Network roaming: gateway denial, direct CAS renewal, repeated campus/off-campus transitions, vault retention and account isolation passed")
 }
 try await verifyNetworkRoaming()
+
+@MainActor
+func verifyExpiredGatewayRecovery() async throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockPortalProtocol.self]
+    let client = PortalClient(http: HTTPClient(configuration: config))
+    let vault = MemoryWebSessionStore()
+    let suite = "NEU-Lumen.GatewayRenewal." + UUID().uuidString
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let credentials = MemoryCredentialStore()
+    let session = SessionStore(client: client, webSessions: vault, defaults: defaults, credentials: credentials)
+    let staleCAS = HTTPCookie(properties: [.name:"CASTGC", .value:"stale-public", .domain:"pass.neu.edu.cn", .path:"/tpass", .secure:"TRUE"])!
+    let profileHTML = "<script>const userInfoDSL = \(raw);</script>"
+    let login = await session.completeWebLogin(WebLoginSession(cookies: [ticket, staleCAS, proxyCASTGC], user: user,
+        userAgent: "Recovery WebKit UA", credentials: CampusLoginCredentials(username: user.sid, password: "fixture-password"),
+        rememberCredentials: true))
+    precondition(login && session.canAutomaticallySignIn)
+    precondition(PortalLoginDocument.canComplete(user: nil, cookies: [proxyCASTGC], hasLoginForm: false))
+    var publicExchanges = 0, proxyExchanges = 0
+    MockPortalProtocol.handle = { request in
+        precondition(request.httpMethod == "GET", "Successful ticket renewal must never submit the saved password")
+        let url = request.url!
+        let original = WebVPN.unwrap(url) ?? url
+        let cookies = request.value(forHTTPHeaderField: "Cookie") ?? ""
+        if original.host == "pass.neu.edu.cn" {
+            if url.host == "pass.neu.edu.cn" {
+                publicExchanges += 1
+                return (403, [:], "temporary public CAS denial")
+            }
+            proxyExchanges += 1
+            precondition(cookies.contains("CASTGC=proxy-only-cas"))
+            let service = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "service" }!.value!
+            return (302, ["Location": service + "&ticket=ST-renewal"], "")
+        }
+        if url.host == gateway.host, url.path == "/login" {
+            if url.query?.contains("ticket=ST-renewal") == true {
+                return (302, ["Location": "/", "Set-Cookie": "wengine_vpn_ticket=renewed; Path=/; Secure"], "")
+            }
+            return (200, [:], "<html>gateway login</html>")
+        }
+        if url.host == gateway.host, url.path.isEmpty || url.path == "/" { return (200, [:], "<html>gateway home</html>") }
+        precondition(url.host == gateway.host && original.host == portal.host)
+        if original.path.contains("/cas_login/") {
+            precondition(cookies.contains("wengine_vpn_ticket=renewed"))
+            return (302, ["Location": PortalClient.portalBase, "Set-Cookie": "SESS_ID=renewed-portal; Path=\(wrapped.path); Secure"], "")
+        }
+        if original.path.contains("/appmarket/") {
+            if !cookies.contains("SESS_ID=renewed-portal") {
+                return (302, ["Location": WebVPN.casService], "")
+            }
+            return (200, [:], #"{"e":0,"d":{"list":[{"id":138,"name":"教务系统","url":"https://jwxt.neu.edu.cn"}]}}"#)
+        }
+        // The homepage can still render while the native data endpoint requires login.
+        return (200, [:], profileHTML)
+    }
+    do {
+        _ = try await client.fetchApps()
+        preconditionFailure("Gateway login HTML must trigger recovery")
+    } catch let error as PortalAPIError {
+        precondition(error.requiresAuthentication)
+    }
+    let renewed = await session.silentRelogin(authenticationRequired: true)
+    let apps = try await client.fetchApps()
+    precondition(renewed && apps.count == 1 && publicExchanges == 2 && proxyExchanges == 2)
+    let persisted = vault.load()!.restoredCookies()
+    precondition(persisted.contains { $0.value == "renewed" } && persisted.contains { $0.value == "renewed-portal" })
+    let restarted = SessionStore(client: PortalClient(http: HTTPClient(configuration: config)), webSessions: vault,
+                                 defaults: defaults, credentials: credentials)
+    await restarted.restoreSession()
+    precondition(restarted.phase == .loggedIn && restarted.client.webvpnOn && restarted.user == user)
+    print("Expired gateway: login redirect detection, public-to-proxied CAS fallback, native retry and cold-start persistence passed")
+}
+try await verifyExpiredGatewayRecovery()
 
 let contentConfig = URLSessionConfiguration.ephemeral
 contentConfig.protocolClasses = [MockPortalProtocol.self]

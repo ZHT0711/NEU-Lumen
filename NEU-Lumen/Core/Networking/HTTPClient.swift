@@ -45,6 +45,10 @@ final class HTTPClient {
         session = URLSession(configuration: config, delegate: RedirectSuppressor(), delegateQueue: nil)
     }
 
+    func isolatedSession() -> HTTPClient {
+        HTTPClient(configuration: configuration.copy() as! URLSessionConfiguration)
+    }
+
     private func transport() -> (session: URLSession, revision: UUID, network: UUID) {
         transportLock.lock(); defer { transportLock.unlock() }
         return (session, transportRevision, networkRevision)

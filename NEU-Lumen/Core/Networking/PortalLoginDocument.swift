@@ -22,6 +22,7 @@ struct PortalLoginDocument {
     static func canComplete(user: PortalUser?, cookies: [HTTPCookie], hasLoginForm: Bool) -> Bool {
         guard !hasLoginForm else { return false }
         return user?.hasProfile == true || cookies.contains {
+            if WebVPN.isProxiedCASCookie($0) { return true }
             let domain = $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
             return $0.name == "CASTGC" && !$0.value.isEmpty &&
                 (domain == "pass.neu.edu.cn" || domain == "neu.edu.cn") &&

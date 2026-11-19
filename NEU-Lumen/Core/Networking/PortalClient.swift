@@ -46,11 +46,9 @@ final class PortalClient {
     init(http: HTTPClient = HTTPClient()) {
         self.http = http
         http.redirectRewriter = { [weak self] url in
-            guard let self,
-                  self.webvpnOn,
-                  WebVPN.isIntranet(url.absoluteString),
-                  !WebVPN.isWrapped(url.absoluteString) else { return nil }
-            return URL(string: WebVPN.wrap(url.absoluteString))
+            guard let self else { return nil }
+            let destination = self.maybeWrap(url.absoluteString)
+            return destination == url.absoluteString ? nil : URL(string: destination)
         }
     }
 
@@ -105,21 +103,13 @@ final class PortalClient {
     /// 在已有 CAS 会话所在的认证域中换取 WebVPN 票据。
     @discardableResult
     func ensureWebVPN(force: Bool = false) async -> Bool {
+        let epoch = sessionEpoch
         let revision = accessRouteRevision
         if !force && webvpnOn && http.cookies.hasWebVPNTicket() { return true }
-        for _ in 0..<2 {
-            let url = authenticationURL(for: WebVPN.casService)
-            if let resp = try? await http.get(url) {
-                guard revision == accessRouteRevision, !Task.isCancelled else { return false }
-                let landed = resp.finalURL.absoluteString
-                if http.cookies.hasWebVPNTicket() && !landed.contains("/tpass/login") {
-                    webvpnOn = true
-                    return true
-                }
-            }
-            try? await Task.sleep(nanoseconds: 400_000_000)
-        }
-        return false
+        guard (try? await casLand(WebVPN.casService)) != nil,
+              epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { return false }
+        webvpnOn = true
+        return true
     }
 
     /// 校外准备：探测校园网，不通则种 WebVPN 票（失败不抛错，由调用方按需处理）。
@@ -129,7 +119,9 @@ final class PortalClient {
         let campus = await isCampusNet()
         guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { return }
         webvpnOn = !campus
-        if !campus, authenticateGateway { _ = await ensureWebVPN() }
+        if !campus, authenticateGateway, hasCasSession || hasProxiedCASSession {
+            _ = await ensureWebVPN()
+        }
     }
 
     private func maybeWrap(_ url: String) -> String {
@@ -152,7 +144,11 @@ final class PortalClient {
         http.cookies.hasCookie(CasCrypto.casLoginURL, "CASTGC")
     }
 
-    var hasLoginSession: Bool { isLoggedIn || hasCasSession || hasWebVPNTicket }
+    private var hasProxiedCASSession: Bool {
+        browserCookies().contains(where: WebVPN.isProxiedCASCookie)
+    }
+
+    var hasLoginSession: Bool { isLoggedIn || hasCasSession || hasProxiedCASSession || hasWebVPNTicket }
 
     func setUserAgent(_ value: String) {
         let agent = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,9 +174,11 @@ final class PortalClient {
 
     /// 用 CASTGC 给指定 service 换 ST 并跟随到业务系统（停留在 CAS 登录页视为会话失效）。
     private func casLand(_ service: String) async throws -> HTTPClient.RawResponse {
+        let epoch = sessionEpoch
+        let revision = accessRouteRevision
         await casGate.acquire()
         do {
-            let response = try await performCASLanding(service)
+            let response = try await performCASLanding(service, epoch: epoch, revision: revision)
             await casGate.release()
             return response
         } catch {
@@ -189,14 +187,25 @@ final class PortalClient {
         }
     }
 
-    private func performCASLanding(_ service: String) async throws -> HTTPClient.RawResponse {
-        let url = authenticationURL(for: service)
-        let resp = try await http.get(url)
-        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
-            || resp.finalURL.path.contains("/tpass/login") {
-            throw NetworkError.sessionExpired()
+    private func performCASLanding(_ service: String, epoch: UUID, revision: UUID) async throws -> HTTPClient.RawResponse {
+        var failure: Error = NetworkError.sessionExpired()
+        for url in authenticationURLs(for: service) {
+            guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { throw CancellationError() }
+            do {
+                let response = try await http.get(url)
+                guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { throw CancellationError() }
+                guard !Self.requiresAuthentication(response) else { throw NetworkError.sessionExpired() }
+                if service == WebVPN.casService {
+                    guard (200..<300).contains(response.status), response.finalURL.host == "webvpn.neu.edu.cn",
+                          hasWebVPNTicket else { throw NetworkError.sessionExpired() }
+                }
+                return response
+            } catch {
+                if NetworkError.isCancellation(error) { throw error }
+                failure = error
+            }
         }
-        return resp
+        throw failure
     }
 
     // 正则只编译一次。
@@ -213,6 +222,7 @@ final class PortalClient {
 
     func clearSession() {
         sessionEpoch = UUID()
+        accessRouteRevision = UUID()
         http.cookies.clear()
         secondAuthExecution = nil
         webvpnOn = false
@@ -232,6 +242,22 @@ final class PortalClient {
     }
 
     // MARK: - CAS 统一身份认证
+
+    /// 验证同一账号后才合入新会话，续登失败时保留当前网络及其它服务的 Cookie。
+    func renewLogin(_ credentials: CampusLoginCredentials, expectedUser: PortalUser) async throws -> PortalUser {
+        let epoch = sessionEpoch
+        let revision = accessRouteRevision
+        let candidate = PortalClient(http: http.isolatedSession())
+        candidate.setUserAgent(browserUserAgent ?? HTTPClient.userAgent)
+        let fresh = try await candidate.login(username: credentials.username, password: credentials.password)
+        guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { throw CancellationError() }
+        guard expectedUser.isSameAccount(as: fresh) else {
+            throw NetworkError(message: "续登返回的账号不匹配，请更新网页登录", rejectsCredentials: true)
+        }
+        absorbCookies(candidate.browserCookies())
+        if candidate.webvpnOn { webvpnOn = true }
+        return fresh
+    }
 
     /// CAS 登录。成功返回用户信息，失败抛 NetworkError。
     func login(username rawUsername: String, password: String) async throws -> PortalUser {
@@ -281,7 +307,9 @@ final class PortalClient {
                     if msg.contains("账号不存在") {
                         throw NetworkError(message: "【密码校验】账号不存在：若当前使用移动网络（4G/5G），学校统一认证会拦截公网直连鉴权。请切换至校园网 WiFi，或改用下方「浏览器方式登录」。")
                     }
-                    throw NetworkError(message: "【密码校验】" + msg)
+                    throw NetworkError(message: "【密码校验】" + msg,
+                                       rejectsCredentials: msg.contains("密码错误") || msg.contains("密码不正确")
+                                           || msg.contains("密码有误") || msg.contains("密码已过期"))
                 }
             }
             throw NetworkError(message: "【密码校验】账号或密码错误")
@@ -390,27 +418,37 @@ final class PortalClient {
     /// 请求门户首页并解析 window.userInfoDSL。
     /// 校外门户 HTML 会被学校重定向进 WebVPN 网关：直连失败（落到 CAS/网关拦截页）
     /// 时自动切换到网关模式重试一次。
-    func fetchUserInfo() async throws -> PortalUser {
+    func fetchUserInfo(repairAuthentication: Bool = false) async throws -> PortalUser {
         let retained = browserCookies()
         let epoch = sessionEpoch
-        defer { if epoch == sessionEpoch { retainMissingCookies(retained) } }
+        defer {
+            if epoch == sessionEpoch, !Task.isCancelled, !webvpnOn {
+                // 校内网关可能拒绝请求并清理票据，留待下次出校时再验证。
+                retainMissingCookies(retained.filter {
+                    $0.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased() == "webvpn.neu.edu.cn"
+                })
+            }
+        }
         var lastError = NetworkError(message: "门户暂时无法验证，已保留登录信息")
-        for attempt in 0..<3 {
+        for attempt in (repairAuthentication ? 2 : 0)..<3 {
             guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
             if attempt == 1 {
                 invalidateAccessRoute()
                 await prepareAccess()
             }
-            if attempt == 2 {
+            if attempt == 2, hasCasSession || (webvpnOn && hasProxiedCASSession) {
                 // Rebuild the portal service session without clearing either CAS cookie realm.
                 if webvpnOn { _ = await ensureWebVPN(force: true) }
+                guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
                 guard let service = URLComponents(url: CasCrypto.casLoginURL, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "service" })?.value else { break }
-                _ = try? await casLand(service)
+                if let response = try? await casLand(service), let user = Self.portalUser(from: response) { return user }
             }
+            guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
             do {
                 let response = try await http.get(URL(string: maybeWrap(Self.portalBase))!)
-                if !Self.isPortalSessionFailure(response), let user = Self.extractUser(fromHTML: response.text) { return user }
-                if response.finalURL.path.contains("/tpass/login") || Self.isSessionLostHTML(response.text) {
+                guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
+                if let user = Self.portalUser(from: response) { return user }
+                if Self.requiresAuthentication(response) || Self.isGatewayHome(response.finalURL) {
                     lastError = .sessionExpired()
                 }
             } catch { lastError = NetworkError.from(error) }
@@ -425,14 +463,24 @@ final class PortalClient {
     }
 
 
-    /// 直连门户是否失败：落在 CAS 登录页 / 网关拦截页 / 网关域。
-    private static func isPortalSessionFailure(_ resp: HTTPClient.RawResponse) -> Bool {
-        let onPass = resp.finalURL.host?.contains("pass.neu.edu.cn") == true
-            || resp.finalURL.path.contains("/tpass/login")
-        let onWebVPN = resp.finalURL.host?.contains("webvpn.neu.edu.cn") == true
-        let gate = onWebVPN
-            && (resp.status == 403 || resp.text.contains("仅用于我校师生在校外登录"))
-        return onPass || gate || resp.text.contains("当前设备需进行身份验证")
+    private static func portalUser(from response: HTTPClient.RawResponse) -> PortalUser? {
+        guard (200..<300).contains(response.status), PortalLoginFlow.isPersonalPortal(response.finalURL),
+              !requiresAuthentication(response) else { return nil }
+        return extractUser(fromHTML: response.text)
+    }
+
+    private static func requiresAuthentication(_ response: HTTPClient.RawResponse) -> Bool {
+        let url = response.finalURL
+        let onGateway = url.host == "webvpn.neu.edu.cn"
+        return response.status == 401 || url.host == "pass.neu.edu.cn"
+            || (onGateway && (url.path.contains("/tpass/login") ||
+                url.path == "/login" || url.path == "/login/" ||
+                response.text.contains("仅用于我校师生在校外登录")))
+            || isSessionLostHTML(response.text)
+    }
+
+    private static func isGatewayHome(_ url: URL) -> Bool {
+        url.host == "webvpn.neu.edu.cn" && (url.path.isEmpty || url.path == "/")
     }
 
     // MARK: - 门户业务接口
@@ -443,12 +491,8 @@ final class PortalClient {
         let requestURL = URL(string: maybeWrap(comps.url!.absoluteString))!
         let resp = try await http.get(requestURL, xhr: true)
         // Status is checked before parsing: JSON gateway errors are not empty data.
-        if resp.status == 401 { throw PortalAPIError.authenticationRequired }
+        if Self.requiresAuthentication(resp) || Self.isGatewayHome(resp.finalURL) { throw PortalAPIError.authenticationRequired }
         guard (200..<300).contains(resp.status) else { throw PortalAPIError.httpStatus(resp.status) }
-        if resp.finalURL.host?.contains("pass.neu.edu.cn") == true
-            || resp.finalURL.path.contains("/tpass/login") {
-            throw PortalAPIError.authenticationRequired
-        }
         return try PortalEnvelope.data(status: resp.status, body: resp.body)
     }
 
@@ -802,7 +846,7 @@ final class PortalClient {
             "Fetch-Api": "true", "Accept": "application/json", "Referer": jwxtReferer
         ])
         guard epoch == sessionEpoch, !Task.isCancelled else { throw CancellationError() }
-        if response.status == 401 || response.finalURL.host == "pass.neu.edu.cn" || response.finalURL.path.contains("/tpass/login") {
+        if Self.requiresAuthentication(response) {
             throw NetworkError.sessionExpired()
         }
         guard (200..<300).contains(response.status) else {
@@ -989,14 +1033,20 @@ final class PortalClient {
 
     /// Decide before showing any login form, so off-campus users authenticate in one cookie realm.
     func browserLoginEntryURL() async -> URL {
-        if webvpnOn || hasWebVPNTicket { return URL(string: WebVPN.casService)! }
+        if !routeInvalidated && (webvpnOn || hasWebVPNTicket) && campusProbe?.isCampus != true {
+            return URL(string: WebVPN.casService)!
+        }
         return await isCampusNet() ? CasCrypto.casLoginURL : URL(string: WebVPN.casService)!
     }
 
-    private func authenticationURL(for service: String) -> URL {
+    private func authenticationURLs(for service: String) -> [URL] {
         let direct = "https://pass.neu.edu.cn/tpass/login?service=\(service.urlFormEncoded)"
-        // Gateway-first browser logins own a proxied CAS session, not a public CASTGC.
-        return URL(string: (webvpnOn || hasWebVPNTicket) && !hasCasSession ? WebVPN.wrap(direct) : direct)!
+        guard webvpnOn || (service == WebVPN.casService && (hasWebVPNTicket || hasProxiedCASSession)) else {
+            return [URL(string: direct)!]
+        }
+        let proxied = URL(string: WebVPN.wrap(direct))!
+        guard hasCasSession else { return [proxied] }
+        return hasProxiedCASSession ? [URL(string: direct)!, proxied] : [URL(string: direct)!]
     }
 
     func browserDestination(for url: URL) -> URL {
