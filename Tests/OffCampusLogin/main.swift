@@ -589,11 +589,26 @@ func courseListData(_ count: Int, mode: Int = 0, total: Int = 51) throws -> Data
 let firstMOOCPage = try MOOCCoursePage.decode(courseListData(50), page: 1, pageSize: 50)
 precondition(firstMOOCPage.hasMore && firstMOOCPage.courses.count == 50)
 precondition(firstMOOCPage.courses[0].id == "NEU-1" && firstMOOCPage.courses[0].termID == "101")
+precondition(!firstMOOCPage.requiresAccountConfirmation)
 let lastMOOCPage = try MOOCCoursePage.decode(courseListData(1, mode: 20), page: 2, pageSize: 50)
 precondition(!lastMOOCPage.hasMore && lastMOOCPage.courses[0].url.path == "/spoc/learn/NEU-1")
 let terminalMOOCPage = try MOOCCoursePage.decode(Data(#"{"result":{"result":null,"pagination":{"totleCount":51}}}"#.utf8), page: 3, pageSize: 50)
-precondition(terminalMOOCPage.courses.isEmpty && !terminalMOOCPage.hasMore)
-precondition((try? MOOCCoursePage.decode(Data(#"{"result":null}"#.utf8), page: 1, pageSize: 50)) == nil)
+precondition(terminalMOOCPage.courses.isEmpty && !terminalMOOCPage.hasMore && !terminalMOOCPage.requiresAccountConfirmation)
+let emptyMOOCPage = try MOOCCoursePage.decode(Data(#"{"code":0,"result":{"result":null,"pagination":{"totleCount":0}},"message":""}"#.utf8), page: 1, pageSize: 50)
+precondition(emptyMOOCPage.courses.isEmpty && !emptyMOOCPage.hasMore && emptyMOOCPage.requiresAccountConfirmation)
+for (payload, expected) in [
+    (#"{"result":null}"#, MOOCReadError.invalidCourseList),
+    (#"{"code":0,"result":null,"message":"不支持类型:application/json"}"#, .unsupportedContentType),
+    (#"{"code":401,"result":null}"#, .authenticationRequired),
+    ("<html>服务暂时不可用</html>", .invalidCourseList)
+] {
+    do {
+        _ = try MOOCCoursePage.decode(Data(payload.utf8), page: 1, pageSize: 50)
+        preconditionFailure("错误的课程响应不能当成有效课程列表")
+    } catch let error as MOOCReadError {
+        precondition(error == expected)
+    }
+}
 print("Learning course progress: leaf-only task counts, missing data, Beijing deadlines, old models and paginated MOOC/SPOC courses passed")
 
 
@@ -664,6 +679,11 @@ func verifySessionRestart() async throws {
     precondition(preserved.path == wrapped.path && preserved.isSecure && preserved.isHTTPOnly)
     precondition(saved.user == user && saved.userAgent == "Saved WebKit UA")
 
+    MockPortalProtocol.handle = { _ in preconditionFailure("后台作业需要从本机恢复身份，不应先请求学校门户") }
+    let cached = makeSession()
+    await cached.restoreSession(validatePortal: false)
+    precondition(cached.phase == .loggedIn && cached.user == user && cached.client.webvpnOn)
+
     MockPortalProtocol.handle = { request in
         precondition(request.url == wrapped)
         precondition(request.value(forHTTPHeaderField: "User-Agent") == "Saved WebKit UA")
@@ -697,6 +717,10 @@ func verifySessionRestart() async throws {
     // 学校已给出的到期时间不能因保存而延长。
     let expired = HTTPCookie(properties: [.name:"CASTGC", .value:"old", .domain:"pass.neu.edu.cn", .path:"/tpass", .expires:Date(timeIntervalSinceNow: -60)])!
     try vault.save(SavedWebSession(user: user, userAgent: "Saved WebKit UA", cookies: [expired]))
+    MockPortalProtocol.handle = { _ in preconditionFailure("后台慕课恢复不依赖学校门户会话的有效期") }
+    let learningOnly = makeSession()
+    await learningOnly.restoreSession(validatePortal: false)
+    precondition(learningOnly.phase == .loggedIn && learningOnly.user == user && !learningOnly.client.hasLoginSession)
     let timedOut = makeSession()
     await timedOut.restoreSession()
     precondition(timedOut.phase == .loggedOut && vault.data == nil)
@@ -1222,3 +1246,103 @@ for mode in ["wrong", "changes", "login", "network"] {
     if mode == "wrong" { precondition(directoryPaths == ["/user/info"], "Wrong account stops before the directory read") }
 }
 print("WebVPN directory: real API sequence, external database gateway routes, identity before/after, HTML login rejection and late-network cancellation passed")
+
+@MainActor
+func verifyNativeMOOCRead() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [MockPortalProtocol.self]
+    let csrf = HTTPCookie(properties: [.name: "NTESSTUDYSI", .value: "fixture-mooc-session",
+        .domain: ".icourse163.org", .path: "/", .secure: "TRUE"])!
+    let unrelated = HTTPCookie(properties: [.name: "unrelated", .value: "must-stay-local",
+        .domain: ".chaoxing.com", .path: "/", .secure: "TRUE"])!
+    var pages: [String] = []
+    MockPortalProtocol.handle = { request in
+        let url = request.url!
+        precondition(url.host == "www.icourse163.org")
+        precondition(request.value(forHTTPHeaderField: "User-Agent") == "Fixture MOOC UA")
+        let cookieHeader = request.value(forHTTPHeaderField: "Cookie") ?? ""
+        precondition(cookieHeader.contains("NTESSTUDYSI=fixture-mooc-session") && !cookieHeader.contains("unrelated"))
+        if request.httpMethod == "GET" {
+            return (200, [:], "<html><title>慕课</title></html>")
+        }
+        precondition(request.httpMethod == "POST")
+        precondition(request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/x-www-form-urlencoded") == true)
+        precondition(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains {
+            $0.name == "csrfKey" && $0.value == "fixture-mooc-session"
+        } == true)
+        let body = requestBody(request)
+        if url.path.contains("getMyLearnedCoursePanelList") {
+            precondition(body.contains("type=30") && body.contains("psize=50") && body.contains("p=1"))
+            if body.contains("courseType=1") {
+                pages.append("regular")
+                return (200, [:], #"{"code":0,"result":{"result":[{"id":42,"name":"合成课程","mode":0,"schoolPanel":{"shortName":"NEU"},"termPanel":{"id":17}}],"pagination":{"totleCount":1}}}"#)
+            }
+            precondition(body.contains("courseType=2"))
+            pages.append("spoc")
+            return (200, [:], #"{"code":0,"result":{"result":null,"pagination":{"totleCount":0}}}"#)
+        }
+        precondition(url.path.contains("courseBean.") && body.contains("termId=17"))
+        return (200, [:], #"{"code":0,"result":{"chapters":[{"id":1,"lessons":[],"homeworks":[{"id":21,"name":"合成作业","contentType":3,"test":{"userSubmitStatus":1}}]}]}}"#)
+    }
+    let reader = LearningWebReader(configuration: configuration)
+    let report = try await reader.readMOOC(cookies: [csrf, unrelated], userAgent: "Fixture MOOC UA", previous: nil)
+    precondition(pages == ["regular", "spoc"] && report.warnings.isEmpty)
+    precondition(report.courses.map(\.key) == ["NEU-42.17"] && report.refreshedCourseKeys == ["NEU-42.17"])
+    precondition(report.assignments.count == 1 && report.assignments.first?.title == "合成作业" && report.assignments.first?.completed == true)
+    print("Native MOOC: scoped stored cookies, form-encoded RPCs, normal/SPOC lists and assignment parsing without WebKit navigation passed")
+}
+try await verifyNativeMOOCRead()
+
+@MainActor
+func verifyMOOCRenewalCheckpoint() async throws {
+    let account = "mooc-checkpoint-" + UUID().uuidString
+    let defaults = UserDefaults(suiteName: account)!
+    let learningVault = KeychainWebSessionStore(account: "learning." + account)
+    defer {
+        learningVault.clear()
+        defaults.removePersistentDomain(forName: account)
+    }
+    let owner = PortalUser(uid: account, name: "MOOC fixture", sid: account, identity: "",
+                           department: "", email: "", avatarUrl: "")
+    let portalVault = MemoryWebSessionStore()
+    try portalVault.save(SavedWebSession(user: owner, userAgent: "MOOC checkpoint fixture", cookies: [ticket]))
+    let session = SessionStore(webSessions: portalVault, defaults: defaults)
+    await session.restoreSession(validatePortal: false)
+    precondition(session.phase == .loggedIn)
+
+    func cookie(_ name: String, _ value: String) -> HTTPCookie {
+        HTTPCookie(properties: [.name: name, .value: value, .domain: ".icourse163.org", .path: "/"])!
+    }
+    let old = cookie("STUDY_SESS", "old-browser")
+    let renewed = cookie("STUDY_SESS", "native-renewal")
+    let device = cookie("EDUWEBDEVICE", "browser-device")
+    precondition(LearningWebReader.hasMOOCSessionCookie(in: [old, device]))
+    precondition(!LearningWebReader.hasMOOCSessionCookie(in: [device, cookie("NTESSTUDYSI", "anonymous")]))
+    precondition(session.importBrowserMOOCCookies([old, device], observedOnPage: true))
+    try session.acceptMOOCCookies([renewed, device], replacing: [old, device])
+    precondition(!session.importBrowserMOOCCookies([old, device], observedOnPage: false), "Unchanged browser must not undo a native renewal")
+    precondition(!session.importBrowserMOOCCookies([device], observedOnPage: false), "Partially restored WebKit snapshot must keep the native renewal")
+    precondition(!session.importBrowserMOOCCookies([old, device], observedOnPage: true), "An unchanged open page can save stale cookies when it closes")
+    let retained = try await session.moocCookies(includeBrowser: false)
+    precondition(retained.contains { $0.value == renewed.value } && !retained.contains { $0.value == old.value })
+
+    precondition(session.importBrowserMOOCCookies([device], observedOnPage: true), "An observed sign-out must replace the native session")
+    do {
+        try session.acceptMOOCCookies([renewed, device], replacing: [old, device])
+        preconditionFailure("Late native response must not undo a browser sign-out")
+    } catch is CancellationError {}
+    let signedOut = try await session.moocCookies(includeBrowser: false)
+    precondition(!LearningWebReader.hasMOOCSessionCookie(in: signedOut))
+
+    let legacy = SavedWebSession(user: owner, userAgent: "MOOC checkpoint fixture", cookies: [old])
+    let legacyData = try JSONEncoder().encode(legacy)
+    let legacyDecoded = try JSONDecoder().decode(SavedWebSession.self, from: legacyData)
+    precondition(legacyDecoded.moocBrowserCheckpoint == nil && legacyDecoded.restoredCookies().first?.value == old.value)
+    let checkpointed = SavedWebSession(user: owner, userAgent: "MOOC checkpoint fixture", cookies: [renewed],
+                                       moocBrowserCheckpoint: ["digest"])
+    let checkpointedData = try JSONEncoder().encode(checkpointed)
+    let checkpointedDecoded = try JSONDecoder().decode(SavedWebSession.self, from: checkpointedData)
+    precondition(checkpointedDecoded == checkpointed)
+    print("MOOC session: native renewal wins over stale browser snapshots, sign-out wins over late reads, and checkpoint preserves compatibility")
+}
+try await verifyMOOCRenewalCheckpoint()

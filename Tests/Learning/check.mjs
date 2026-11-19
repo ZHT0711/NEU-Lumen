@@ -37,20 +37,26 @@ for (const [index, status] of statuses.entries()) {
   assert.equal(row.checkedOff, index < 4, `Personal submission state ${JSON.stringify(status)}`);
 }
 
-const readCourse = new Function("DOMParser", "html", "responses", "course", helpers + raw("readCourse"));
+const readCourse = new Function("html", "responses", "course", helpers + raw("readCourse"));
 const metadata = { chapters: [{ id: 1, lessons: [], homeworks: [
   { id: 5, name: "简答作业", contentType: 3, test: { deadline } },
 ] }] };
 const personal = structuredClone(metadata);
 personal.chapters[0].homeworks[0].test.userSubmitStatus = 1;
 const staleFlight = `self.__next_f.push([1,${JSON.stringify('1:["$","div",null,{"outline":' + JSON.stringify(metadata) + '}]\n')}])`;
-class FixtureDOMParser {
-  parseFromString() { return { querySelectorAll: () => [{ textContent: staleFlight }] }; }
-}
-const merged = readCourse(FixtureDOMParser, "", [{ raw: JSON.stringify(personal), termID: "42" }],
+const courseHTML = `<html><script type="text/javascript">${staleFlight}</script></html>`;
+const merged = readCourse(courseHTML, [{ raw: JSON.stringify(personal), termID: "42" }],
   { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl });
 assert.equal(merged.assignments.length, 1);
 assert.equal(merged.assignments[0].completed, true, "Outline metadata must not erase an authenticated submission");
+const readHeadlessCourse = new Function("URL", "html", "responses", "course", helpers + raw("readCourse"));
+const nativeRoute = { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl,
+  path: "/spoc/learn/NEU-1", assignmentURL: meta.pageUrl + "#/learn/testlist" };
+assert.deepEqual(readHeadlessCourse(undefined, courseHTML, [{ raw: JSON.stringify(personal), termID: "42" }], nativeRoute), merged,
+  "The native reader must parse API data and page outlines without browser globals");
+const accountID = new Function("html", helpers + raw("readAccount"));
+assert.equal(accountID('<script>if (window.webUser) location.search = "?userId=" + window.webUser.id;</script>'), "");
+assert.equal(accountID('<script>window.webUser = {"name":"Synthetic Learner","id":42};</script>'), "42");
 const [withoutDeadline] = parse({ chapters: [{ id: 1, lessons: [], homeworks: [
   { id: 8, name: "未定期限作业", contentType: 3, test: { userSubmitStatus: 0, actionLabel: "查看成绩" } },
 ] }] }, meta);
@@ -71,7 +77,7 @@ const taskOnlyData = { id: 99, name: "软件测试课程", endTime: deadline, ch
 const strict = parse(taskOnlyData, meta);
 assert.deepEqual(strict.map(row => row.title), ["补充练习"],
   "课件 lesson units must stay out of 测验与作业, including quizzes and homework units");
-const filtered = readCourse(FixtureDOMParser, "", [{ raw: JSON.stringify(taskOnlyData), termID: "42" }],
+const filtered = readCourse(courseHTML, [{ raw: JSON.stringify(taskOnlyData), termID: "42" }],
   { id: "NEU-1", termID: "42", title: "测试课程", url: meta.pageUrl });
 assert.deepEqual(filtered.assignments.map(row => row.title).sort(), ["补充练习", "简答作业"].sort());
 assert.ok(filtered.assignments.every(row => ["作业", "测验"].includes(row.kind)));

@@ -35,6 +35,7 @@ struct CampusReminderCoordinator: View {
                 .task(id: identity) {
                     guard !identity.booting else { return }
                     await store.activate(account: account)
+                    if !Task.isCancelled { CampusBackgroundRefresh.shared.schedule() }
                     if account != nil { await environment.repository.ensureLoadedForCurrentUser() }
                 }
                 .task(id: load) {
@@ -52,7 +53,6 @@ struct CampusReminderCoordinator: View {
                 .onChange(of: store.preferences) { _, _ in CampusBackgroundRefresh.shared.schedule() }
                 .onChange(of: store.authorization) { _, _ in CampusBackgroundRefresh.shared.schedule() }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .background { CampusBackgroundRefresh.shared.schedule() }
                     if phase == .active { Task { await store.refreshAuthorization() } }
                 }
         }.allowsHitTesting(false).accessibilityHidden(true)

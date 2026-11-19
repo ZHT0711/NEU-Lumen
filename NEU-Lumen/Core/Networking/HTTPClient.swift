@@ -132,7 +132,7 @@ final class HTTPClient {
                 var nextReq = URLRequest(url: next, timeoutInterval: Self.timeout)
                 let keepMethod = (status == 307 || status == 308) && current.httpMethod == "POST"
                 if keepMethod {
-                    guard allowPostRedirects else { throw NetworkError(message: "学校认证提交需要在网页登录中继续") }
+                    guard allowPostRedirects else { throw NetworkError(message: "服务要求跳转后重新提交，已停止自动重试") }
                     nextReq.httpMethod = "POST"
                     nextReq.httpBody = current.httpBody
                     if let ct = current.value(forHTTPHeaderField: "Content-Type") {

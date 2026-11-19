@@ -114,23 +114,50 @@ struct LearningCourseProgress: Codable, Hashable {
     }
 }
 
+enum MOOCReadError: LocalizedError, Equatable {
+    case authenticationRequired
+    case unsupportedContentType
+    case invalidCourseList
+
+    var errorDescription: String? {
+        switch self {
+        case .authenticationRequired: "慕课会话未登录或已失效，请打开慕课网页登录"
+        case .unsupportedContentType: "慕课课程接口不接受本次请求格式，请稍后重试"
+        case .invalidCourseList: "慕课返回了无法识别的课程列表，已保留上次同步"
+        }
+    }
+}
+
 struct MOOCCoursePage {
     let courses: [LearningCourse]
     let hasMore: Bool
+    /// The platform can return a well-formed empty first page to a guest.
+    let requiresAccountConfirmation: Bool
 
-    /// Authenticated list responses wrap the paginated result twice.
+    /// Both signed-in and guest list responses can wrap the paginated result twice.
     static func decode(_ data: Data, page: Int, pageSize: Int, courseType: Int = 1) throws -> MOOCCoursePage {
-        guard let envelope = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let result = envelope["result"] as? [String: Any] else {
-            throw NetworkError(message: "慕课登录已失效，请打开平台重新登录")
+        guard let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw MOOCReadError.invalidCourseList
+        }
+        let code = integer(envelope["code"])
+        let message = ((envelope["message"] ?? envelope["msg"]) as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if code == 401 || ["未登录", "请先登录", "登录已失效", "登录已过期", "not logged in"].contains(where: message.contains) {
+            throw MOOCReadError.authenticationRequired
+        }
+        if code == 415 || message.hasPrefix("不支持类型") || message.hasPrefix("unsupported media type") {
+            throw MOOCReadError.unsupportedContentType
+        }
+        guard (code == nil || code == 0), let result = envelope["result"] as? [String: Any] else {
+            throw MOOCReadError.invalidCourseList
         }
         let pagination = result["pagination"] as? [String: Any] ?? [:]
-        let total = (pagination["total"] ?? pagination["totleCount"] ?? pagination["totalCount"]) as? Int
-        if result["result"] is NSNull, page > 1 || (total ?? 0) > 0 {
-            return MOOCCoursePage(courses: [], hasMore: false)
+        let total = integer(pagination["total"] ?? pagination["totleCount"] ?? pagination["totalCount"])
+        if result["result"] is NSNull, page > 1 || total == 0 {
+            return MOOCCoursePage(courses: [], hasMore: false, requiresAccountConfirmation: page == 1)
         }
         guard let rows = result["result"] as? [[String: Any]] else {
-            throw NetworkError(message: "慕课课程列表格式异常，请重新登录后同步")
+            throw MOOCReadError.invalidCourseList
         }
         let courses = try rows.map { row -> LearningCourse in
             let term = row["termPanel"] as? [String: Any] ?? [:]
@@ -150,7 +177,12 @@ struct MOOCCoursePage {
             return LearningCourse(id: key, termID: tid, title: row["name"] as? String ?? key, url: url)
         }
         let reachedTotal = total.map { page * pageSize >= $0 } ?? false
-        return MOOCCoursePage(courses: courses, hasMore: rows.count >= pageSize && !reachedTotal)
+        return MOOCCoursePage(courses: courses, hasMore: rows.count >= pageSize && !reachedTotal,
+                              requiresAccountConfirmation: page == 1 && courses.isEmpty)
+    }
+
+    private static func integer(_ value: Any?) -> Int? {
+        (value as? Int) ?? (value as? String).flatMap { Int($0) }
     }
 }
 

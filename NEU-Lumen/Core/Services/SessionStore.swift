@@ -1,5 +1,9 @@
 import Foundation
 import Observation
+import CryptoKit
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// 全局会话状态机：booting → loggedOut / loggedIn。
 /// 「保持登录」凭据经 Keychain 加密保存，重启后静默续登。
@@ -34,6 +38,7 @@ final class SessionStore {
     private var learningSessionGeneration: UUID?
     private var learningSessionAccount: String?
     private var lastSavedLearningSession: SavedWebSession?
+    private var moocBrowserCheckpoint: Set<String>?
     private var recoveryTask: Task<Bool, Never>?
     private(set) var networkRevision = 0
     private(set) var networkAvailable = true
@@ -151,10 +156,11 @@ final class SessionStore {
     }
 
     /// 启动恢复：有保存凭据则静默续登，否则进登录页。
-    func restoreSession() async {
+    func restoreSession(validatePortal: Bool = true) async {
         guard phase == .booting else { return }
         guard !defaults.bool(forKey: Self.suppressRestoreKey) else { phase = .loggedOut; return }
-        if await restoreWebSession() { return }
+        if await restoreWebSession(validatePortal: validatePortal) { return }
+        guard validatePortal else { return }
         if !defaults.bool(forKey: Self.passwordLoginDisabledKey), let cred = credentials.load(),
            !defaults.bool(forKey: "lumen.passwordLoginPaused." + cred.username) {
             let ok = await performLogin(username: cred.username, password: cred.password, keep: true)
@@ -355,8 +361,9 @@ final class SessionStore {
     }
 
     /// 优先恢复网页登录；网络/风控暂时失败时仍保留会话，只有明确过期才清除。
-    private func restoreWebSession() async -> Bool {
+    private func restoreWebSession(validatePortal: Bool) async -> Bool {
         guard let saved = webSessions.load() else { return false }
+        if !validatePortal, saved.user.sid.isEmpty, saved.user.uid.isEmpty { return false }
         let epoch = sessionEpoch
         client.clearSession()
         client.setUserAgent(saved.userAgent)
@@ -366,36 +373,38 @@ final class SessionStore {
         let canRestoreWithPassword = !saved.user.sid.isEmpty && !defaults.bool(forKey: Self.passwordLoginDisabledKey)
             && !defaults.bool(forKey: "lumen.passwordLoginPaused." + saved.user.sid)
             && credentials.load()?.username == saved.user.sid
-        guard hasCookies || canRestoreWithPassword else {
+        guard hasCookies || canRestoreWithPassword || !validatePortal else {
             webSessions.clear()
             return false
         }
         var restoredUser = saved.user
         var authenticationExpired = !hasCookies
-        if hasCookies {
+        if hasCookies && validatePortal {
             do {
                 if let fresh = try await client.validateSavedSession(),
                    !saved.user.hasProfile || saved.user.isSameAccount(as: fresh) {
                     restoredUser = restoredUser.merging(fresh)
                 }
             } catch {
-                guard epoch == sessionEpoch, !Task.isCancelled else { return true }
+                guard epoch == sessionEpoch, phase == .booting, !Task.isCancelled else { return true }
                 authenticationExpired = NetworkError.from(error).isSessionExpired
                 profileSyncError = authenticationExpired
                     ? "当前网络需要更新认证，可更新网页登录"
                     : "暂时无法同步个人资料，已保留登录会话"
             }
         }
-        guard epoch == sessionEpoch, !Task.isCancelled else { return true }
+        guard epoch == sessionEpoch, phase == .booting, !Task.isCancelled else { return true }
         user = restoredUser
         usesWebSession = true
         keepSession = true
         defaults.set(false, forKey: Self.suppressRestoreKey)
-        lastForegroundValidation = Date()
+        lastForegroundValidation = validatePortal ? Date() : .distantPast
         lastIdentityAttempt = .distantPast
         phase = .loggedIn
         persistWebSession()
-        if authenticationExpired, canRestoreWithPassword { _ = await silentRelogin(authenticationRequired: true) }
+        if validatePortal, authenticationExpired, canRestoreWithPassword {
+            _ = await silentRelogin(authenticationRequired: true)
+        }
         return true
     }
 
@@ -423,14 +432,76 @@ final class SessionStore {
         learningSessionGeneration = client.sessionGeneration
         learningSessionAccount = store.account
         lastSavedLearningSession = nil
+        moocBrowserCheckpoint = nil
         guard let saved = store.load(), user?.isSameAccount(as: saved.user) == true else { return }
         client.restoreLearningCookies(saved.restoredCookies())
+        moocBrowserCheckpoint = saved.moocBrowserCheckpoint.map { Set($0) }
     }
 
     func learningBrowserIdentifier(for platform: LearningPlatform) -> UUID? {
         guard phase == .loggedIn, let user else { return nil }
         return LearningBrowserProfiles(defaults: defaults).identifier(
             account: user.sid.isEmpty ? user.uid : user.sid, platform: platform)
+    }
+
+    /// The foreground may recover cookies still held by the account's browser.
+    /// Background refresh starts directly from the restored Keychain snapshot.
+    func moocCookies(includeBrowser: Bool) async throws -> [HTTPCookie] {
+        guard phase == .loggedIn, hasConfirmedIdentity, !Task.isCancelled else { throw CancellationError() }
+        restoreLearningSession()
+        #if canImport(WebKit)
+        if includeBrowser, #available(iOS 17.0, macOS 14.0, *),
+           let identifier = learningBrowserIdentifier(for: .mooc) {
+            let epoch = requestEpoch
+            let generation = client.sessionGeneration
+            let owner = learningSessions?.account
+            let store = WKWebsiteDataStore(forIdentifier: identifier).httpCookieStore
+            let cookies = await store.allCookies().filter(LearningPlatform.mooc.ownsCookie)
+            guard epoch == requestEpoch, generation == client.sessionGeneration, owner == learningSessions?.account,
+                  phase == .loggedIn, !Task.isCancelled else { throw CancellationError() }
+            importBrowserMOOCCookies(cookies, observedOnPage: false)
+        }
+        #endif
+        return client.browserCookies().filter(LearningPlatform.mooc.ownsCookie)
+    }
+
+    /// Ignore results that raced a browser sign-in, sign-out, or session renewal.
+    func acceptMOOCCookies(_ cookies: [HTTPCookie], replacing original: [HTTPCookie]) throws {
+        let current = client.browserCookies().filter(LearningPlatform.mooc.ownsCookie)
+        let originalSnapshot = Set(original.map(SavedWebSession.Cookie.init))
+        guard Set(current.map(SavedWebSession.Cookie.init)) == originalSnapshot else { throw CancellationError() }
+        guard Set(cookies.map(SavedWebSession.Cookie.init)) != originalSnapshot else { return }
+        if moocBrowserCheckpoint == nil { moocBrowserCheckpoint = moocCookieDigests(original) }
+        client.replaceLearningCookies(cookies, platform: .mooc)
+        persistLearningSession()
+    }
+
+    /// Passive reads can see a previous WebKit snapshot, including only its
+    /// persistent cookies after relaunch. An observed browser change can sign out.
+    @discardableResult
+    func importBrowserMOOCCookies(_ cookies: [HTTPCookie], observedOnPage: Bool) -> Bool {
+        guard phase == .loggedIn, hasConfirmedIdentity else { return false }
+        restoreLearningSession()
+        let owned = cookies.filter(LearningPlatform.mooc.ownsCookie)
+        let browser = moocCookieDigests(owned)
+        if let checkpoint = moocBrowserCheckpoint,
+           browser == checkpoint || (!observedOnPage && browser.isSubset(of: checkpoint)) { return false }
+        if !observedOnPage {
+            let current = moocCookieDigests(client.browserCookies().filter(LearningPlatform.mooc.ownsCookie))
+            if browser.isSubset(of: current) { return false }
+        }
+        moocBrowserCheckpoint = nil
+        client.replaceLearningCookies(owned, platform: .mooc)
+        persistLearningSession()
+        return true
+    }
+
+    private func moocCookieDigests(_ cookies: [HTTPCookie]) -> Set<String> {
+        Set(cookies.map { cookie in
+            let signature = [cookie.domain.lowercased(), cookie.path, cookie.name, cookie.value]
+                .map { "\($0.utf8.count):\($0)" }.joined()
+            return Data(SHA256.hash(data: Data(signature.utf8))).base64EncodedString()
+        })
     }
 
     func cleanRetiredLearningBrowsers() async {
@@ -447,7 +518,8 @@ final class SessionStore {
         let cookies = client.browserCookies().filter { cookie in
             LearningPlatform.allCases.contains { $0.ownsCookie(cookie) }
         }
-        let snapshot = SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent, cookies: cookies)
+        let snapshot = SavedWebSession(user: user, userAgent: client.browserUserAgent ?? HTTPClient.userAgent,
+                                      cookies: cookies, moocBrowserCheckpoint: moocBrowserCheckpoint?.sorted())
         guard snapshot != lastSavedLearningSession else { return }
         do {
             try store.save(snapshot)
@@ -629,6 +701,7 @@ final class SessionStore {
             Task { await cleanRetiredLearningBrowsers() }
         }
         lastSavedLearningSession = nil
+        moocBrowserCheckpoint = nil
         stopNetworkRecovery()
         recoveryTask?.cancel()
         recoveryTask = nil

@@ -99,6 +99,7 @@ final class PortalRepository {
     private(set) var assignmentUpdatedAt: [LearningPlatform: Date] = [:]
     private var assignmentRequests: [LearningPlatform: UUID] = [:]
     private var assignmentBrowsers: [LearningPlatform: PortalBrowser] = [:]
+    private var moocTask: Task<LearningAssignmentReport, Error>?
     private(set) var campusOverride: Campus?
     var suggestedCampus: Campus? { Campus.inferred(from: session.user?.department ?? "") }
     var campus: Campus { campusOverride ?? suggestedCampus ?? .nanhu }
@@ -225,7 +226,10 @@ final class PortalRepository {
 
     init(session: SessionStore) {
         self.session = session
-        session.onSessionScopeInvalidated = { [weak self] in self?.withdrawWidgetSnapshot() }
+        session.onSessionScopeInvalidated = { [weak self] in
+            self?.moocTask?.cancel()
+            self?.withdrawWidgetSnapshot()
+        }
     }
 
     var ecodeEntryURL: URL { ServiceCatalog(apps: apps).ecodeURL }
@@ -354,6 +358,8 @@ final class PortalRepository {
         cgState = .idle
         cgUpdatedAt = nil
         assignmentRequests = [:]
+        moocTask?.cancel()
+        moocTask = nil
         for browser in assignmentBrowsers.values { browser.webView.stopLoading() }
         assignmentBrowsers = [:]
         assignmentReports = [:]
@@ -502,6 +508,7 @@ final class PortalRepository {
         }
         for (platform, state) in assignmentStates where interrupted(state) {
             assignmentRequests[platform] = UUID(); assignmentBrowsers[platform]?.close(); assignmentBrowsers[platform] = nil
+            if platform == .mooc { moocTask?.cancel(); moocTask = nil }
             assignmentStates[platform] = .idle
             work.append(Task { await self.loadAssignments(platform, force: true) })
         }
@@ -1133,30 +1140,58 @@ final class PortalRepository {
         session.persistWebSession()
     }
 
-    func loadAssignments(_ platform: LearningPlatform, force: Bool = false) async {
+    func loadAssignments(_ platform: LearningPlatform, force: Bool = false, background: Bool = false) async {
         if platform == .cg { await loadCGAssignments(force: force); return }
         await ensureLoadedForCurrentUser()
+        guard let context = requestContext, !Task.isCancelled else { return }
         if assignmentStates[platform] == .loading || (!force && assignmentReports[platform] != nil) { return }
-        let generation = accountGeneration
         let request = UUID()
         assignmentRequests[platform] = request
         assignmentStates[platform] = .loading
-        let browser = PortalBrowser()
-        assignmentBrowsers[platform] = browser
+        let previous = assignmentReports[platform]
         do {
-            await browser.start(platform.entryURL, client: session.client, session: session)
-            let report = try await browser.syncAssignments(platform, previous: assignmentReports[platform])
-            guard accountGeneration == generation, assignmentRequests[platform] == request else { return }
+            let report: LearningAssignmentReport
+            if platform == .mooc {
+                let task = Task { @MainActor in
+                    guard isCurrent(context), assignmentRequests[platform] == request,
+                          !Task.isCancelled else { throw CancellationError() }
+                    let cookies = try await session.moocCookies(includeBrowser: !background)
+                    guard isCurrent(context), assignmentRequests[platform] == request,
+                          !Task.isCancelled else { throw CancellationError() }
+                    let generation = session.client.sessionGeneration
+                    let reader = LearningWebReader()
+                    let report = try await reader.readMOOC(cookies: cookies, userAgent: session.client.browserUserAgent,
+                                                           previous: previous)
+                    guard isCurrent(context), assignmentRequests[platform] == request,
+                          generation == session.client.sessionGeneration, !Task.isCancelled else { throw CancellationError() }
+                    try session.acceptMOOCCookies(reader.moocCookies, replacing: cookies)
+                    return report
+                }
+                moocTask = task
+                report = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            } else {
+                let browser = PortalBrowser()
+                assignmentBrowsers[platform] = browser
+                await browser.start(platform.entryURL, client: session.client, session: session)
+                report = try await browser.syncAssignments(platform, previous: previous)
+            }
+            guard isCurrent(context), assignmentRequests[platform] == request, !Task.isCancelled else { throw CancellationError() }
             applyAssignments(report, platform: platform)
         } catch {
-            guard accountGeneration == generation, assignmentRequests[platform] == request else { return }
-            assignmentStates[platform] = NetworkError.isCancellation(error) ? .idle : .failed(NetworkError.from(error).message)
+            guard isCurrent(context), assignmentRequests[platform] == request else { return }
+            if platform == .mooc { moocTask = nil }
+            if NetworkError.isCancellation(error) {
+                assignmentStates[platform] = previous == nil ? .idle : .loaded
+            } else {
+                assignmentStates[platform] = .failed(NetworkError.from(error).message)
+            }
             assignmentBrowsers[platform] = nil
         }
     }
 
     func applyAssignments(_ report: LearningAssignmentReport, platform: LearningPlatform) {
         assignmentRequests[platform] = UUID()
+        if platform == .mooc { moocTask?.cancel(); moocTask = nil }
         assignmentBrowsers[platform]?.webView.stopLoading()
         assignmentBrowsers[platform] = nil
         assignmentReports[platform] = report.merging(assignmentReports[platform])

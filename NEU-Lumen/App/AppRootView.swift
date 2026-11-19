@@ -53,6 +53,7 @@ struct AppRootView: View {
         .task {
             networkMonitor.start { environment.session.networkDidChange(isConnected: $0) }
             await environment.session.restoreSession()
+            if scenePhase == .active { environment.session.applicationDidBecomeActive() }
         }
         .task(id: environment.session.networkRevision) {
             guard environment.session.networkRevision > 0 else { return }
@@ -60,6 +61,7 @@ struct AppRootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .inactive || phase == .background { environment.session.persistWebSession() }
+            if phase == .background { CampusBackgroundRefresh.shared.schedule() }
             if phase == .active { environment.session.applicationDidBecomeActive() }
         }
         .animation(.easeInOut(duration: 0.25), value: environment.session.phase)

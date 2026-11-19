@@ -34,9 +34,12 @@ struct SavedWebSession: Codable, Equatable {
     let user: PortalUser
     let userAgent: String
     let cookies: [Cookie]
+    /// Cookie digests from the browser before the native MOOC reader renewed its session.
+    let moocBrowserCheckpoint: [String]?
 
-    init(user: PortalUser, userAgent: String, cookies: [HTTPCookie]) {
+    init(user: PortalUser, userAgent: String, cookies: [HTTPCookie], moocBrowserCheckpoint: [String]? = nil) {
         self.user = user; self.userAgent = userAgent
+        self.moocBrowserCheckpoint = moocBrowserCheckpoint
         self.cookies = cookies.sorted {
             [$0.domain, $0.path, $0.name].lexicographicallyPrecedes([$1.domain, $1.path, $1.name])
         }.map(Cookie.init)

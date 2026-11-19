@@ -814,9 +814,14 @@ final class LearningFixtureProtocol: URLProtocol {
                         body.append(contentsOf: buffer.prefix(count))
                     }
                 }
-                guard let fields = try JSONSerialization.jsonObject(with: body) as? [String: Int],
-                      fields["type"] == 30, fields["psize"] == 50,
-                      let page = fields["p"], let type = fields["courseType"] else {
+                let fields = URLComponents(string: "https://fixture.invalid/?" + String(decoding: body, as: UTF8.self))?.queryItems
+                func field(_ name: String) -> Int? {
+                    guard let value = fields?.first(where: { $0.name == name })?.value else { return nil }
+                    return Int(value)
+                }
+                guard request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/x-www-form-urlencoded") == true,
+                      field("type") == 30, field("psize") == 50,
+                      let page = field("p"), let type = field("courseType") else {
                     throw NetworkError(message: "Incorrect course-list request")
                 }
                 let ids = type == 1 ? (page == 1 ? Array(1...50) : [51]) : [52]

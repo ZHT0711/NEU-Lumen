@@ -32,9 +32,8 @@ enum MOOCScripts {
     """#
 
     static let readCourse = parser + #"""
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const outlines = extractLearnOutlines([...doc.querySelectorAll('script')].map(el => el.textContent).join('\n'));
-    const route = new URL(course.url);
+    const outlines = extractLearnOutlines(inlineScriptBodies(html));
+    const pagePath = course.path ?? new URL(course.url).pathname;
     const term = html.match(/(?:moocTerm|term)Dto\s*=\s*\{\s*["']?id["']?\s*:\s*(\d+)/)
       || html.match(/"(?:moocTerm|term)Dto"\s*:\s*\{[^}]*?"id"\s*:\s*(\d+)/)
       || html.match(/(?:moocTerm|term)Dto\s*=\s*new\s+\w+\s*[({]\s*(\d+)/);
@@ -65,6 +64,7 @@ enum MOOCScripts {
       for (const item of extractHomeworkFromTermDto(outline, meta)) merge(item);
     }
     function destination() {
+      if (course.assignmentURL) return course.assignmentURL;
       const url = new URL(course.url);
       if (/\/learn\/[^/]+\//.test(url.pathname)) {
         url.pathname = url.pathname.replace(/(\/learn\/[^/]+)\/.*/, '$1/assessments');
@@ -72,7 +72,7 @@ enum MOOCScripts {
       } else url.hash = '/learn/testlist';
       return url.href;
     }
-    return {recognized, activeTermID: route.pathname.includes('/spoc/') && term ? term[1] : '',
+    return {recognized, activeTermID: pagePath.includes('/spoc/') && term ? term[1] : '',
       assignments: [...items.values()].filter(item => item.type === 'quiz' || item.type === 'homework').map(item => ({id: item.uid, courseKey: course.id + '.' + course.termID,
         courseTitle: course.title, title: item.title,
         kind: item.type === 'quiz' ? '测验' : '作业',
@@ -83,7 +83,22 @@ enum MOOCScripts {
         scoreText: item.score == null ? '' : String(item.score) + (item.totalScore == null ? '' : ' / ' + item.totalScore)}))};
     """#
 
+    static let readAccount = parser + #"""
+    const scripts = inlineScriptBodies(html);
+    const assignment = /(?:^|[;\n])\s*(?:window\s*\.\s*|(?:var|let|const)\s+)webUser\s*=\s*(?=\{)/g;
+    for (const match of scripts.matchAll(assignment)) {
+      const account = readJsonValueAt(scripts, match.index + match[0].length);
+      const id = String(account?.id ?? '');
+      if (/^[1-9]\d{0,19}$/.test(id)) return id;
+    }
+    return '';
+    """#
+
     static let parser = #"""
+function inlineScriptBodies(html) {
+  return Array.from(html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi), match => match[1]).join('\n');
+}
+
 function coerceJson(input) {
   if (input == null) return null;
   if (typeof input === 'object') return input;

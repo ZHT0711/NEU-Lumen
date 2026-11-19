@@ -74,6 +74,12 @@ func verifyLearningProcessRestart(save: Bool, base: URL) async throws {
         try require(cookies.contains { platform.ownsCookie($0) && $0.value == marker },
                     "\(platform.rawValue) session cookie was not restored from Keychain")
         try require(!cookies.contains { $0.domain.contains("neu.edu.cn") }, "Portal cookies leaked into durable learning profile")
+        if platform == .mooc {
+            let foregroundCookies = try await session.moocCookies(includeBrowser: true)
+            try require(foregroundCookies.contains { $0.value == marker }, "Native MOOC sync did not adopt the stored browser session")
+            let backgroundCookies = try await session.moocCookies(includeBrowser: false)
+            try require(backgroundCookies.contains { $0.value == marker }, "Native MOOC background sync did not load the saved session")
+        }
         await browser!.saveSession()
         browser!.close()
         browser = nil

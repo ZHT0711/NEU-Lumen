@@ -520,10 +520,26 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
         if let learningPlatform, webView.configuration.websiteDataStore.isPersistent {
             let existing = await store.allCookies()
             guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
-            // Durable WebKit cookies may have renewed after the last Keychain snapshot.
-            client.absorbBrowserCookies(existing.filter(learningPlatform.ownsCookie))
+            let keepsNativeMOOC: Bool
+            if learningPlatform == .mooc, let session {
+                guard session.requestEpoch == downloadSessionEpoch else { return }
+                keepsNativeMOOC = !session.importBrowserMOOCCookies(existing, observedOnPage: false)
+            } else {
+                // Durable WebKit cookies may have renewed after the last Keychain snapshot.
+                client.absorbBrowserCookies(existing.filter(learningPlatform.ownsCookie))
+                keepsNativeMOOC = false
+            }
+            let scoped = client.browserCookies().filter(learningPlatform.ownsCookie)
+            if keepsNativeMOOC {
+                for cookie in existing where learningPlatform.ownsCookie(cookie)
+                    && !scoped.contains(where: { $0.domain == cookie.domain && $0.path == cookie.path && $0.name == cookie.name }) {
+                    guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
+                    await store.deleteCookie(cookie)
+                }
+            }
             let saved = Set(existing.map(SavedWebSession.Cookie.init))
-            for cookie in client.browserCookies() where learningPlatform.ownsCookie(cookie) {
+            for cookie in scoped {
+                guard !Task.isCancelled, client.sessionGeneration == clientEpoch else { return }
                 if !saved.contains(SavedWebSession.Cookie(cookie)) { await store.setCookie(cookie) }
             }
         } else if let service, webView.configuration.websiteDataStore.isPersistent {
@@ -809,7 +825,10 @@ final class PortalBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPC
     private func syncCookies() async {
         let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
         guard let client, client.sessionGeneration == clientEpoch else { return }
-        if let learningPlatform {
+        if learningPlatform == .mooc, let session {
+            guard entryURL != nil, session.requestEpoch == downloadSessionEpoch else { return }
+            session.importBrowserMOOCCookies(cookies, observedOnPage: true)
+        } else if let learningPlatform {
             client.replaceLearningCookies(cookies, platform: learningPlatform)
             session?.persistLearningSession()
         } else { client.absorbBrowserCookies(cookies) }
