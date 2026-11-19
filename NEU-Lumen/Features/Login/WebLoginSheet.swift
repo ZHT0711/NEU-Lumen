@@ -107,7 +107,7 @@ struct WebLoginWebView: UIViewRepresentable {
         configuration.userContentController.add(context.coordinator, contentWorld: Coordinator.credentialWorld,
                                                 name: CampusCredentialBridge.handler)
         configuration.userContentController.addUserScript(WKUserScript(
-            source: "window.__lumenRememberLogin = \(rememberCredentials ? "true" : "false");\n" + CampusCredentialBridge.script,
+            source: CampusCredentialBridge.draftScript(rememberCredentials: rememberCredentials),
             injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Coordinator.credentialWorld))
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.customUserAgent = client.browserUserAgent
@@ -123,7 +123,7 @@ struct WebLoginWebView: UIViewRepresentable {
         if !rememberCredentials { context.coordinator.credentials = nil }
         webView.configuration.userContentController.removeAllUserScripts()
         webView.configuration.userContentController.addUserScript(WKUserScript(
-            source: "window.__lumenRememberLogin = \(rememberCredentials ? "true" : "false");\n" + CampusCredentialBridge.script,
+            source: CampusCredentialBridge.draftScript(rememberCredentials: rememberCredentials),
             injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Coordinator.credentialWorld))
         Task { @MainActor [weak webView] in
             _ = try? await webView?.callAsyncJavaScript("window.__lumenRememberLogin = enabled;",
@@ -160,8 +160,9 @@ struct WebLoginWebView: UIViewRepresentable {
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard rememberCredentials, !completed, message.name == CampusCredentialBridge.handler,
-                  message.frameInfo.isMainFrame, message.frameInfo.securityOrigin.host == "pass.neu.edu.cn",
-                  let url = message.frameInfo.request.url, CampusCredentialBridge.isLoginURL(url),
+                  message.frameInfo.isMainFrame, let url = message.frameInfo.request.url,
+                  message.frameInfo.securityOrigin.host == url.host,
+                  CampusCredentialBridge.isLoginURL(url) || CampusCredentialBridge.isGatewayLoginURL(url),
                   let value = message.body as? [String: Any],
                   let username = value["username"] as? String, let password = value["password"] as? String else { return }
             credentials = CampusLoginCredentials(username: username, password: password)
@@ -231,12 +232,13 @@ struct WebLoginWebView: UIViewRepresentable {
                 try? await Task.sleep(nanoseconds: 700_000_000)
             }
             guard !Task.isCancelled, let url = webView.url,
+                  !WebVPN.isSecondAuthURL(url),
                   ["personal.neu.edu.cn", "webvpn.neu.edu.cn", "portal.neu.edu.cn"].contains(url.host ?? "") else { return }
             let current = await readDocument(webView)
             let cookies = await webView.configuration.websiteDataStore.httpCookieStore.allCookies()
             guard PortalLoginDocument.canComplete(user: user, cookies: cookies, hasLoginForm: current.hasLoginForm) else { return }
             let agent = (try? await webView.evaluateJavaScript("navigator.userAgent")) as? String ?? ""
-            guard !Task.isCancelled, let handler = onPortalLanding else { return }
+            guard !Task.isCancelled, webView.url == url, let handler = onPortalLanding else { return }
             completed = await handler(WebLoginSession(cookies: cookies, user: user, userAgent: agent,
                                                       hasLoginForm: current.hasLoginForm,
                                                       credentials: rememberCredentials ? credentials : nil,

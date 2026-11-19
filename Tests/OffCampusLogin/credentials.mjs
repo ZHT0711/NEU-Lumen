@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 const source = readFileSync(new URL('../../NEU-Lumen/Core/Networking/CampusCredentialBridge.swift', import.meta.url), 'utf8');
 const extract = name => source.split(`static let ${name} = #"""`)[1].split('"""#')[0];
+const gatewayPath = '/https/62304135386136393339346365373340a0e0b72cc4cb43c8bc1d6f66c806db/tpass/login';
+const gatewayService = 'https://webvpn.neu.edu.cn/login?cas_login=true';
+const gatewayForm = 'https://webvpn.neu.edu.cn' + gatewayPath + '?service=' + encodeURIComponent(gatewayService);
 function fixture(options = {}) {
   const listeners = {}, messages = [];
   const location = new URL(options.url || 'https://pass.neu.edu.cn/tpass/login?service=https://personal.neu.edu.cn/portal');
@@ -17,7 +20,7 @@ function fixture(options = {}) {
     input.dispatchEvent = event => emit(event.type, input);
   }
   const button = {id: 'index_login_btn', type: 'button', form, disabled: false,
-    closest() { return this; }, click() { clicks++; emit('click', this); }};
+    closest() { return this; }, click() { clicks++; emit('click', this, {isTrusted:false}); }};
   const document = {
     addEventListener(type, fn) { (listeners[type] ||= []).push(fn); },
     querySelector(selector) {
@@ -30,6 +33,7 @@ function fixture(options = {}) {
     querySelectorAll() { return [account, password, ...(options.captcha ? [{name:'captcha', type:'text', disabled:false, getClientRects:() => [1]}] : [])]; }
   };
   const window = {__lumenRememberLogin: options.enabled !== false,
+    __lumenGatewayCASPath: gatewayPath, __lumenGatewayCASService: gatewayService,
     webkit: {messageHandlers: {campusLoginDraft: {postMessage(value) { messages.push(JSON.parse(JSON.stringify(value))); }}}}};
   const context = vm.createContext({location, document, window, URL,
     Event: class { constructor(type) { this.type = type; } }, username:'SYNTH-1', password:'synthetic-password'});
@@ -45,6 +49,25 @@ f.emit('input', f.password);
 assert.equal(f.messages.length, 0, 'typing must not send a draft to native');
 f.button.click();
 assert.deepEqual(f.messages, [{username:'SYNTH-1', password:'synthetic-password'}]);
+const typed = {username:'SYNTH-1', password:'synthetic-password'};
+f = fixture({url:gatewayForm, ...typed});
+f.emit('input', f.password, {isTrusted:true});
+f.button.click();
+assert.equal(f.messages.length, 0, 'a synthetic click in WebVPN must never capture a password');
+f.emit('click', f.button, {isTrusted:true});
+assert.deepEqual(f.messages, [typed]);
+assert.equal(await f.autofill(), 'untrusted', 'saved passwords must never enter gateway WebKit pages automatically');
+for (const url of [gatewayService, gatewayForm + '&service=' + encodeURIComponent(gatewayService),
+  gatewayForm.replace(encodeURIComponent(gatewayService), encodeURIComponent('https://personal.neu.edu.cn/portal')),
+  gatewayForm.replace('/https/', '/http/'), gatewayForm.replace('webvpn.neu.edu.cn', 'webvpn.neu.edu.cn:444')]) {
+  f = fixture({url, ...typed});
+  f.emit('click', f.button, {isTrusted:true});
+  assert.equal(f.reads, 0);
+  assert.equal(f.messages.length, 0);
+}
+f = fixture({url:gatewayForm, action:gatewayService, ...typed});
+f.emit('click', f.button, {isTrusted:true});
+assert.equal(f.messages.length, 0, 'gateway form must post to the exact scoped CAS path');
 f = fixture({username:'SYNTH-1', password:'synthetic-password', enabled:false});
 f.emit('input', f.password); f.button.click();
 assert.equal(f.reads, 0); assert.equal(f.messages.length, 0);

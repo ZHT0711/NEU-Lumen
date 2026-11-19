@@ -74,7 +74,8 @@ final class HTTPClient {
 
     /// 手动跟随重定向（最多 10 跳），每跳吸收 Set-Cookie。
     @discardableResult
-    func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true, retryTransport: Bool = true) async throws -> RawResponse {
+    func send(_ request: URLRequest, maxHops: Int = 10, followRedirects: Bool = true,
+              retryTransport: Bool = true, allowPostRedirects: Bool = true) async throws -> RawResponse {
         let generation = cookies.generation
         let network = transport().network
         var current = request
@@ -131,6 +132,7 @@ final class HTTPClient {
                 var nextReq = URLRequest(url: next, timeoutInterval: Self.timeout)
                 let keepMethod = (status == 307 || status == 308) && current.httpMethod == "POST"
                 if keepMethod {
+                    guard allowPostRedirects else { throw NetworkError(message: "学校认证提交需要在网页登录中继续") }
                     nextReq.httpMethod = "POST"
                     nextReq.httpBody = current.httpBody
                     if let ct = current.value(forHTTPHeaderField: "Content-Type") {
@@ -170,7 +172,8 @@ final class HTTPClient {
         return try await send(req)
     }
 
-    func postForm(_ url: URL, fields: [String: String], extraHeaders: [String: String] = [:]) async throws -> RawResponse {
+    func postForm(_ url: URL, fields: [String: String], extraHeaders: [String: String] = [:],
+                  allowPostRedirects: Bool = true) async throws -> RawResponse {
         var req = URLRequest(url: url, timeoutInterval: Self.timeout)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
@@ -180,7 +183,7 @@ final class HTTPClient {
             .map { "\($0.key.urlFormEncoded)=\($0.value.urlFormEncoded)" }
             .joined(separator: "&")
         req.httpBody = Data(body.utf8)
-        return try await send(req)
+        return try await send(req, allowPostRedirects: allowPostRedirects)
     }
 
     func json(_ response: RawResponse) throws -> Any {

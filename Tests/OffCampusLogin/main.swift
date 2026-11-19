@@ -20,6 +20,16 @@ print("Off-campus routing: 9 checks passed")
 // Gateway-first must never send the user through another gateway login after authentication.
 var singleLogin = PortalLoginFlow(gatewayFirst: true)
 let proxyCAS = URL(string: WebVPN.wrap(CasCrypto.casLoginURL.absoluteString))!
+let gatewaySMS = URL(string: WebVPN.base + "/login?second_login=true")!
+var smsFlow = PortalLoginFlow(gatewayFirst: true)
+precondition(smsFlow.action(for: gatewaySMS) == .wait, "短信认证页不能提前消耗门户跳转")
+precondition(smsFlow.action(for: gateway) == .navigate(wrapped))
+var gatewayPasswordForm = URLComponents(url: proxyCAS, resolvingAgainstBaseURL: false)!
+gatewayPasswordForm.queryItems = [URLQueryItem(name: "service", value: WebVPN.casService)]
+let gatewayCASFormURL = gatewayPasswordForm.url!
+precondition(CampusCredentialBridge.isGatewayLoginURL(gatewayCASFormURL))
+precondition(!CampusCredentialBridge.canResume(gatewayCASFormURL))
+precondition(!CampusCredentialBridge.isGatewayLoginURL(proxyCAS))
 precondition(singleLogin.action(for: proxyCAS, hasLoginForm: true) == .wait)
 precondition(singleLogin.action(for: gateway) == .navigate(wrapped))
 precondition(singleLogin.action(for: wrapped) == .capture)
@@ -804,7 +814,7 @@ func verifyBrowserCredentialRecovery() async throws {
                 posts += 1
                 return (200, ["Set-Cookie": "CASTGC=failed-attempt; Path=/tpass; Secure"], "<span id=\"errormsg\">密码错误</span>")
             }
-            return (200, [:], "<input name=\"lt\" value=\"SYNTHETIC-LT\"><input name=\"execution\" value=\"e1s1\">")
+            return (200, [:], "<input type=\"hidden\" name=\"lt\" value=\"SYNTHETIC-LT\"><input type=\"hidden\" name=\"execution\" value=\"e1s1\">")
         }
         return (401, [:], "")
     }
@@ -1018,6 +1028,51 @@ func verifyExpiredGatewayRecovery() async throws {
     print("Expired gateway: login redirect detection, public-to-proxied CAS fallback, native retry and cold-start persistence passed")
 }
 try await verifyExpiredGatewayRecovery()
+
+let passwordConfig = URLSessionConfiguration.ephemeral
+passwordConfig.protocolClasses = [MockPortalProtocol.self]
+let passwordClient = PortalClient(http: HTTPClient(configuration: passwordConfig))
+passwordClient.absorbCookies([ticket])
+passwordClient.adoptGatewayTicket()
+let recoveryPair = CampusLoginCredentials(username: user.sid, password: "test-gateway-password")!
+var requireGatewaySMS = true
+var gatewayPasswordSubmissions = 0
+MockPortalProtocol.handle = { request in
+    let url = request.url!
+    precondition(url.host == gateway.host, "校外密码续登应沿用门户的 WebVPN 入口")
+    if url == URL(string: WebVPN.casService)! {
+        return (302, ["Location": gatewayCASFormURL.absoluteString], "")
+    }
+    if url == gatewayCASFormURL {
+        if request.httpMethod == "GET" {
+            return (200, [:], #"<input value='gateway-lt' type='hidden' name='lt'><input type='hidden' name='execution' value='e1s1'>"#)
+        }
+        gatewayPasswordSubmissions += 1
+        let form = requestBody(request)
+        precondition(form.contains("lt=gateway-lt") && form.contains("rsa=") && !form.contains(recoveryPair.password))
+        return (302, [
+            "Location": requireGatewaySMS ? gatewaySMS.absoluteString : WebVPN.base + "/",
+            "Set-Cookie": "wengine_vpn_ticket=renewed-password-session; Path=/; Secure"
+        ], "")
+    }
+    if url == gatewaySMS { return (200, [:], "<html>双重登录认证</html>") }
+    if url.path == "/" || url.path.isEmpty { return (200, [:], "<html>WebVPN</html>") }
+    precondition(url == wrapped && request.value(forHTTPHeaderField: "Cookie")?.contains("renewed-password-session") == true)
+    return (200, [:], "<script>const userInfoDSL = \(raw);</script>")
+}
+do {
+    _ = try await passwordClient.renewLogin(recoveryPair, expectedUser: user)
+    preconditionFailure("网关短信验证不能被当成成功登录")
+} catch let error as NetworkError {
+    precondition(error.needsSecondAuth && gatewayPasswordSubmissions == 1)
+    precondition(passwordClient.browserCookies().contains { $0.value == ticket.value })
+    precondition(!passwordClient.browserCookies().contains { $0.value == "renewed-password-session" })
+}
+requireGatewaySMS = false
+let gatewayPasswordUser = try await passwordClient.renewLogin(recoveryPair, expectedUser: user)
+precondition(gatewayPasswordUser == user && gatewayPasswordSubmissions == 2)
+precondition(passwordClient.browserCookies().contains { $0.value == "renewed-password-session" })
+print("Gateway password recovery: official scoped form, isolated renewal and mandatory SMS handoff passed")
 
 let contentConfig = URLSessionConfiguration.ephemeral
 contentConfig.protocolClasses = [MockPortalProtocol.self]

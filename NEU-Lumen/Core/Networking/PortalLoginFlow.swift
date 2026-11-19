@@ -37,7 +37,7 @@ struct PortalLoginFlow {
 
     mutating func action(for url: URL, hasLoginForm: Bool = false) -> Action {
         guard url.scheme == "https", let host = url.host?.lowercased() else { return .wait }
-        guard !hasLoginForm, !url.path.contains("/tpass/login") else { return .wait }
+        guard !hasLoginForm, !url.path.contains("/tpass/login"), !WebVPN.isSecondAuthURL(url) else { return .wait }
         if Self.isPersonalPortal(url) { return .capture }
         guard host == "webvpn.neu.edu.cn" || host == "portal.neu.edu.cn" else { return .wait }
         if host == "webvpn.neu.edu.cn", !gatewayAuthTried {

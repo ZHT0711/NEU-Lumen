@@ -137,7 +137,11 @@ final class SessionStore {
     }
 
     private func saveVerifiedBrowserCredentials() {
-        guard let draft = pendingBrowserCredentials, let sid = user?.sid, !sid.isEmpty else { return }
+        guard let draft = pendingBrowserCredentials else { return }
+        guard let sid = user?.sid, !sid.isEmpty else {
+            credentialSaveError = "等待门户返回学号或工号，核对账号后保存密码"
+            return
+        }
         pendingBrowserCredentials = nil
         guard draft.username == sid else {
             credentialSaveError = "网页登录账号与填写账号不一致，未保存密码"
@@ -338,12 +342,13 @@ final class SessionStore {
         lastForegroundValidation = Date()
         lastIdentityAttempt = .distantPast
         phase = .loggedIn
+        credentialSaveError = nil
         if browser.rememberCredentials == false { clearCredentials() }
         else if browser.rememberCredentials == true, let draft = browser.credentials {
             pendingBrowserCredentials = draft
             saveVerifiedBrowserCredentials()
         } else if browser.rememberCredentials == true, !canAutomaticallySignIn {
-            credentialSaveError = "本次未取得已核对的登录密码，已保存网页会话；可重新输入账号密码后启用自动续登"
+            credentialSaveError = "本次只保存了网页会话。启用自动续登时，请在统一认证页输入并提交密码"
         }
         persistWebSession()
         return true

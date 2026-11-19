@@ -18,9 +18,23 @@ enum CampusCredentialBridge {
     static let handler = "campusLoginDraft"
 
     static func isLoginURL(_ url: URL) -> Bool {
-        url.scheme == "https" && url.host?.lowercased() == "pass.neu.edu.cn" &&
-            (url.port == nil || url.port == 443) && url.user == nil && url.password == nil &&
-            ["/tpass/login", "/tpass/login/"].contains(url.path)
+        isLoginEndpoint(url, host: "pass.neu.edu.cn", path: "/tpass/login")
+    }
+
+    static func isGatewayLoginURL(_ url: URL) -> Bool {
+        isLoginEndpoint(url, host: "webvpn.neu.edu.cn", path: WebVPN.proxiedCASLoginPath) && usesGatewayService(url)
+    }
+
+    static func usesGatewayService(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return components.queryItems?.filter { $0.name == "service" }.map(\.value) == [WebVPN.casService]
+    }
+
+    private static func isLoginEndpoint(_ url: URL, host: String, path: String) -> Bool {
+        guard url.scheme == "https", url.host?.lowercased() == host,
+              url.port == nil || url.port == 443, url.user == nil, url.password == nil,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return components.percentEncodedPath == path || components.percentEncodedPath == path + "/"
     }
 
     static func canResume(_ url: URL) -> Bool {
@@ -31,21 +45,42 @@ enum CampusCredentialBridge {
         return service.absoluteString == WebVPN.casService || WebVPN.shouldProxyBrowserURL(service)
     }
 
-    // Runs only in a named isolated world, in the main frame of the exact CAS
-    // origin. Read a submitted draft before the school's RSA handler clears it.
-    // No password is read when the native "save password" toggle is off.
+    static func draftScript(rememberCredentials: Bool) -> String {
+        """
+        window.__lumenRememberLogin = \(rememberCredentials ? "true" : "false");
+        window.__lumenGatewayCASPath = '\(WebVPN.proxiedCASLoginPath)';
+        window.__lumenGatewayCASService = '\(WebVPN.casService)';
+        """ + "\n" + script
+    }
+
+    // Capture the user's own submission on either official CAS form. Automatic
+    // WebKit password entry remains limited to the dedicated public CAS origin.
     static let script = #"""
     (() => {
-      if (location.protocol !== 'https:' || location.hostname !== 'pass.neu.edu.cn' ||
-          (location.port && location.port !== '443') || !['/tpass/login','/tpass/login/'].includes(location.pathname)) return;
+      const allowed = url => {
+        if (url.protocol !== 'https:' || (url.port && url.port !== '443') || url.username || url.password) return false;
+        if (url.hostname === 'pass.neu.edu.cn') return ['/tpass/login','/tpass/login/'].includes(url.pathname);
+        const path = window.__lumenGatewayCASPath;
+        return url.hostname === 'webvpn.neu.edu.cn' && !!path && [path, path + '/'].includes(url.pathname);
+      };
+      const usesGatewayService = url => {
+        const services = url.searchParams.getAll('service');
+        return services.length === 1 && services[0] === window.__lumenGatewayCASService;
+      };
+      const entry = new URL(location.href);
+      if (!allowed(entry)) return;
+      const viaGateway = entry.hostname === 'webvpn.neu.edu.cn';
+      if (viaGateway && !usesGatewayService(entry)) return;
       let draft = null;
       const fields = () => {
+        const current = new URL(location.href);
+        if (current.origin !== entry.origin || !allowed(current) || viaGateway && !usesGatewayService(current)) return null;
         const username = document.querySelector('#un, input[name="username"]');
         const password = document.querySelector('#pd, input[name="password"][type="password"]');
         if (!username || !password || password.type !== 'password' || !username.form ||
             username.form !== password.form || username.form.method.toLowerCase() !== 'post' || username.disabled || password.disabled) return null;
         const action = new URL(username.form.action || location.href, location.href);
-        if (action.origin !== location.origin || !['/tpass/login','/tpass/login/'].includes(action.pathname)) return null;
+        if (action.origin !== entry.origin || !allowed(action)) return null;
         return {username, password, form: username.form};
       };
       const sample = event => {
@@ -58,6 +93,7 @@ enum CampusCredentialBridge {
         return f;
       };
       const submit = event => {
+        if (viaGateway && !event.isTrusted) return;
         const f = sample();
         if (!f || !draft || document.querySelector('#second_auth_form')) return;
         const target = event.target;

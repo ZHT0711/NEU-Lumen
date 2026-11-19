@@ -51,9 +51,9 @@ enum CredentialStore {
         }
         guard status == errSecSuccess else { return false }
         // The new complete record is durable before removing either legacy field.
-        let usernameRemoved = remove("username")
-        let passwordRemoved = remove("password")
-        return usernameRemoved && passwordRemoved
+        _ = remove("username")
+        _ = remove("password")
+        return true
     }
 
     static func load() -> (username: String, password: String)? {

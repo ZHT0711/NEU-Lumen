@@ -209,7 +209,6 @@ final class PortalClient {
     }
 
     // 正则只编译一次。
-    private static let ltRegex = try! NSRegularExpression(pattern: #"name="lt"\s+value="([^"]+)""#)
     private static let executionRegex = try! NSRegularExpression(pattern: #"name="execution"\s+value="([^"]+)""#)
     private static let casErrorRegex = try! NSRegularExpression(
         pattern: #"<(?:span|div|p)[^>]*id="(?:errormsg|msg|msg_i18n)"[^>]*>([\s\S]*?)</(?:span|div|p)>"#,
@@ -249,7 +248,8 @@ final class PortalClient {
         let revision = accessRouteRevision
         let candidate = PortalClient(http: http.isolatedSession())
         candidate.setUserAgent(browserUserAgent ?? HTTPClient.userAgent)
-        let fresh = try await candidate.login(username: credentials.username, password: credentials.password)
+        let fresh = try await candidate.login(username: credentials.username, password: credentials.password,
+                                              preferGateway: webvpnOn)
         guard epoch == sessionEpoch, revision == accessRouteRevision, !Task.isCancelled else { throw CancellationError() }
         guard expectedUser.isSameAccount(as: fresh) else {
             throw NetworkError(message: "续登返回的账号不匹配，请更新网页登录", rejectsCredentials: true)
@@ -260,7 +260,7 @@ final class PortalClient {
     }
 
     /// CAS 登录。成功返回用户信息，失败抛 NetworkError。
-    func login(username rawUsername: String, password: String) async throws -> PortalUser {
+    func login(username rawUsername: String, password: String, preferGateway: Bool = false) async throws -> PortalUser {
         sessionEpoch = UUID()
         http.cookies.clear()
         let username = rawUsername
@@ -271,22 +271,26 @@ final class PortalClient {
         }
 
         // 1. 取登录页，解析 lt / execution
-        let page = try await http.get(CasCrypto.casLoginURL).text
-        guard let lt = Self.firstMatch(Self.ltRegex, page),
-              let execution = Self.firstMatch(Self.executionRegex, page) else {
+        let page = try await passwordLoginPage(preferGateway: preferGateway)
+        let fields = Self.hiddenFields(page.text)
+        guard let lt = fields["lt"], !lt.isEmpty, let execution = fields["execution"], !execution.isEmpty else {
             throw NetworkError(message: "【认证页】统一身份认证页加载失败：请检查网络后重试；多次失败可改用「浏览器方式登录」")
         }
 
         // 2. RSA 加密并提交（学号+密码拼接后整体加密）
         let rsa = try CasCrypto.encrypt(username + password)
-        let post = try await http.postForm(CasCrypto.casLoginURL, fields: [
+        let loginURL = preferGateway && CampusCredentialBridge.usesGatewayService(page.finalURL)
+            ? page.finalURL : CasCrypto.casLoginURL
+        let post = try await http.postForm(loginURL, fields: [
             "rsa": rsa,
             "ul": "\(username.count)",
             "pl": "\(password.count)",
             "lt": lt,
             "execution": execution,
             "_eventId": "submit",
-        ])
+        ], allowPostRedirects: false)
+
+        if WebVPN.isSecondAuthURL(post.finalURL) { throw NetworkError.needSecondAuth() }
 
         // 3. 校验认证结果：最终仍停留在 CAS 登录页说明认证未通过
         if post.finalURL.host?.contains("pass.neu.edu.cn") == true
@@ -318,22 +322,37 @@ final class PortalClient {
         // 校外门户登录成功后会被学校重定向进 WebVPN 网关（网关无票据时显示
         // 「仅用于我校师生在校外登录」403 页）：此时 CASTGC 已到手，
         // 换网关票据后改经网关读取门户，不要停在网关拦截页。
-        if post.finalURL.host?.contains("webvpn.neu.edu.cn") == true {
+        if post.finalURL.scheme == "https", post.finalURL.host == "webvpn.neu.edu.cn" {
+            adoptGatewayTicket()
             guard await ensureWebVPN() else {
                 throw NetworkError(message: "校外需经 WebVPN 访问门户，网关登录失败：请稍后重试，或连接校园网后直接登录")
             }
             return try await fetchUserInfo()
         }
 
-        if post.finalURL.absoluteString.hasPrefix(Self.portalBase),
-           let user = Self.extractUser(fromHTML: post.text) {
-            return user
-        }
+        if let user = Self.portalUser(from: post) { return user }
         do {
             return try await fetchUserInfo()
         } catch let e as NetworkError {
             throw NetworkError(message: "【门户会话】" + e.message)
         }
+    }
+
+    private func passwordLoginPage(preferGateway: Bool) async throws -> HTTPClient.RawResponse {
+        if preferGateway, let page = try? await http.get(URL(string: WebVPN.casService)!) {
+            if WebVPN.isSecondAuthURL(page.finalURL) { throw NetworkError.needSecondAuth() }
+            let directGatewayCAS = CampusCredentialBridge.isLoginURL(page.finalURL)
+                && CampusCredentialBridge.usesGatewayService(page.finalURL)
+            if page.status == 200, directGatewayCAS || CampusCredentialBridge.isGatewayLoginURL(page.finalURL) {
+                return page
+            }
+        }
+        try Task.checkCancellation()
+        let page = try await http.get(CasCrypto.casLoginURL)
+        guard page.status == 200, CampusCredentialBridge.isLoginURL(page.finalURL) else {
+            throw NetworkError(message: "统一身份认证页暂时无法加载，可改用浏览器方式登录")
+        }
+        return page
     }
 
     // MARK: - 新设备二次认证（图形码 + 短信）

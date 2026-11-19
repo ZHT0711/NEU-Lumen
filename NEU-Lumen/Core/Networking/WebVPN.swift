@@ -14,6 +14,14 @@ enum WebVPN {
     /// WebVPN 的 CAS 登录 service：用公网一号通的 CASTGC 直接换网关票据。
     static let casService = "https://webvpn.neu.edu.cn/login?cas_login=true"
     private static let casPath = URL(string: wrap("https://pass.neu.edu.cn/tpass"))!.path
+    static let proxiedCASLoginPath = casPath + "/login"
+
+    static func isSecondAuthURL(_ url: URL) -> Bool {
+        guard url.scheme == "https", url.host == "webvpn.neu.edu.cn", url.path == "/login" else { return false }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains {
+            $0.name == "second_login" && $0.value == "true"
+        } == true
+    }
 
     static func isProxiedCASCookie(_ cookie: HTTPCookie) -> Bool {
         let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
